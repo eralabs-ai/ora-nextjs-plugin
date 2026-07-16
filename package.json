@@ -1,0 +1,26 @@
+{
+  "name": "ora-nextjs-plugin-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=18.18"
+  },
+  "packageManager": "pnpm@11.13.1",
+  "scripts": {
+    "build": "pnpm --filter \"./packages/*\" run build",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm --filter \"./packages/*\" run test",
+    "lint": "prettier --check .",
+    "format": "prettier --write .",
+    "fixtures:build": "pnpm --filter \"@ora-catalog/fixture-*\" run build",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "pnpm build && changeset publish"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.27.11",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.3"
+  }
+}

@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.next/
+out/
+pnpm-lock.yaml
+coverage/
+
+# Keep the user's plan and the vendored upstream prose spec verbatim
+PLAN.md
+spec/ai-catalog.md
+
+# Next.js generated files
+**/next-env.d.ts

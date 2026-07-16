@@ -1,0 +1,45 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Example API",
+    "version": "1.0.0",
+    "description": "A minimal OpenAPI 3.1 description served statically at /openapi.json."
+  },
+  "servers": [{ "url": "https://example.com" }],
+  "paths": {
+    "/api/echo": {
+      "post": {
+        "operationId": "echo",
+        "summary": "Echo a message back to the caller.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["message"],
+                "properties": {
+                  "message": { "type": "string", "description": "The text to echo back" },
+                  "shout": { "type": "boolean", "description": "Uppercase the echoed text" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The echoed message.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "echoed": { "type": "string" } }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

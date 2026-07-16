@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Agent-Card/ai-catalog/schema/ai-catalog.schema.json",
+  "title": "AI Catalog",
+  "description": "Hand-written JSON Schema for the AI Catalog format, derived from the prose spec at Agent-Card/ai-catalog commit 3f7c2407aaa181f6e19d3988d0e8a4011d27c9ac. Deliberately permissive: enforces only what the prose requires and allows unknown properties everywhere.",
+  "type": "object",
+  "required": ["specVersion", "entries"],
+  "properties": {
+    "specVersion": {
+      "type": "string",
+      "description": "Major.Minor format, e.g. \"1.0\".",
+      "pattern": "^[0-9]+\\.[0-9]+$"
+    },
+    "entries": {
+      "type": "array",
+      "description": "May be empty.",
+      "items": { "$ref": "#/$defs/entry" }
+    },
+    "host": { "$ref": "#/$defs/host" },
+    "metadata": { "$ref": "#/$defs/metadata" }
+  },
+  "$defs": {
+    "metadata": {
+      "type": "object",
+      "description": "Custom/vendor-specific properties; any JSON value.",
+      "additionalProperties": true
+    },
+    "trustManifest": {
+      "description": "Verifiable identity/trust metadata. Out of scope for v1 emission; accepted permissively so catalogs that carry one still validate.",
+      "type": "object",
+      "additionalProperties": true
+    },
+    "host": {
+      "type": "object",
+      "required": ["displayName"],
+      "properties": {
+        "displayName": { "type": "string" },
+        "identifier": { "type": "string" },
+        "documentationUrl": { "type": "string", "format": "uri" },
+        "logoUrl": { "type": "string", "format": "uri" },
+        "trustManifest": { "$ref": "#/$defs/trustManifest" }
+      },
+      "additionalProperties": true
+    },
+    "publisher": {
+      "type": "object",
+      "required": ["identifier", "displayName"],
+      "properties": {
+        "identifier": { "type": "string" },
+        "displayName": { "type": "string" },
+        "identityType": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "entry": {
+      "type": "object",
+      "required": ["identifier", "type"],
+      "properties": {
+        "identifier": {
+          "type": "string",
+          "description": "Unique artifact ID; URN format recommended."
+        },
+        "type": {
+          "type": "string",
+          "description": "Media type identifier. Open string, intentionally not an enum."
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Retrieval URL for the full artifact."
+        },
+        "data": {
+          "description": "Inline artifact content; any JSON value.",
+          "type": ["object", "array", "string", "number", "boolean", "null"]
+        },
+        "displayName": { "type": "string" },
+        "description": { "type": "string" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "version": { "type": "string" },
+        "publisher": { "$ref": "#/$defs/publisher" },
+        "trustManifest": { "$ref": "#/$defs/trustManifest" },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 last-modification timestamp."
+        },
+        "metadata": { "$ref": "#/$defs/metadata" }
+      },
+      "oneOf": [
+        {
+          "title": "url form",
+          "required": ["url"],
+          "not": { "required": ["data"] }
+        },
+        {
+          "title": "data form",
+          "required": ["data"],
+          "not": { "required": ["url"] }
+        }
+      ],
+      "additionalProperties": true
+    }
+  }
+}

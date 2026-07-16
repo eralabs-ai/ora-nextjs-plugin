@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "types": ["node"],
+    // This package is bundled by tsup/esbuild, so use Bundler resolution for authoring/typecheck.
+    // It matches the build and interops cleanly with the CJS deps (ajv, ajv-formats).
+    "module": "ESNext",
+    "moduleResolution": "Bundler"
+  },
+  "include": ["src", "test", "tsup.config.ts", "vitest.config.ts"]
+}

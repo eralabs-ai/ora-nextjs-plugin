@@ -1,0 +1,10 @@
+{
+  "name": "@ora-catalog/fixture-monorepo-root",
+  "version": "0.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "//": "Turborepo root. No build script here — the actual Next app is apps/web, built directly by name. turbo.json is the structural marker the plugin's detect-and-warn keys on."
+}

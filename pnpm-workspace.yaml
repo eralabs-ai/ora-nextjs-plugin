@@ -1,0 +1,7 @@
+packages:
+  - 'packages/*'
+  - 'fixtures/*'
+  - 'fixtures/monorepo/apps/*'
+allowBuilds:
+  esbuild: true
+  sharp: false
