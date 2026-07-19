@@ -83,6 +83,13 @@ absolute URI, so a detector skips emitting its entry (with a warning) unless it 
 from `ard.config`'s `siteUrl`, or from Vercel's build-time `VERCEL_PROJECT_PRODUCTION_URL`. On any
 other host, set `siteUrl` explicitly (see below).
 
+`ard.config.*` is evaluated as real code at build time (via [`jiti`](https://github.com/unjs/jiti)),
+not parsed as static JSON — so `siteUrl: process.env.SITE_URL` (or whatever env var your host/CI
+sets) works with no special support needed. The plugin doesn't guess a variable name on your
+behalf: unlike Vercel's `VERCEL_PROJECT_PRODUCTION_URL`, there's no single convention for "the
+site's URL" across hosts (`SITE_URL`, `NEXT_PUBLIC_SITE_URL`, `DEPLOY_URL`, ... all exist in the
+wild), and guessing wrong could silently point the catalog at a stale preview URL.
+
 ### Config (`ard.config.{ts,js,mjs,cjs}`)
 
 Optional. Loaded from your project root; `.ts`/`.mjs`/`.cjs`/`.js` all work. (Named `ard.config`
@@ -95,6 +102,8 @@ import type { ArdConfig } from 'ora-catalog';
 const config: ArdConfig = {
   // Your production origin — every detected entry's URL is resolved against this. Only needed off
   // Vercel (Vercel's own VERCEL_PROJECT_PRODUCTION_URL is used automatically when this is unset).
+  // This file is real code, so reading it from your own env var works too:
+  //   siteUrl: process.env.SITE_URL,
   siteUrl: 'https://example.com',
   // Scaffold a starter app/llms.txt/route.ts when neither it nor public/llms.txt exists.
   // Opt-in (defaults to false) — it writes into your source tree, not just the catalog file.

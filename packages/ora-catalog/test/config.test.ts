@@ -8,6 +8,7 @@ import { loadArdConfig, ArdConfigError } from '../src/config.js';
 import { DEFAULT_DENYLIST } from '../src/config-schema.js';
 
 let dir: string;
+const originalEnv = { ...process.env };
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'ora-catalog-config-'));
@@ -15,6 +16,7 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
+  process.env = { ...originalEnv };
 });
 
 describe('loadArdConfig', () => {
@@ -106,5 +108,20 @@ describe('loadArdConfig', () => {
       'utf8',
     );
     await expect(loadArdConfig(dir)).rejects.toThrow(ArdConfigError);
+  });
+
+  // `ard.config.*` is evaluated as real code (via jiti), not parsed as static JSON — so reading
+  // `siteUrl` from a project's own env var, without any special support from the plugin, must
+  // keep working. There's no single env var name to support directly (see README): different
+  // hosts use different conventions, so this is deliberately left to the developer's own config.
+  it('reads siteUrl from an arbitrary env var the developer chooses to read', async () => {
+    process.env.MY_CUSTOM_SITE_URL = 'https://from-env.example.com';
+    writeFileSync(
+      join(dir, 'ard.config.mjs'),
+      'export default { siteUrl: process.env.MY_CUSTOM_SITE_URL };\n',
+      'utf8',
+    );
+    const { config } = await loadArdConfig(dir);
+    expect(config.siteUrl).toBe('https://from-env.example.com');
   });
 });
