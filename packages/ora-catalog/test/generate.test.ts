@@ -23,14 +23,14 @@ afterEach(() => {
 });
 
 describe('generateCatalog', () => {
-  it('produces a spec-valid catalog with only site-level host metadata', () => {
+  it('produces a spec-valid catalog with only site-level host metadata', async () => {
     writeFileSync(
       join(dir, 'package.json'),
       JSON.stringify({ name: 'demo', description: 'A demo app.' }),
       'utf8',
     );
 
-    const catalog = generateCatalog({ cwd: dir });
+    const catalog = await generateCatalog({ cwd: dir });
 
     expect(catalog.specVersion).toBe(SPEC_VERSION);
     expect(catalog.entries).toEqual([]);
@@ -38,24 +38,24 @@ describe('generateCatalog', () => {
     expect(validateCatalog(catalog).valid).toBe(true);
   });
 
-  it('never emits entries in Phase 1 — site metadata only, no artifact detection yet', () => {
-    const catalog = generateCatalog({ cwd: dir });
+  it('emits no entries with zero config — artifact detection is Phase 2.2', async () => {
+    const catalog = await generateCatalog({ cwd: dir });
     expect(catalog.entries).toEqual([]);
   });
 
-  it('sets host.identifier from the Vercel production domain when present', () => {
+  it('sets host.identifier from the Vercel production domain when present', async () => {
     process.env.VERCEL_PROJECT_PRODUCTION_URL = 'example.com';
-    const catalog = generateCatalog({ cwd: dir });
+    const catalog = await generateCatalog({ cwd: dir });
     expect(catalog.host?.identifier).toBe('did:web:example.com');
   });
 
-  it('omits host.identifier when no domain is known', () => {
-    const catalog = generateCatalog({ cwd: dir });
+  it('omits host.identifier when no domain is known', async () => {
+    const catalog = await generateCatalog({ cwd: dir });
     expect(catalog.host?.identifier).toBeUndefined();
   });
 
-  it('defaults cwd to process.cwd() when not provided', () => {
-    const catalog = generateCatalog();
+  it('defaults cwd to process.cwd() when not provided', async () => {
+    const catalog = await generateCatalog();
     expect(validateCatalog(catalog).valid).toBe(true);
   });
 });

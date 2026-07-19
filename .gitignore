@@ -5,6 +5,10 @@ out/
 *.tsbuildinfo
 .turbo/
 coverage/
+
+# Repo-local pnpm content-addressable store (this project links node_modules from a store in the
+# repo root rather than the global ~/.pnpm-store). Large, machine-local cache — never commit it.
+.pnpm-store/
 .DS_Store
 *.log
 .env

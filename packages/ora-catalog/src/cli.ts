@@ -1,3 +1,4 @@
+import { ArdConfigError } from './config.js';
 import { generateCatalog } from './generate.js';
 import { writeCatalog } from './write.js';
 
@@ -54,11 +55,12 @@ function parseArgs(argv: string[]): ParsedArgs {
 
 /**
  * Runs the CLI end to end and returns a process exit code. Never throws for expected failure
- * modes (bad args, invalid catalog) — those are reported via `stderr` and a non-zero code. Only an
- * unexpected environment failure (e.g. an unwritable disk) propagates as a thrown error, since the
- * bin entry point is better placed to decide how to present that.
+ * modes (bad args, invalid catalog, invalid `ard.config`) — those are reported via `stderr` and a
+ * non-zero code. Only an unexpected environment failure (e.g. an unwritable disk)
+ * propagates as a thrown error, since the bin entry point is better placed to decide how to
+ * present that.
  */
-export function runCli(argv: string[], io: CliIO = {}): number {
+export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   const stdout = io.stdout ?? ((line: string) => console.log(line));
   const stderr = io.stderr ?? ((line: string) => console.error(line));
 
@@ -77,7 +79,21 @@ export function runCli(argv: string[], io: CliIO = {}): number {
   }
 
   const cwd = args.cwd ?? io.cwd ?? process.cwd();
-  const catalog = generateCatalog({ cwd });
+
+  const warnings: string[] = [];
+  let catalog;
+  try {
+    catalog = await generateCatalog({ cwd, onWarning: (message) => warnings.push(message) });
+  } catch (err) {
+    if (err instanceof ArdConfigError) {
+      stderr(`[ora-catalog] ${err.message}`);
+      return 1;
+    }
+    throw err;
+  }
+
+  for (const warning of warnings) stdout(`[ora-catalog] ⚠ ${warning}`);
+
   const result = writeCatalog(cwd, catalog);
 
   if (!result.ok) {
@@ -91,8 +107,8 @@ export function runCli(argv: string[], io: CliIO = {}): number {
 
   stdout(`[ora-catalog] ✓ wrote ${result.path}`);
   stdout(
-    `[ora-catalog] ✓ site metadata only (${catalog.entries.length} entries) — ` +
-      'artifact detection (MCP/OpenAPI/docs/skills/llms.txt) lands in Phase 2',
+    `[ora-catalog] ✓ ${catalog.entries.length} entries (config-declared only — zero-config ` +
+      'artifact detection for MCP/OpenAPI/docs/skills/llms.txt lands in Phase 2.2)',
   );
   return 0;
 }
