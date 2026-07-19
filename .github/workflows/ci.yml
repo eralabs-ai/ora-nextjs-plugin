@@ -48,7 +48,22 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      - name: Install dependencies
+      # Install just ora-catalog's own deps first (not the fixtures') so it can be built
+      # before the fixtures' node_modules are linked. pnpm creates node_modules/.bin bin
+      # shims at install time — if the fixtures were installed now, dist/bin.js wouldn't
+      # exist yet and the `ora-catalog` shim would silently fail to link (a plain
+      # `pnpm install --frozen-lockfile` afterwards does NOT fix this: pnpm sees the
+      # lockfile is unchanged and short-circuits as "already up to date" without
+      # re-linking anything).
+      - name: Install ora-catalog's dependencies
+        run: pnpm install --filter ora-catalog --frozen-lockfile
+
+      - name: Build ora-catalog
+        run: pnpm --filter ora-catalog run build
+
+      # Now install everything else. dist/bin.js exists, so the fixtures' `ora-catalog`
+      # bin shims (needed for their `postbuild` step) link correctly this time.
+      - name: Install remaining dependencies
         run: pnpm install --frozen-lockfile
 
       # Phase 0 safety net: every fixture must `next build`. Replaced by the Phase 2.6

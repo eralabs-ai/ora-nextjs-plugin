@@ -203,24 +203,38 @@ CI runs on PR; Ora has signed off on the open questions.
 Goal: the thinnest end-to-end slice — a real catalog, served from a real deployment, crawled by Ora.
 This de-risks the one integration nobody has tested: does Ora's crawler actually pick it up?
 
-- [ ] CLI entry point: `npx ora-catalog` runnable as a postbuild step.
-- [ ] Emit a minimal, mostly-static but **spec-valid** `ai-catalog.json` (site-level metadata only)
-      into `public/.well-known/`.
-- [ ] Run `validateCatalog` on the output before writing; hard-fail on invalid.
-- [ ] Wire it into the `bare` fixture's `postbuild` script.
-- [ ] Deploy the fixture to Vercel; confirm the file is served at
-      `https://<domain>/.well-known/ai-catalog.json` with correct content-type.
+- [x] CLI entry point: `npx ora-catalog` runnable as a postbuild step. (`packages/ora-catalog`:
+      `src/bin.ts` is the published `bin`; `src/cli.ts` is the testable orchestration it wraps.)
+- [x] Emit a minimal, mostly-static but **spec-valid** `ai-catalog.json` (site-level metadata only)
+      into `public/.well-known/`. (`src/generate.ts` + `src/site-metadata.ts` — `host.displayName`
+      / `description` from `package.json`, empty `entries`. Zero-config artifact detection is
+      Phase 2.)
+- [x] Run `validateCatalog` on the output before writing; hard-fail on invalid. (`src/write.ts` —
+      never writes on a validation failure; atomic write via temp-file + rename otherwise.)
+- [x] Wire it into the `bare` fixture's `postbuild` script. (Also wired into `deploy-variants` to
+      exercise the limitation below.) Verified: `pnpm --filter @ora-catalog/fixture-* run build`
+      runs `next build` then `ora-catalog` automatically via pnpm's lifecycle hooks, no extra
+      config needed.
+- [ ] **Deploy the fixture to Vercel; confirm the file is served at
+      `https://<domain>/.well-known/ai-catalog.json` with correct content-type.** Requires a Vercel
+      project/account — not something this environment can do. Next manual step.
 - [ ] **Run the deployed domain through journey.ora.ai (AgentJourney) and confirm the ai-catalog
       is discovered and reflected in the agent-readiness rating.** This is the on-demand
       verification loop — no crawler wait. If the catalog isn't picked up, this is the week-1
-      finding that reshapes the plan.
+      finding that reshapes the plan. Blocked on the Vercel deploy above + AgentJourney access.
 - [ ] Confirm with Ora whether AgentJourney discovery also feeds the registry/index, or whether
-      registry inclusion is a separate step (submission/crawl).
-- [ ] Verify (and document) behavior on the `deploy-variants` fixture: `basePath` breaks static
+      registry inclusion is a separate step (submission/crawl). Requires direct contact with Ora.
+- [x] Verify (and document) behavior on the `deploy-variants` fixture: `basePath` breaks static
       `public/` serving — note the limitation now, route-handler emission comes in Phase 2.
+      **Verified empirically** (`next dev` against the fixture): with `basePath: '/app'`, the
+      catalog serves at `/app/.well-known/ai-catalog.json` (200) but 404s at the conventional
+      `/.well-known/ai-catalog.json`. Also found and documented a related standalone-output gap —
+      see `fixtures/deploy-variants/README.md`.
 
 **Done when:** a Vercel-deployed fixture's catalog is live at the well-known URL and visible in
-Ora's registry.
+Ora's registry. **Code-side work is complete and green** (build/typecheck/test/lint/fixture builds
+all pass — see PR); the deploy + AgentJourney + Ora-confirmation steps require external
+accounts/access this environment doesn't have and are the immediate next actions for a human.
 
 ---
 
