@@ -9,5 +9,9 @@ coverage/
 PLAN.md
 spec/ai-catalog.md
 
+# Vendored verbatim from ards-project/ard-spec (see spec/ard/README.md) — never reformat
+spec/ard/spec/
+spec/ard/conformance/
+
 # Next.js generated files
 **/next-env.d.ts

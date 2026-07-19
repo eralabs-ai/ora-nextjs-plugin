@@ -98,10 +98,16 @@ permissive schema):
 | `text/markdown` | `llms.txt` | served `llms.txt` |
 | `text/html` | docs pointers: developer portal, API docs, pricing, rate limits, auth docs | ordinary pages/files |
 
-Ora also uses extension fields on entries (all legal — the spec allows unknown keys): `auth` (full
-OAuth details), `capabilities` (tool-name list), `representativeQueries`, `provenance`, and
-`trustManifest.attestations`. The plugin should populate the ones a site can self-declare (at least
-`auth`, and `capabilities` for MCP) where cheap.
+**Correction (2026-07-19, from the ARD spec §4.2):** most of what this section originally called
+"Ora extension fields" are **first-class ARD entry fields**: `capabilities`,
+`representativeQueries`, and `trustManifest` are standard optional fields, not extensions.
+`representativeQueries` in particular is *the* semantic-search signal — registries build vector
+embeddings from it, and the schema enforces 2–5 items — so letting developers declare it per entry
+(supported via `ard.config` `entries`) directly improves discoverability, not just Ora's score.
+Only `auth` and entry-level `provenance` are genuine extensions (legal: entries allow unknown
+keys; the manifest root and `host` do **not** — the ARD schema closes them). The plugin populates
+the self-declarable ones (`capabilities` for MCP zero-config; `representativeQueries`/`auth` via
+config) where cheap.
 
 **Scoring tell:** the A+-vs-B differentiator is *breadth of machine-readable artifacts*, not depth.
 Telnyx (A+) is the only one exposing a full OpenAPI doc **plus** `pricing.md`, `rate-limits.json`,
@@ -131,29 +137,48 @@ Goal: requirements ratified by Ora, spec pinned, project scaffolded. No plugin l
 
 ### 0.2 Pin the spec surface
 
-**Finding (verified 2026-07-16): the spec publishes NO formal schema.** The upstream
-[Agent-Card/ai-catalog](https://github.com/Agent-Card/ai-catalog) repo contains only a prose spec
-(`specification/ai-catalog.md`) and one example (`specification/examples/ai-catalog.json`) — no
-JSON Schema, CDDL, or OpenAPI. Also note ADR-0011: upstream dropped the `.well-known`
-*requirement*; the `.well-known/ai-catalog.json` location is an ARD-layer convention
-(`specVersion: "1.0"` per agenticresourcediscovery.org).
+**Superseding finding (2026-07-19): the ARD spec DOES publish formal schemas + an official
+conformance tool.** The earlier finding ("no formal schema", verified 2026-07-16) was true only of
+the base [Agent-Card/ai-catalog](https://github.com/Agent-Card/ai-catalog) repo. The ARD layer —
+[ards-project/ard-spec](https://github.com/ards-project/ard-spec), rendered at
+agenticresourcediscovery.org/spec — ships an authoritative CDDL, a JSON Schema
+(`spec/schemas/ai-catalog.schema.json`, Draft 2020-12), a registry OpenAPI 3.1 spec, and a
+zero-dependency Python conformance CLI (`conformance/bin/conformance-test`). These are vendored in
+`spec/ard/` (pinned commit in `spec/ard/README.md`) and answer open question #12: the official
+tool is the oracle. Also note ADR-0011: upstream dropped the `.well-known` *requirement*; the
+`.well-known/ai-catalog.json` location is an ARD-layer convention (`specVersion: "1.0"`).
 
-- [ ] **Ask Ora first:** does their crawler/AgentJourney use an internal schema or validator for
-      ai-catalog? If yes, that artifact is the real oracle — vendor it.
-- [ ] Otherwise, hand-write a JSON Schema in `spec/` derived from the prose spec (§Top-Level
-      Structure, §Host Info, §Catalog Entry, §Publisher Object, §Metadata Extensibility,
-      §Version Handling), plus vendor the upstream example as a must-validate test case. Keep it
-      deliberately permissive where the prose is ambiguous — reject only what the spec explicitly
-      forbids. (Consider offering it upstream later; contributing a validator is spec-following,
-      not spec-inventing.)
-- [ ] Record the upstream commit the schema was derived from; upgrade policy: spec bumps are
-      explicit PRs with a changelog entry, never silent updates.
-- [ ] Validation helper: `validateCatalog(json)` → pass/fail + errors, backed by the schema (ajv
-      or similar). This is the oracle everything else tests against.
-- [ ] Treat catalog `type` fields as open string lists, not enums (IANA registrations not final).
-- [ ] Trust Manifest / attestations (a large part of the spec): **out of scope for v1 emission**
-      beyond not emitting anything that conflicts with it — confirm with Ora whether their score
-      checks trust fields (relates to open question #10's "whole score" framing).
+**Two oracles, two roles** (the ARD schema is strictly stronger than the base prose — required
+entry `displayName`, `urn:air:` identifier pattern, closed root/host objects — and the upstream
+Agent-Card example does *not* pass it, so both layers stay pinned):
+
+- [x] Hand-written permissive JSON Schema in `spec/` derived from the base prose spec — the
+      *acceptance* check (`validateCatalog`): reject only what the spec explicitly forbids.
+      Upstream example vendored as a must-validate test case.
+- [x] **Official ARD schema vendored verbatim** (`spec/ard/`) — the *emission* gate
+      (`validateCatalogArd`, enforced by `writeCatalog`): everything the plugin writes must pass
+      the official conformance tool, which runs this exact schema plus semantic checks (URN
+      format, value-or-reference, `representativeQueries` sizing 2–5).
+- [x] Official conformance CLI vendored and wired into CI (`pnpm conformance` runs it over every
+      generated fixture catalog).
+- [x] Record the upstream commits both schemas derive from; upgrade policy: spec bumps are
+      explicit PRs with a changelog entry, never silent updates. (`spec/README.md`,
+      `spec/ard/README.md`.)
+- [x] Entry **identifiers follow the ARD URN format** `urn:air:<publisher>:<name>` (§4.2.1), where
+      `<publisher>` is the site's domain (from `siteUrl`) — the verifiable trust anchor registries
+      extract as the filterable `publisher` field. Detector segments are sanitized to the schema's
+      `[a-zA-Z0-9._-]` alphabet (an MCP mount at `/api/tools` → `urn:air:<domain>:mcp-server:api-tools`).
+- [x] Treat catalog `type` fields as open string lists, not enums (IANA registrations not final —
+      ARD §3.3 explicitly tells intermediaries to skip strict type verification; the conformance
+      tool warns-not-fails on unknown types).
+- [x] No `host.description`: the ARD schema closes the host object (`additionalProperties: false`),
+      so the package.json description is no longer emitted there. Worth filing upstream — a host
+      description field seems like an obvious gap.
+- [ ] Trust Manifest / attestations: **out of scope for v1 emission** beyond not emitting anything
+      that conflicts with it — confirm with Ora whether their score checks trust fields (relates
+      to open question #10's "whole score" framing). Note if ever emitted: the ARD schema requires
+      `mediaType` on attestations (the prose tables omit it) and closes `identityType` /
+      `provenance.relation` to enums.
 
 ### 0.3 Decide the supported matrix
 
@@ -271,21 +296,44 @@ Goal: the `next-sitemap`-style production core. Stable regardless of spec churn.
 Detect-and-reference is the cheapest, highest-value work — it mirrors exactly what Ora's crawler
 already rewards. Zero-config, in rough priority order:
 
-- [ ] Emit site-level metadata (name, domain, description from package.json / config).
-- [ ] Detect an existing **MCP server** configured the Next.js way (`mcp-handler`, legacy alias
+- [x] Emit site-level metadata (name + domain from package.json / config). Domain can
+      now also come from `ard.config`'s new **`siteUrl`** (see below), not just Vercel's env var.
+      (**Changed 2026-07-19:** package.json's description is no longer emitted as
+      `host.description` — the official ARD schema closes the host object, so that key fails
+      conformance. See Phase 0.2.)
+- [x] Detect an existing **MCP server** configured the Next.js way (`mcp-handler`, legacy alias
       `@vercel/mcp-adapter`) → `application/mcp-server-card+json`. Unambiguous intent to publish.
-      Populate `capabilities` / `auth` where statically derivable.
-- [ ] Detect a static **`public/openapi.json`** and reference its URL →
-      `application/vnd.oai.openapi+json`. Details in Phase 3.
-- [ ] Emit **docs** and **skills** entries (`text/html` / `application/ai-skill+md`) from URLs the
+      Populate `capabilities` / `auth` where statically derivable. (`src/detect-mcp.ts` — textual
+      detection, not AST, per the core design decisions; `capabilities` populated from `.tool(...)`
+      call sites; `auth` deliberately **not** derived — no cheap, reliable static signal for it, so
+      it's left as a documented gap rather than guessed.)
+- [x] Detect a static **`public/openapi.json`** and reference its URL →
+      `application/vnd.oai.openapi+json`. Details in Phase 3. (`src/detect-openapi.ts`.)
+- [x] Emit **docs** and **skills** entries (`text/html` / `application/ai-skill+md`) from URLs the
       developer **declares in `ard.config`**. Config-driven, not guessed — the developer knows
-      where their docs and skills live; the plugin doesn't spider for them.
-- [ ] Reference an existing **`llms.txt`** served the Next.js way — a route handler at
+      where their docs and skills live; the plugin doesn't spider for them. (Already covered by the
+      generic `entries` override mechanism from 2.1 — see the `config-overrides` fixture, which
+      already declares exactly this shape. No new config surface needed.)
+- [x] Reference an existing **`llms.txt`** served the Next.js way — a route handler at
       `app/llms.txt/route.ts` (often `dynamic = 'force-static'`) or a static `public/llms.txt` →
       `text/markdown`. Scaffold a starter route handler when absent (v1; cheap, idiomatic).
-- [ ] Do **not** synthesize an OpenAPI doc from bare route handlers; reference only a doc the app
+      (`src/detect-llms-txt.ts`. **Deviation from the plan as written:** scaffolding is **opt-in**
+      via `ard.config`'s `scaffoldLlmsTxt: true`, defaulting to `false` — writing a *second* file
+      into a consumer's `app/` directory is a bigger, unsolicited source-tree mutation than the one
+      catalog file this plugin exists to produce, and an opt-out default is too easy to miss for a
+      build tool meant to run unattended across many sites. This was found empirically: with an
+      opt-out default, this repo's own test suite silently scaffolded files into four unrelated
+      fixtures the first time it ran.)
+- [x] Do **not** synthesize an OpenAPI doc from bare route handlers; reference only a doc the app
       actually produces. Most route handlers are internal BFF endpoints and must not be exposed.
-- [ ] Do **not** emit GraphQL entries — out of scope (see *Scope*).
+- [x] Do **not** emit GraphQL entries — out of scope (see *Scope*).
+
+**New config surface added to support the above:** `ard.config`'s `siteUrl` — an explicit absolute
+origin (e.g. `https://example.com`). The catalog schema's `url` fields require an absolute URI
+(`format: uri`), so every detector above needs a known site origin to build one; without `siteUrl`
+(and without Vercel's build-time `VERCEL_PROJECT_PRODUCTION_URL`), a detector still runs but skips
+emitting its URL-bearing entry — with a warning — rather than emit a relative or guessed URL.
+Precision over recall, applied to the plugin's own output, not just to what it detects.
 
 ### 2.3 Review-before-publish flow
 
@@ -299,6 +347,12 @@ already rewards. Zero-config, in rough priority order:
 - [ ] Static file into `public/.well-known/` (default).
 - [ ] Alternative: generate a route handler (`app/.well-known/ai-catalog.json/route.ts`) for
       `basePath`/proxy setups — also the future path to dynamic catalogs.
+- [ ] **Spec-blessed alternate discovery mechanisms (ARD §6.1)** — the in-spec fix for the Phase 1
+      `basePath` finding (catalog serves under the prefix, 404s at the conventional well-known
+      path): emit/recommend an HTML `<link rel="ai-catalog" href="...">` tag (root layout) and/or
+      a robots.txt `Agentmap:` directive (Next's `app/robots.ts`) pointing at wherever the catalog
+      actually lives. DNS SRV-style records are also in §6.1 but are out of the plugin's reach —
+      document only.
 - [ ] Fixture + test for each target, including the `deploy-variants` fixture.
 
 ### 2.5 Drift detection (fold in here — it's nearly free)
@@ -447,9 +501,9 @@ Goal: prove the output is *usable by agents*, not just spec-valid, and lock in c
 | 9 | Timeline expectations per phase? | Skeleton wk 1; Phases 2–3 are the bulk | _pending_ |
 | 10 | Which artifacts should the plugin emit/reference? | **Resolved (2026-07-16):** Ora confirmed the crawler ingests the first-party `/.well-known/ai-catalog.json`, `openapi.json`, `/graphql`, and `llms.txt`. The plugin emits the Next-idiomatic subset — MCP + `public/openapi.json` + config-declared docs/skills now; WebMCP + `llms.txt` generation next; **GraphQL out** (not idiomatic Next). Sitemap = detect + recommend `next-sitemap`, don't reimplement. | **confirmed** |
 | 11 | API access to AgentJourney (journey.ora.ai) for automated evals? | Yes — use it as the nightly real-LLM eval harness | _pending_ |
-| 12 | Does Ora's crawler/scorer use an internal ai-catalog schema or validator? (Spec publishes none — verified) | If yes, vendor theirs as the oracle; if no, we hand-write one and offer it upstream | _pending_ |
+| 12 | Does Ora's crawler/scorer use an internal ai-catalog schema or validator? | **Resolved (2026-07-19):** the ARD spec now publishes an official JSON Schema + conformance CLI (ards-project/ard-spec) — vendored in `spec/ard/` as the strict emission oracle and run in CI. Remaining sub-question for Ora: do they validate with the official tool too, or something stricter? | **resolved** |
 | 13 | Is the agent-readiness score essentially a **checklist of artifact types** (OpenAPI / MCP / GraphQL / llms.txt / docs / skills)? Top-site data suggests breadth drives the grade. | If yes, target the checklist directly and report per-artifact coverage in the build summary. | _pending_ |
-| 14 | Which of Ora's entry **extension fields** should a first-party catalog self-declare? (`auth`, `capabilities`, `representativeQueries`, `provenance`, `trustManifest.attestations`) | Emit the self-declarable ones (`auth`, `capabilities` for MCP) where cheap; leave Ora-side scoring fields to Ora. | _pending_ |
+| 14 | Which entry fields should a first-party catalog self-declare? (`auth`, `capabilities`, `representativeQueries`, `provenance`, `trustManifest.attestations`) | **Partly resolved by the spec (2026-07-19):** `capabilities` / `representativeQueries` / `trustManifest` are first-class ARD fields, not Ora extensions — `representativeQueries` (2–5 items) drives registry search embeddings, so it's plainly worth self-declaring; supported via `ard.config` `entries`. `capabilities` emitted zero-config for MCP. Only `auth` / entry-level `provenance` are true extensions — confirm with Ora how they weigh those. | _mostly resolved_ |
 | 15 | Agent **skills** (`application/ai-skill+md`): does Ora expect skills in a published GitHub repo, and should the plugin help scaffold/reference one? | Detect-and-reference a skills repo if present; do not invent skills. Scaffolding = later. | _pending_ |
 
 ---

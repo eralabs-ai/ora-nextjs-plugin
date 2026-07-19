@@ -1,5 +1,11 @@
 # AI Catalog spec — vendored surface & oracle
 
+> **Update (2026-07-19):** the ARD layer now publishes **official** formal schemas and a
+> conformance CLI — see [`ard/README.md`](ard/README.md). The vendored ARD schema is the strict
+> oracle for everything this plugin _emits_; the hand-written schema below remains the permissive
+> acceptance check for the base AI Catalog format. The 2026-07-16 "no formal schema" finding was
+> true only of the base Agent-Card/ai-catalog repo.
+
 The upstream [Agent-Card/ai-catalog](https://github.com/Agent-Card/ai-catalog) repo publishes a
 **prose spec only** — no JSON Schema, CDDL, or OpenAPI (verified 2026-07-16). This directory is our
 pinned, machine-checkable surface derived from that prose.
@@ -23,8 +29,10 @@ and note the spec-version change in a changeset.
 
 ## Schema philosophy: permissive, reject only what's forbidden
 
-`ai-catalog.schema.json` is the oracle everything in this repo tests against (`validateCatalog`). The
-prose is ambiguous in places; where it is, we accept rather than reject:
+`ai-catalog.schema.json` backs `validateCatalog` — the permissive check for whether a document is a
+valid AI Catalog at all. (The _emission_ gate is stricter: `validateCatalogArd`, backed by the
+vendored official ARD schema in `ard/` — see `ard/README.md`.) The prose is ambiguous in places;
+where it is, we accept rather than reject:
 
 - **`type` is an open string**, never an enum — IANA media-type registrations are not final (ADR
   note in the plan). Known types are documented, not enforced.

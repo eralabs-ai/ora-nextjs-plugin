@@ -70,3 +70,12 @@ jobs:
       # snapshot-and-validate suite once the generator exists.
       - name: Build fixtures
         run: pnpm fixtures:build
+
+      # Official ARD conformance tool (vendored from ards-project/ard-spec — spec/ard/README.md)
+      # over every catalog the fixture builds just generated. jsonschema enables the tool's strict
+      # JSON Schema layer on top of its semantic checks.
+      - name: Install jsonschema for the conformance tool
+        run: pip install jsonschema
+
+      - name: ARD conformance (official tool)
+        run: pnpm conformance

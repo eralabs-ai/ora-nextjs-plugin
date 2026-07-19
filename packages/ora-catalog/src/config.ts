@@ -63,6 +63,8 @@ export async function loadArdConfig(cwd: string): Promise<LoadArdConfigResult> {
 
 function withDefaults(config: ArdConfig): ResolvedArdConfig {
   return {
+    siteUrl: config.siteUrl,
+    scaffoldLlmsTxt: config.scaffoldLlmsTxt ?? false,
     denylist: config.denylist ?? [...DEFAULT_DENYLIST],
     allowlist: config.allowlist ?? [],
     entries: config.entries ?? [],

@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "build": "next build",
+    "postbuild": "ora-catalog",
     "dev": "next dev",
     "start": "next start"
   },
@@ -19,6 +20,7 @@
     "@types/node": "^20.17.12",
     "@types/react": "^19.0.7",
     "@types/react-dom": "^19.0.3",
+    "ora-catalog": "workspace:*",
     "typescript": "^5.7.3"
   }
 }

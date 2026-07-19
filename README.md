@@ -7,10 +7,10 @@ discover the site's capabilities.
 > **Status:** pre-release, under active development. See [`PLAN.md`](./PLAN.md) for the phased
 > roadmap. This repo currently implements Phase 0 groundwork (spec + validator, workspace, fixture
 > corpus), the Phase 1 walking skeleton (CLI that emits a minimal, spec-valid, site-metadata-only
-> catalog as a `postbuild` step), and Phase 2.1 (config: `ard.config.*`, `next.config.*`
-> reading, denylist/allowlist, entry overrides). Zero-config artifact detection (MCP, OpenAPI,
-> docs/skills, llms.txt — Phase 2.2) is next. Deploying a fixture to Vercel and running it through
-> Ora's AgentJourney is also still pending — see `PLAN.md` Phase 1.
+> catalog as a `postbuild` step), Phase 2.1 (config: `ard.config.*`, `next.config.*` reading,
+> denylist/allowlist, entry overrides), and Phase 2.2 (zero-config artifact detection: MCP servers,
+> `public/openapi.json`, `llms.txt`, config-declared docs/skills). Deploying a fixture to Vercel and
+> running it through Ora's AgentJourney is still pending — see `PLAN.md` Phase 1.
 
 ## Design posture
 
@@ -61,11 +61,34 @@ npm install --save-dev ora-catalog
 }
 ```
 
-This writes `public/.well-known/ai-catalog.json` with site-level metadata (`displayName` /
-`description` from `package.json`) plus any entries you declare in `ard.config` — validated
-against the AI Catalog spec before it's written; the CLI refuses to write (and exits non-zero) if
-generation ever produces an invalid catalog. Zero-config artifact _detection_ (MCP servers,
-`openapi.json`, `llms.txt`, docs/skills) lands in Phase 2.2 — see `PLAN.md`.
+This writes `public/.well-known/ai-catalog.json` with:
+
+- **Site-level metadata** — `displayName` / `description` from `package.json`.
+- **Zero-config artifact detection** (Phase 2.2) — detects and references what's already there:
+  - An **MCP server** mounted via [`mcp-handler`](https://www.npmjs.com/package/mcp-handler) (or
+    its legacy alias `@vercel/mcp-adapter`) → `application/mcp-server-card+json`.
+  - A static **`public/openapi.json`** → `application/vnd.oai.openapi+json`.
+  - An **`llms.txt`** served either as `app/llms.txt/route.ts` or `public/llms.txt` →
+    `text/markdown`.
+- **Config-declared entries** — anything you list in `ard.config`'s `entries`, e.g. docs/skills
+  pointers (`text/html` / `application/ai-skill+md`).
+
+Every entry above is validated against the AI Catalog spec before writing; the CLI refuses to
+write (and exits non-zero) if generation ever produces an invalid catalog. The plugin only ever
+**detects and references** — it never invents a per-route entry or synthesizes a doc from route
+handlers (see `PLAN.md`'s _Scope_ and _Core design decisions_).
+
+**Absolute URLs need a known site origin.** The spec requires every entry's `url` to be an
+absolute URI, so a detector skips emitting its entry (with a warning) unless it can resolve one —
+from `ard.config`'s `siteUrl`, or from Vercel's build-time `VERCEL_PROJECT_PRODUCTION_URL`. On any
+other host, set `siteUrl` explicitly (see below).
+
+`ard.config.*` is evaluated as real code at build time (via [`jiti`](https://github.com/unjs/jiti)),
+not parsed as static JSON — so `siteUrl: process.env.SITE_URL` (or whatever env var your host/CI
+sets) works with no special support needed. The plugin doesn't guess a variable name on your
+behalf: unlike Vercel's `VERCEL_PROJECT_PRODUCTION_URL`, there's no single convention for "the
+site's URL" across hosts (`SITE_URL`, `NEXT_PUBLIC_SITE_URL`, `DEPLOY_URL`, ... all exist in the
+wild), and guessing wrong could silently point the catalog at a stale preview URL.
 
 ### Config (`ard.config.{ts,js,mjs,cjs}`)
 
@@ -77,15 +100,24 @@ so it stays vendor-neutral.)
 import type { ArdConfig } from 'ora-catalog';
 
 const config: ArdConfig = {
-  // Glob patterns that must never be published, even once zero-config detection (Phase 2.2)
-  // would otherwise infer an entry for them. `/api/auth/**` and `/api/webhooks/**` are denied
-  // by default; list them again here only if you also want an `allowlist` exception below.
+  // Your production origin — every detected entry's URL is resolved against this. Only needed off
+  // Vercel (Vercel's own VERCEL_PROJECT_PRODUCTION_URL is used automatically when this is unset).
+  // This file is real code, so reading it from your own env var works too:
+  //   siteUrl: process.env.SITE_URL,
+  siteUrl: 'https://example.com',
+  // Scaffold a starter app/llms.txt/route.ts when neither it nor public/llms.txt exists.
+  // Opt-in (defaults to false) — it writes into your source tree, not just the catalog file.
+  scaffoldLlmsTxt: true,
+  // Glob patterns that must never be published, even if a detector would otherwise infer an entry
+  // for them. `/api/auth/**` and `/api/webhooks/**` are denied by default; list them again here
+  // only if you also want an `allowlist` exception below.
   denylist: ['/internal/**'],
   // Re-include a path the denylist would otherwise exclude.
   allowlist: ['/api/auth/status'],
-  // Hand-declared entries. An `identifier` matching an inferred entry overrides/extends it
-  // field-by-field (never replaces it outright); anything else is appended as a new entry.
-  entries: [{ identifier: 'urn:example:docs', type: 'text/html', url: '/docs' }],
+  // Hand-declared entries — e.g. docs/skills pointers zero-config detection can't guess at. An
+  // `identifier` matching a detected entry overrides/extends it field-by-field (never replaces it
+  // outright); anything else is appended as a new entry.
+  entries: [{ identifier: 'urn:example:docs', type: 'text/html', url: 'https://example.com/docs' }],
 };
 
 export default config;

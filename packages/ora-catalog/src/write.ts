@@ -2,7 +2,7 @@ import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import type { AiCatalog } from './types.js';
-import { formatCatalogErrors, validateCatalog } from './validate.js';
+import { formatCatalogErrors, validateCatalogArd } from './validate.js';
 
 /** Where the Phase 1 static emission target lands, relative to the project root. */
 export const CATALOG_OUTPUT_PATH = join('public', '.well-known', 'ai-catalog.json');
@@ -10,16 +10,17 @@ export const CATALOG_OUTPUT_PATH = join('public', '.well-known', 'ai-catalog.jso
 export type WriteCatalogResult = { ok: true; path: string } | { ok: false; errors: string };
 
 /**
- * Validates a catalog against the spec schema and, only if valid, writes it to
+ * Validates a catalog against the strict official ARD schema and, only if valid, writes it to
  * `public/.well-known/ai-catalog.json` under `cwd`. Never writes an invalid catalog — this is the
  * hard-fail gate the plan calls for: a bad catalog is worse than none, so it must never reach a
- * real deployment.
+ * real deployment. The strict (not permissive) schema gates here because this is *emitted* output:
+ * it must survive the official conformance tool, not merely count as a catalog.
  *
  * The write itself is atomic (write to a temp file, then rename into place) so a crash or
  * concurrent build never leaves a half-written, unparseable catalog on disk.
  */
 export function writeCatalog(cwd: string, catalog: AiCatalog): WriteCatalogResult {
-  const result = validateCatalog(catalog);
+  const result = validateCatalogArd(catalog);
   if (!result.valid) {
     return { ok: false, errors: formatCatalogErrors(result.errors) };
   }
