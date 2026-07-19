@@ -244,15 +244,31 @@ Goal: the `next-sitemap`-style production core. Stable regardless of spec churn.
 
 ### 2.1 Config
 
-- [ ] `ora-catalog.config.ts` — typed config, validated with Zod (dogfooding), loaded via the CLI.
-- [ ] Load the user's `next.config.*` (js/mjs/ts) and extract `basePath`, `distDir`, and `output`
+- [x] `ora-catalog.config.ts` — typed config, validated via JSON Schema through the existing Ajv
+      instance (not Zod — see *decision* below), loaded via the CLI.
+- [x] Load the user's `next.config.*` (js/mjs/ts) and extract `basePath`, `distDir`, and `output`
       so users never repeat Next settings in plugin config. Handle both object and function-form
       configs; on load failure, warn and fall back to defaults (never crash over their config).
-- [ ] Test next-config loading against the `deploy-variants` and `monorepo` fixtures.
-- [ ] Build-time validation fails loudly with actionable messages on invalid config.
-- [ ] Config **overrides/extends** inferred entries; it never silently replaces them.
-- [ ] Denylist support, with a default-on denylist (`/api/auth/**`, `/api/webhooks/**`); allowlist
-      to re-include.
+      (`src/next-config.ts`, loaded via `jiti` — the one new runtime dependency this needs, since
+      Node can't natively `import()` a `.ts` config file itself.)
+- [x] Test next-config loading against the `deploy-variants` and `monorepo` fixtures.
+      (`test/fixtures-integration.test.ts`.)
+- [x] Build-time validation fails loudly with actionable messages on invalid config.
+      (`OraCatalogConfigError`, caught in `cli.ts` and reported without a stack trace.)
+- [x] Config **overrides/extends** inferred entries; it never silently replaces them.
+      (`src/entries.ts` `applyEntryOverrides` — merges by `identifier`, appends otherwise.)
+- [x] Denylist support, with a default-on denylist (`/api/auth/**`, `/api/webhooks/**`); allowlist
+      to re-include. (`src/denylist.ts`.)
+
+**Decision (2026-07-19, superseding this section's original "validated with Zod" wording):** this
+is build-time tooling, so dependency count matters (see *Core design decisions*). The package
+already needs a JSON Schema validator for the AI Catalog spec itself (`ajv`) — a second, different
+validator (`zod`) just for `ora-catalog.config` would be redundant, since Ajv validates any parsed
+JS object regardless of whether it came from JSON or from executing a `.ts` file. So
+`ora-catalog.config` is validated by a small hand-written JSON Schema (`src/config-schema.ts`)
+through the same shared Ajv instance (`src/ajv-instance.ts`) as `validate.ts`. `jiti` is still a
+new dependency — unavoidably so, since *something* has to execute a `.ts`/`.mjs`/`.cjs` config
+file at runtime, which is an orthogonal problem to schema validation.
 
 ### 2.2 Zero-config inference & artifact detection (aligned with Ora's index)
 

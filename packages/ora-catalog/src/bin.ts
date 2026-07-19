@@ -4,7 +4,7 @@ import { runCli } from './cli.js';
 // This file is the published `bin` entry point (`npx ora-catalog`). Kept separate from cli.ts
 // so cli.ts stays a pure, testable function — this file's only job is process wiring.
 try {
-  process.exitCode = runCli(process.argv.slice(2));
+  process.exitCode = await runCli(process.argv.slice(2));
 } catch (err) {
   // runCli only lets environment failures (e.g. an unwritable disk, missing permissions) reach
   // here — expected failure modes (bad args, invalid catalog) are handled inside it and never
