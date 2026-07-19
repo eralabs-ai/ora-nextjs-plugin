@@ -106,9 +106,6 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   }
 
   stdout(`[ora-catalog] ✓ wrote ${result.path}`);
-  stdout(
-    `[ora-catalog] ✓ ${catalog.entries.length} entries (config-declared only — zero-config ` +
-      'artifact detection for MCP/OpenAPI/docs/skills/llms.txt lands in Phase 2.2)',
-  );
+  stdout(`[ora-catalog] ✓ ${catalog.entries.length} entries referenced`);
   return 0;
 }

@@ -21,7 +21,13 @@ describe('loadArdConfig', () => {
   it('defaults denylist/allowlist/entries when no config file exists', async () => {
     const { config, path } = await loadArdConfig(dir);
     expect(path).toBeUndefined();
-    expect(config).toEqual({ denylist: [...DEFAULT_DENYLIST], allowlist: [], entries: [] });
+    expect(config).toEqual({
+      siteUrl: undefined,
+      scaffoldLlmsTxt: false,
+      denylist: [...DEFAULT_DENYLIST],
+      allowlist: [],
+      entries: [],
+    });
   });
 
   it('loads a CommonJS .js config', async () => {

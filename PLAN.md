@@ -271,21 +271,41 @@ Goal: the `next-sitemap`-style production core. Stable regardless of spec churn.
 Detect-and-reference is the cheapest, highest-value work — it mirrors exactly what Ora's crawler
 already rewards. Zero-config, in rough priority order:
 
-- [ ] Emit site-level metadata (name, domain, description from package.json / config).
-- [ ] Detect an existing **MCP server** configured the Next.js way (`mcp-handler`, legacy alias
+- [x] Emit site-level metadata (name, domain, description from package.json / config). Domain can
+      now also come from `ard.config`'s new **`siteUrl`** (see below), not just Vercel's env var.
+- [x] Detect an existing **MCP server** configured the Next.js way (`mcp-handler`, legacy alias
       `@vercel/mcp-adapter`) → `application/mcp-server-card+json`. Unambiguous intent to publish.
-      Populate `capabilities` / `auth` where statically derivable.
-- [ ] Detect a static **`public/openapi.json`** and reference its URL →
-      `application/vnd.oai.openapi+json`. Details in Phase 3.
-- [ ] Emit **docs** and **skills** entries (`text/html` / `application/ai-skill+md`) from URLs the
+      Populate `capabilities` / `auth` where statically derivable. (`src/detect-mcp.ts` — textual
+      detection, not AST, per the core design decisions; `capabilities` populated from `.tool(...)`
+      call sites; `auth` deliberately **not** derived — no cheap, reliable static signal for it, so
+      it's left as a documented gap rather than guessed.)
+- [x] Detect a static **`public/openapi.json`** and reference its URL →
+      `application/vnd.oai.openapi+json`. Details in Phase 3. (`src/detect-openapi.ts`.)
+- [x] Emit **docs** and **skills** entries (`text/html` / `application/ai-skill+md`) from URLs the
       developer **declares in `ard.config`**. Config-driven, not guessed — the developer knows
-      where their docs and skills live; the plugin doesn't spider for them.
-- [ ] Reference an existing **`llms.txt`** served the Next.js way — a route handler at
+      where their docs and skills live; the plugin doesn't spider for them. (Already covered by the
+      generic `entries` override mechanism from 2.1 — see the `config-overrides` fixture, which
+      already declares exactly this shape. No new config surface needed.)
+- [x] Reference an existing **`llms.txt`** served the Next.js way — a route handler at
       `app/llms.txt/route.ts` (often `dynamic = 'force-static'`) or a static `public/llms.txt` →
       `text/markdown`. Scaffold a starter route handler when absent (v1; cheap, idiomatic).
-- [ ] Do **not** synthesize an OpenAPI doc from bare route handlers; reference only a doc the app
+      (`src/detect-llms-txt.ts`. **Deviation from the plan as written:** scaffolding is **opt-in**
+      via `ard.config`'s `scaffoldLlmsTxt: true`, defaulting to `false` — writing a *second* file
+      into a consumer's `app/` directory is a bigger, unsolicited source-tree mutation than the one
+      catalog file this plugin exists to produce, and an opt-out default is too easy to miss for a
+      build tool meant to run unattended across many sites. This was found empirically: with an
+      opt-out default, this repo's own test suite silently scaffolded files into four unrelated
+      fixtures the first time it ran.)
+- [x] Do **not** synthesize an OpenAPI doc from bare route handlers; reference only a doc the app
       actually produces. Most route handlers are internal BFF endpoints and must not be exposed.
-- [ ] Do **not** emit GraphQL entries — out of scope (see *Scope*).
+- [x] Do **not** emit GraphQL entries — out of scope (see *Scope*).
+
+**New config surface added to support the above:** `ard.config`'s `siteUrl` — an explicit absolute
+origin (e.g. `https://example.com`). The catalog schema's `url` fields require an absolute URI
+(`format: uri`), so every detector above needs a known site origin to build one; without `siteUrl`
+(and without Vercel's build-time `VERCEL_PROJECT_PRODUCTION_URL`), a detector still runs but skips
+emitting its URL-bearing entry — with a warning — rather than emit a relative or guessed URL.
+Precision over recall, applied to the plugin's own output, not just to what it detects.
 
 ### 2.3 Review-before-publish flow
 

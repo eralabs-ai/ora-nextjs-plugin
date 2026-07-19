@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
@@ -46,6 +47,55 @@ describe('generateCatalog with the config-overrides fixture', () => {
     expect(ids).toContain('urn:example:auth-status');
     // Denylisted by default and NOT allowlisted — dropped even though the config declares it.
     expect(ids).not.toContain('urn:example:auth-internal');
+  });
+});
+
+// Phase 2.2 end-to-end: each fixture ships a real artifact (an mcp-handler mount, a static
+// public/openapi.json, an app/llms.txt/route.ts) plus an ard.config.ts declaring a fixture-specific
+// `siteUrl` so the resulting catalog is deterministic in CI. `scaffoldLlmsTxt` stays at its default
+// (`false`) here — these fixtures must never gain files as a side effect of running this suite.
+describe('generateCatalog zero-config detection against the fixture corpus', () => {
+  it('detects the mcp-handler mount in the mcp-adapter fixture', async () => {
+    const catalog = await generateCatalog({ cwd: `${fixturesDir}mcp-adapter` });
+    expect(validateCatalog(catalog).valid).toBe(true);
+
+    const entry = catalog.entries.find((e) => e.identifier === 'urn:ora-catalog:mcp-server');
+    expect(entry).toMatchObject({
+      type: 'application/mcp-server-card+json',
+      url: 'https://mcp-adapter-fixture.example.com/mcp',
+      capabilities: ['roll_dice'],
+    });
+  });
+
+  it('detects public/openapi.json in the openapi fixture', async () => {
+    const catalog = await generateCatalog({ cwd: `${fixturesDir}openapi` });
+    expect(validateCatalog(catalog).valid).toBe(true);
+
+    const entry = catalog.entries.find((e) => e.identifier === 'urn:ora-catalog:openapi');
+    expect(entry).toMatchObject({
+      type: 'application/vnd.oai.openapi+json;version=3.1',
+      url: 'https://openapi-fixture.example.com/openapi.json',
+    });
+  });
+
+  it('detects app/llms.txt/route.ts in the llms-txt fixture', async () => {
+    const catalog = await generateCatalog({ cwd: `${fixturesDir}llms-txt` });
+    expect(validateCatalog(catalog).valid).toBe(true);
+
+    const entry = catalog.entries.find((e) => e.identifier === 'urn:ora-catalog:llms-txt');
+    expect(entry).toMatchObject({
+      type: 'text/markdown',
+      url: 'https://llms-txt-fixture.example.com/llms.txt',
+    });
+  });
+
+  it('never writes into the fixture corpus as a side effect (scaffoldLlmsTxt defaults to false)', async () => {
+    for (const name of ['bare', 'bare-js', 'mcp-adapter', 'openapi']) {
+      await generateCatalog({ cwd: `${fixturesDir}${name}` });
+    }
+    for (const name of ['bare', 'bare-js', 'mcp-adapter', 'openapi']) {
+      expect(existsSync(`${fixturesDir}${name}/app/llms.txt`)).toBe(false);
+    }
   });
 });
 

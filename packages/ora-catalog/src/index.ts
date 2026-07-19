@@ -43,3 +43,17 @@ export {
 export { isPathDenied, matchesAnyGlob } from './denylist.js';
 
 export { applyEntryOverrides, entryUrlPath, type ApplyEntryOverridesResult } from './entries.js';
+
+export { resolveSiteUrl, buildArtifactUrl, hostnameFromUrl } from './site-url.js';
+
+export { findAppDir } from './app-dir.js';
+
+export { detectMcpServers, type DetectMcpOptions } from './detect-mcp.js';
+
+export { detectOpenApi, type DetectOpenApiOptions } from './detect-openapi.js';
+
+export {
+  detectLlmsTxt,
+  type DetectLlmsTxtOptions,
+  type DetectLlmsTxtResult,
+} from './detect-llms-txt.js';

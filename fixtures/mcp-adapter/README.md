@@ -8,5 +8,11 @@ A Next.js app that already hosts an MCP server via
 > alias.
 
 **Exercises:** zero-config MCP detection (Phase 2.2). An existing MCP mount is unambiguous intent to
-publish, so the plugin should surface the MCP server in the catalog **without** an opt-in marker —
-the one exception to "route entries are opt-in only."
+publish, so the plugin surfaces the MCP server in the catalog **without** an opt-in marker — the
+one exception to "route entries are opt-in only." Detection resolves the `[transport]` dynamic
+segment to `/mcp` (`mcp-handler`'s documented default `streamableHttpEndpoint`) and populates
+`capabilities` from the `server.tool(...)` call sites it finds.
+
+Ships an `ard.config.ts` declaring `siteUrl` so the emitted entry's URL is deterministic in CI
+(without it, this detector still runs, but skips emitting a URL-bearing entry since none of this
+repo's test environments set Vercel's production-domain env var).
