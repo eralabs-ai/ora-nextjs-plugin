@@ -7,13 +7,7 @@ import { formatCatalogErrors, validateCatalog } from './validate.js';
 /** Where the Phase 1 static emission target lands, relative to the project root. */
 export const CATALOG_OUTPUT_PATH = join('public', '.well-known', 'ai-catalog.json');
 
-export interface WriteCatalogResult {
-  ok: boolean;
-  /** Absolute path written to, only set when `ok` is true. */
-  path?: string;
-  /** Human-readable validation errors, only set when `ok` is false. */
-  errors?: string;
-}
+export type WriteCatalogResult = { ok: true; path: string } | { ok: false; errors: string };
 
 /**
  * Validates a catalog against the spec schema and, only if valid, writes it to

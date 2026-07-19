@@ -9,6 +9,7 @@ import { SPEC_VERSION } from '../src/schema.js';
 import { validateCatalog } from '../src/validate.js';
 
 let dir: string;
+const originalEnv = { ...process.env };
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'ora-catalog-generate-'));
@@ -18,6 +19,7 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
+  process.env = { ...originalEnv };
 });
 
 describe('generateCatalog', () => {

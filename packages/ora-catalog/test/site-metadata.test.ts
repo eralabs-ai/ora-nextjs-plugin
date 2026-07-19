@@ -64,11 +64,11 @@ describe('readSiteMetadata', () => {
     expect(readSiteMetadata(dir).domain).toBe('example.com');
   });
 
-  it('falls back to VERCEL_URL when the production url is absent', () => {
+  it('ignores VERCEL_URL — it is per-deployment and would go stale', () => {
     delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
     process.env.VERCEL_URL = 'my-site-abc123.vercel.app';
     writePackageJson({ name: 'my-site' });
-    expect(readSiteMetadata(dir).domain).toBe('my-site-abc123.vercel.app');
+    expect(readSiteMetadata(dir).domain).toBeUndefined();
   });
 
   it('leaves domain undefined outside Vercel', () => {

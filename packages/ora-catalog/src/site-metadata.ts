@@ -50,11 +50,13 @@ export function readSiteMetadata(cwd: string): SiteMetadata {
 
 /**
  * Best-effort production domain from Vercel's build-time env vars — unambiguous, provider-supplied
- * truth, not a guess. `VERCEL_PROJECT_PRODUCTION_URL` is the stable production domain; falls back to
- * the per-deployment `VERCEL_URL`. Absent outside Vercel (or in Phase 1's other hosts) — that's fine,
- * `domain` stays undefined and the catalog omits `host.identifier`.
+ * truth, not a guess. Deliberately only `VERCEL_PROJECT_PRODUCTION_URL` (the stable production
+ * domain), not the per-deployment `VERCEL_URL`: the latter is unique to a single preview/production
+ * deployment and disappears once superseded, which would bake a dead, deployment-specific
+ * `did:web:` identifier into the catalog. Absent outside Vercel (or in Phase 1's other hosts) —
+ * that's fine, `domain` stays undefined and the catalog omits `host.identifier`.
  */
 function readVercelDomain(): string | undefined {
-  const domain = process.env.VERCEL_PROJECT_PRODUCTION_URL ?? process.env.VERCEL_URL;
+  const domain = process.env.VERCEL_PROJECT_PRODUCTION_URL;
   return domain && domain.trim() !== '' ? domain.trim() : undefined;
 }

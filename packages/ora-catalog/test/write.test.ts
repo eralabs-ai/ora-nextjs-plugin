@@ -27,9 +27,9 @@ describe('writeCatalog', () => {
   it('writes a valid catalog to public/.well-known/ai-catalog.json', () => {
     const result = writeCatalog(dir, validCatalog);
 
-    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('expected a successful write');
     expect(result.path).toBe(join(dir, CATALOG_OUTPUT_PATH));
-    const written = JSON.parse(readFileSync(result.path!, 'utf8'));
+    const written = JSON.parse(readFileSync(result.path, 'utf8'));
     expect(written).toEqual(validCatalog);
   });
 
@@ -43,7 +43,7 @@ describe('writeCatalog', () => {
     const invalid = { entries: [] } as unknown as AiCatalog; // missing specVersion
     const result = writeCatalog(dir, invalid);
 
-    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected validation to fail');
     expect(result.errors).toBeTruthy();
     expect(existsSync(join(dir, CATALOG_OUTPUT_PATH))).toBe(false);
   });
@@ -59,8 +59,8 @@ describe('writeCatalog', () => {
     const updated: AiCatalog = { ...validCatalog, host: { displayName: 'Updated' } };
     const result = writeCatalog(dir, updated);
 
-    expect(result.ok).toBe(true);
-    const written = JSON.parse(readFileSync(result.path!, 'utf8'));
+    if (!result.ok) throw new Error('expected a successful write');
+    const written = JSON.parse(readFileSync(result.path, 'utf8'));
     expect(written.host.displayName).toBe('Updated');
   });
 });

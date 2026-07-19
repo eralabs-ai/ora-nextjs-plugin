@@ -7,7 +7,8 @@ Usage:
   ora-catalog [options]
 
 Options:
-  --cwd <dir>   Project root to run in (defaults to the current working directory).
+  --cwd <dir>,
+  --cwd=<dir>   Project root to run in (defaults to the current working directory).
                 Run this from your Next.js app's root, typically as a "postbuild" script.
   -h, --help    Print this help text.
 
@@ -32,6 +33,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   const parsed: ParsedArgs = { help: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
+    if (arg === undefined) continue;
     if (arg === '-h' || arg === '--help') {
       parsed.help = true;
     } else if (arg === '--cwd') {
@@ -39,6 +41,10 @@ function parseArgs(argv: string[]): ParsedArgs {
       if (value === undefined) throw new CliArgError('--cwd requires a directory argument');
       parsed.cwd = value;
       i++;
+    } else if (arg.startsWith('--cwd=')) {
+      const value = arg.slice('--cwd='.length);
+      if (value === '') throw new CliArgError('--cwd requires a directory argument');
+      parsed.cwd = value;
     } else {
       throw new CliArgError(`Unrecognized argument: ${arg}`);
     }
@@ -76,7 +82,7 @@ export function runCli(argv: string[], io: CliIO = {}): number {
 
   if (!result.ok) {
     stderr('[ora-catalog] Generated catalog failed spec validation — refusing to write it:');
-    stderr(result.errors ?? '(no error detail)');
+    stderr(result.errors);
     stderr(
       '[ora-catalog] This is a bug in ora-catalog itself, not your app. Please file an issue.',
     );

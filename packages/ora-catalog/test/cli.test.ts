@@ -43,6 +43,19 @@ describe('runCli', () => {
     expect(existsSync(join(dir, CATALOG_OUTPUT_PATH))).toBe(true);
   });
 
+  it('accepts --cwd=<dir> equals form', () => {
+    const code = runCli([`--cwd=${dir}`], io);
+    expect(code).toBe(0);
+    expect(existsSync(join(dir, CATALOG_OUTPUT_PATH))).toBe(true);
+  });
+
+  it('exits 1 with a clear message when --cwd= has an empty value', () => {
+    const code = runCli(['--cwd='], { ...io, cwd: dir });
+    expect(code).toBe(1);
+    expect(stderr.some((l) => l.includes('--cwd requires a directory argument'))).toBe(true);
+    expect(existsSync(join(dir, CATALOG_OUTPUT_PATH))).toBe(false);
+  });
+
   it('prints help and exits 0 for --help, without writing anything', () => {
     const code = runCli(['--help'], { ...io, cwd: dir });
     expect(code).toBe(0);
