@@ -51,6 +51,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Fixtures depend on the built ora-catalog CLI for their postbuild step (bare,
+      # deploy-variants) — it must exist in dist/ before `next build` runs.
+      - name: Build ora-catalog
+        run: pnpm build
+
       # Phase 0 safety net: every fixture must `next build`. Replaced by the Phase 2.6
       # snapshot-and-validate suite once the generator exists.
       - name: Build fixtures

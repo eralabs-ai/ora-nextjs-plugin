@@ -6,7 +6,9 @@ discover the site's capabilities.
 
 > **Status:** pre-release, under active development. See [`PLAN.md`](./PLAN.md) for the phased
 > roadmap. This repo currently implements Phase 0 groundwork (spec + validator, workspace, fixture
-> corpus).
+> corpus) and the Phase 1 walking skeleton (CLI that emits a minimal, spec-valid,
+> site-metadata-only catalog as a `postbuild` step). Deploying a fixture to Vercel and running it
+> through Ora's AgentJourney is the next, external-access-gated step — see `PLAN.md` Phase 1.
 
 ## Design posture
 
@@ -39,6 +41,33 @@ packages/ora-catalog   the plugin / CLI (published to npm; near-zero runtime dep
 spec/                  vendored AI Catalog spec + hand-written JSON Schema + validator oracle
 fixtures/*             minimal-but-real Next.js apps — the test suite, docs examples, and eval corpus
 ```
+
+## Usage (Phase 1 — walking skeleton)
+
+Add `ora-catalog` as a dependency and run it as a `postbuild` step:
+
+```sh
+npm install --save-dev ora-catalog
+```
+
+```json
+{
+  "scripts": {
+    "build": "next build",
+    "postbuild": "ora-catalog"
+  }
+}
+```
+
+This writes `public/.well-known/ai-catalog.json` with site-level metadata (`displayName` /
+`description` from `package.json`) and an empty `entries` array — validated against the AI Catalog
+spec before it's written; the CLI refuses to write (and exits non-zero) if generation ever produces
+an invalid catalog. Zero-config artifact detection (MCP servers, `openapi.json`, `llms.txt`,
+docs/skills) lands in Phase 2 — see `PLAN.md`.
+
+**Known Phase 1 limitation:** if your app sets `basePath` in `next.config`, the static file above is
+served under that prefix (e.g. `/app/.well-known/ai-catalog.json`), not at the domain root crawlers
+expect. A route-handler emission target that isn't affected by `basePath` is planned for Phase 2.
 
 ## Development
 
