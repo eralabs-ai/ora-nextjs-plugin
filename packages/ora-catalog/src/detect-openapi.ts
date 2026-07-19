@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { buildArtifactUrl } from './site-url.js';
+import { buildArtifactUrl, buildUrn } from './site-url.js';
 import type { CatalogEntry } from './types.js';
 
 export interface DetectOpenApiOptions {
@@ -72,7 +72,7 @@ export function detectOpenApi(options: DetectOpenApiOptions): CatalogEntry | und
   const description = typeof doc.info?.description === 'string' ? doc.info.description : undefined;
 
   return {
-    identifier: 'urn:ora-catalog:openapi',
+    identifier: buildUrn(options.siteUrl, 'openapi'),
     type: `application/vnd.oai.openapi+json;version=${version}`,
     displayName: title ?? 'OpenAPI',
     url: buildArtifactUrl(options.siteUrl, options.basePath, '/openapi.json'),

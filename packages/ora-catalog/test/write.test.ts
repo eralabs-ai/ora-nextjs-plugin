@@ -48,6 +48,19 @@ describe('writeCatalog', () => {
     expect(existsSync(join(dir, CATALOG_OUTPUT_PATH))).toBe(false);
   });
 
+  it('gates on the strict ARD schema, not just the permissive base one', () => {
+    // Base-valid but ARD-invalid: the identifier is not urn:air and displayName is missing.
+    const ardInvalid: AiCatalog = {
+      specVersion: '1.0',
+      host: { displayName: 'Demo' },
+      entries: [{ identifier: 'urn:x', type: 'application/json', url: 'https://x.dev' }],
+    };
+    const result = writeCatalog(dir, ardInvalid);
+
+    if (result.ok) throw new Error('expected the ARD gate to fail');
+    expect(existsSync(join(dir, CATALOG_OUTPUT_PATH))).toBe(false);
+  });
+
   it('leaves no temp file behind on a successful write', () => {
     writeCatalog(dir, validCatalog);
     const files = readdirSync(join(dir, 'public', '.well-known'));

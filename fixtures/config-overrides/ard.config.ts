@@ -10,15 +10,17 @@ const config: ArdConfig = {
   allowlist: ['/api/auth/status'],
   entries: [
     // Ordinary docs/skills pointers — absolute URLs, so they're spec-valid on their own (the
-    // catalog schema requires `url` to be an absolute URI).
+    // catalog schema requires `url` to be an absolute URI). Identifiers follow the ARD URN format
+    // (`urn:air:<publisher-domain>:<name>`, spec §4.2.1) the emission gate enforces, and every
+    // entry carries the `displayName` the ARD schema requires.
     {
-      identifier: 'urn:example:docs',
+      identifier: 'urn:air:example.com:docs',
       type: 'text/html',
       displayName: 'API documentation',
       url: 'https://example.com/docs',
     },
     {
-      identifier: 'urn:example:skills',
+      identifier: 'urn:air:example.com:skills',
       type: 'application/ai-skill+md',
       displayName: 'Agent skills',
       url: 'https://github.com/example/agent-skills',
@@ -26,15 +28,17 @@ const config: ArdConfig = {
     // Under the default denylist (`/api/auth/**`) but re-included by the `allowlist` above, so it
     // survives into the catalog.
     {
-      identifier: 'urn:example:auth-status',
+      identifier: 'urn:air:example.com:auth-status',
       type: 'text/html',
+      displayName: 'Auth status endpoint',
       url: 'https://example.com/api/auth/status',
     },
     // Under the default denylist and NOT allowlisted — the safety net drops it from the catalog,
     // even though it's declared here. Demonstrates "precision over recall".
     {
-      identifier: 'urn:example:auth-internal',
+      identifier: 'urn:air:example.com:auth-internal',
       type: 'text/html',
+      displayName: 'Internal auth endpoint',
       url: 'https://example.com/api/auth/internal',
     },
   ],

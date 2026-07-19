@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { generateCatalog } from '../src/generate.js';
 import { SPEC_VERSION } from '../src/schema.js';
-import { validateCatalog } from '../src/validate.js';
+import { validateCatalog, validateCatalogArd } from '../src/validate.js';
 
 let dir: string;
 const originalEnv = { ...process.env };
@@ -34,8 +34,12 @@ describe('generateCatalog', () => {
 
     expect(catalog.specVersion).toBe(SPEC_VERSION);
     expect(catalog.entries).toEqual([]);
-    expect(catalog.host).toMatchObject({ displayName: 'demo', description: 'A demo app.' });
+    expect(catalog.host).toMatchObject({ displayName: 'demo' });
+    // No host.description even though package.json has one — the ARD schema closes the host
+    // object, so emitting it would fail the official conformance tool.
+    expect(catalog.host).not.toHaveProperty('description');
     expect(validateCatalog(catalog).valid).toBe(true);
+    expect(validateCatalogArd(catalog).valid).toBe(true);
   });
 
   it('emits no entries with zero config — artifact detection is Phase 2.2', async () => {
@@ -81,9 +85,10 @@ describe('generateCatalog zero-config artifact detection (Phase 2.2)', () => {
     const catalog = await generateCatalog({ cwd: dir });
 
     expect(validateCatalog(catalog).valid).toBe(true);
+    expect(validateCatalogArd(catalog).valid).toBe(true);
     expect(catalog.entries).toHaveLength(1);
     expect(catalog.entries[0]).toMatchObject({
-      identifier: 'urn:ora-catalog:openapi',
+      identifier: 'urn:air:example.com:openapi',
       url: 'https://example.com/openapi.json',
     });
   });
@@ -141,7 +146,7 @@ describe('generateCatalog zero-config artifact detection (Phase 2.2)', () => {
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
     writeFileSync(
       join(dir, 'ard.config.mjs'),
-      "export default { siteUrl: 'https://example.com', entries: [{ identifier: 'urn:ora-catalog:openapi', description: 'Hand-written.' }] };\n",
+      "export default { siteUrl: 'https://example.com', entries: [{ identifier: 'urn:air:example.com:openapi', description: 'Hand-written.' }] };\n",
       'utf8',
     );
     mkdirSync(join(dir, 'public'), { recursive: true });
@@ -155,7 +160,7 @@ describe('generateCatalog zero-config artifact detection (Phase 2.2)', () => {
 
     expect(catalog.entries).toHaveLength(1);
     expect(catalog.entries[0]).toMatchObject({
-      identifier: 'urn:ora-catalog:openapi',
+      identifier: 'urn:air:example.com:openapi',
       displayName: 'Demo API',
       description: 'Hand-written.',
     });

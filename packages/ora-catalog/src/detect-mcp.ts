@@ -1,7 +1,7 @@
 import { readFileSync, statSync } from 'node:fs';
 
 import { findAppDir } from './app-dir.js';
-import { buildArtifactUrl } from './site-url.js';
+import { buildArtifactUrl, buildUrn } from './site-url.js';
 import type { CatalogEntry } from './types.js';
 import { pathSegments, ROUTE_FILE_NAMES, walkFiles } from './walk-files.js';
 
@@ -87,9 +87,11 @@ export function detectMcpServers(options: DetectMcpOptions): CatalogEntry[] {
 
   const multiple = mounts.length > 1;
   return mounts.map((mount): CatalogEntry => {
+    // ARD URN format (spec §4.2.1): publisher domain + logical name; a second segment
+    // disambiguates only when the app mounts more than one server.
     const identifier = multiple
-      ? `urn:ora-catalog:mcp-server:${mount.pathname}`
-      : 'urn:ora-catalog:mcp-server';
+      ? buildUrn(siteUrl, 'mcp-server', mount.pathname)
+      : buildUrn(siteUrl, 'mcp-server');
     return {
       identifier,
       type: 'application/mcp-server-card+json',

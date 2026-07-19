@@ -84,12 +84,36 @@ describe('detectMcpServers', () => {
 
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
-      identifier: 'urn:ora-catalog:mcp-server',
+      identifier: 'urn:air:example.com:mcp-server',
       type: 'application/mcp-server-card+json',
       url: 'https://example.com/mcp',
       capabilities: ['roll_dice'],
     });
     expect(typeof entries[0]?.updatedAt).toBe('string');
+  });
+
+  it('disambiguates multiple mounts with sanitized, ARD-conformant URN segments', () => {
+    writeMcpRoute('[transport]');
+    writeMcpRoute(join('api', 'tools'));
+
+    const entries = detectMcpServers({
+      cwd: dir,
+      siteUrl: 'https://example.com',
+      basePath: '',
+      warn,
+    });
+
+    expect(entries).toHaveLength(2);
+    const ids = entries.map((e) => e.identifier).sort();
+    // Mount pathnames contain "/" which the ARD URN pattern forbids inside a segment — they must
+    // be sanitized (e.g. /api/tools -> api-tools), never embedded raw.
+    expect(ids).toEqual([
+      'urn:air:example.com:mcp-server:api-tools',
+      'urn:air:example.com:mcp-server:mcp',
+    ]);
+    for (const id of ids) {
+      expect(id).toMatch(/^urn:air:[a-zA-Z0-9.-]+(:[a-zA-Z0-9._-]+)+$/);
+    }
   });
 
   it('detects a static (non-dynamic) mount path literally', () => {

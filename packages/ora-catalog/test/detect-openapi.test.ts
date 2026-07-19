@@ -44,7 +44,7 @@ describe('detectOpenApi', () => {
     const entry = detectOpenApi({ cwd: dir, siteUrl: 'https://example.com', basePath: '', warn });
 
     expect(entry).toMatchObject({
-      identifier: 'urn:ora-catalog:openapi',
+      identifier: 'urn:air:example.com:openapi',
       type: 'application/vnd.oai.openapi+json;version=3.1',
       displayName: 'Example API',
       description: 'A minimal API.',

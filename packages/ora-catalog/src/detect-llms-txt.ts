@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 
 import { findAppDir } from './app-dir.js';
-import { buildArtifactUrl } from './site-url.js';
+import { buildArtifactUrl, buildUrn } from './site-url.js';
 import type { CatalogEntry } from './types.js';
 import { ROUTE_FILE_NAMES } from './walk-files.js';
 
@@ -86,7 +86,7 @@ export function detectLlmsTxt(options: DetectLlmsTxtOptions): DetectLlmsTxtResul
     }
     return {
       entry: {
-        identifier: 'urn:ora-catalog:llms-txt',
+        identifier: buildUrn(options.siteUrl, 'llms-txt'),
         type: 'text/markdown',
         displayName: 'llms.txt',
         url: buildArtifactUrl(options.siteUrl, options.basePath, '/llms.txt'),

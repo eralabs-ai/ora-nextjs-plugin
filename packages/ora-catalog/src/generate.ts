@@ -84,11 +84,15 @@ export async function generateCatalog(options: GenerateCatalogOptions = {}): Pro
 
   const domain = config.siteUrl ? hostnameFromUrl(config.siteUrl) : site.domain;
 
+  // No `host.description`: the official ARD schema closes the host object
+  // (`additionalProperties: false` — only displayName/identifier/documentationUrl/logoUrl/
+  // trustManifest), so a description there would fail the emission gate and the official
+  // conformance tool. package.json's description still informs nothing for now; if the spec adds a
+  // host description field, re-add it here.
   return {
     specVersion: SPEC_VERSION,
     host: {
       displayName: site.displayName,
-      ...(site.description !== undefined ? { description: site.description } : {}),
       ...(domain !== undefined ? { identifier: `did:web:${domain}` } : {}),
     },
     entries,

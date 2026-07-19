@@ -9,17 +9,31 @@
 
 /** One entry the developer declares by hand, merged over/appended to inferred entries. */
 export interface ArdEntryOverride {
-  /** Must match an inferred entry's `identifier` to override/extend it; any other value appends. */
+  /**
+   * Must match an inferred entry's `identifier` to override/extend it; any other value appends.
+   * ARD requires the `urn:air:<publisher-domain>:<name>` format (inferred entries use
+   * `urn:air:<siteUrl host>:...`) — a non-conforming identifier fails the emission gate at write
+   * time with the schema error.
+   */
   identifier: string;
   type?: string;
+  /** Required by the ARD schema on every emitted entry — appended entries must declare one. */
   displayName?: string;
   description?: string;
   url?: string;
   data?: unknown;
   tags?: string[];
+  /** Tool/skill names for registry-side filtering — a first-class ARD field (spec §4.2). */
+  capabilities?: string[];
+  /**
+   * 2–5 sample natural-language queries — a first-class ARD field (spec §4.2) and the signal
+   * registries build semantic search embeddings from, so declaring these directly improves how
+   * discoverable the entry is.
+   */
+  representativeQueries?: string[];
   metadata?: Record<string, unknown>;
-  // Entries are an intentionally open extension point in the spec (auth, capabilities,
-  // provenance, ...) — see PLAN.md "Ground truth from Ora's index". Config overrides mirror that.
+  // Entries also remain an open extension point (auth, top-level provenance, ...) — see PLAN.md
+  // "Ground truth from Ora's index". Config overrides mirror that.
   [key: string]: unknown;
 }
 
@@ -75,6 +89,10 @@ const entryOverrideSchema = {
     description: { type: 'string' },
     url: { type: 'string' },
     tags: { type: 'array', items: { type: 'string' } },
+    capabilities: { type: 'array', items: { type: 'string' } },
+    // The ARD schema enforces 2–5 items; enforcing it here too surfaces the mistake at config
+    // load ("fails loudly") instead of at the write gate.
+    representativeQueries: { type: 'array', minItems: 2, maxItems: 5, items: { type: 'string' } },
     metadata: { type: 'object' },
   },
   // Open extensibility, matching the spec's own entries — see ArdEntryOverride above.

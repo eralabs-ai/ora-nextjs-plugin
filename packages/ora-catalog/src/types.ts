@@ -25,10 +25,11 @@ export interface CatalogPublisher {
 }
 
 interface CatalogEntryBase {
-  /** Unique artifact ID; URN format recommended. */
+  /** Unique artifact ID. ARD requires `urn:air:<publisher-domain>:<name>` (enforced at emission). */
   identifier: string;
   /** Media type identifier. Open string, not an enum. */
   type: string;
+  /** Optional in the base spec, but required by the ARD schema on every emitted entry. */
   displayName?: string;
   description?: string;
   tags?: string[];

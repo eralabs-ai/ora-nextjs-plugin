@@ -43,6 +43,22 @@ export function hostnameFromUrl(url: string): string | undefined {
   }
 }
 
+/**
+ * Builds an ARD entry identifier: `urn:air:<publisher>:<segment>...` (spec §4.2.1), where
+ * `<publisher>` is the site's domain — the URN's verifiable trust anchor, and the value registries
+ * extract as the filterable `publisher` field. The official schema enforces
+ * `^urn:air:[a-zA-Z0-9.-]+(:[a-zA-Z0-9._-]+)+$`, so each segment is sanitized (e.g. an MCP mount
+ * pathname `/api/mcp` becomes `api-mcp`); empty segments are dropped. Callers pass a known-absolute
+ * `siteUrl` — the same precondition every URL-bearing entry already has.
+ */
+export function buildUrn(siteUrl: string, ...segments: string[]): string {
+  const publisher = new URL(siteUrl).hostname;
+  const parts = segments
+    .map((segment) => segment.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, ''))
+    .filter((segment) => segment !== '');
+  return `urn:air:${publisher}:${parts.join(':')}`;
+}
+
 function stripTrailingSlash(value: string): string {
   return value.endsWith('/') ? value.slice(0, -1) : value;
 }

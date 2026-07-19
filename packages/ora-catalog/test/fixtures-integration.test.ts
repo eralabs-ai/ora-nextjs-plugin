@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import { generateCatalog } from '../src/generate.js';
 import { loadNextConfig } from '../src/next-config.js';
-import { validateCatalog } from '../src/validate.js';
+import { validateCatalog, validateCatalogArd } from '../src/validate.js';
 
 const fixturesDir = fileURLToPath(new URL('../../../fixtures/', import.meta.url));
 
@@ -18,6 +18,7 @@ describe('generateCatalog against the fixture corpus', () => {
     async (name) => {
       const catalog = await generateCatalog({ cwd: `${fixturesDir}${name}` });
       expect(validateCatalog(catalog).valid).toBe(true);
+      expect(validateCatalogArd(catalog).valid).toBe(true);
       expect(catalog.host?.displayName).toBeTruthy();
     },
   );
@@ -39,14 +40,15 @@ describe('generateCatalog with the config-overrides fixture', () => {
   it('emits config-declared entries and applies denylist + allowlist', async () => {
     const catalog = await generateCatalog({ cwd: `${fixturesDir}config-overrides` });
     expect(validateCatalog(catalog).valid).toBe(true);
+    expect(validateCatalogArd(catalog).valid).toBe(true);
 
     const ids = catalog.entries.map((entry) => entry.identifier);
-    expect(ids).toContain('urn:example:docs');
-    expect(ids).toContain('urn:example:skills');
+    expect(ids).toContain('urn:air:example.com:docs');
+    expect(ids).toContain('urn:air:example.com:skills');
     // Denylisted by default (/api/auth/**) but re-included via the config's allowlist.
-    expect(ids).toContain('urn:example:auth-status');
+    expect(ids).toContain('urn:air:example.com:auth-status');
     // Denylisted by default and NOT allowlisted — dropped even though the config declares it.
-    expect(ids).not.toContain('urn:example:auth-internal');
+    expect(ids).not.toContain('urn:air:example.com:auth-internal');
   });
 });
 
@@ -57,9 +59,11 @@ describe('generateCatalog with the config-overrides fixture', () => {
 describe('generateCatalog zero-config detection against the fixture corpus', () => {
   it('detects the mcp-handler mount in the mcp-adapter fixture', async () => {
     const catalog = await generateCatalog({ cwd: `${fixturesDir}mcp-adapter` });
-    expect(validateCatalog(catalog).valid).toBe(true);
+    expect(validateCatalogArd(catalog).valid).toBe(true);
 
-    const entry = catalog.entries.find((e) => e.identifier === 'urn:ora-catalog:mcp-server');
+    const entry = catalog.entries.find(
+      (e) => e.identifier === 'urn:air:mcp-adapter-fixture.example.com:mcp-server',
+    );
     expect(entry).toMatchObject({
       type: 'application/mcp-server-card+json',
       url: 'https://mcp-adapter-fixture.example.com/mcp',
@@ -69,9 +73,11 @@ describe('generateCatalog zero-config detection against the fixture corpus', () 
 
   it('detects public/openapi.json in the openapi fixture', async () => {
     const catalog = await generateCatalog({ cwd: `${fixturesDir}openapi` });
-    expect(validateCatalog(catalog).valid).toBe(true);
+    expect(validateCatalogArd(catalog).valid).toBe(true);
 
-    const entry = catalog.entries.find((e) => e.identifier === 'urn:ora-catalog:openapi');
+    const entry = catalog.entries.find(
+      (e) => e.identifier === 'urn:air:openapi-fixture.example.com:openapi',
+    );
     expect(entry).toMatchObject({
       type: 'application/vnd.oai.openapi+json;version=3.1',
       url: 'https://openapi-fixture.example.com/openapi.json',
@@ -80,9 +86,11 @@ describe('generateCatalog zero-config detection against the fixture corpus', () 
 
   it('detects app/llms.txt/route.ts in the llms-txt fixture', async () => {
     const catalog = await generateCatalog({ cwd: `${fixturesDir}llms-txt` });
-    expect(validateCatalog(catalog).valid).toBe(true);
+    expect(validateCatalogArd(catalog).valid).toBe(true);
 
-    const entry = catalog.entries.find((e) => e.identifier === 'urn:ora-catalog:llms-txt');
+    const entry = catalog.entries.find(
+      (e) => e.identifier === 'urn:air:llms-txt-fixture.example.com:llms-txt',
+    );
     expect(entry).toMatchObject({
       type: 'text/markdown',
       url: 'https://llms-txt-fixture.example.com/llms.txt',

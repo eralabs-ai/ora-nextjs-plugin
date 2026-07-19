@@ -1,11 +1,18 @@
 export {
   validateCatalog,
+  validateCatalogArd,
   formatCatalogErrors,
   type CatalogValidationResult,
   type CatalogValidationError,
 } from './validate.js';
 
-export { catalogSchema, SPEC_VERSION, SPEC_SOURCE_COMMIT } from './schema.js';
+export {
+  catalogSchema,
+  ardCatalogSchema,
+  SPEC_VERSION,
+  SPEC_SOURCE_COMMIT,
+  ARD_SPEC_SOURCE_COMMIT,
+} from './schema.js';
 
 export type { AiCatalog, CatalogEntry, CatalogHost, CatalogPublisher } from './types.js';
 
@@ -44,7 +51,7 @@ export { isPathDenied, matchesAnyGlob } from './denylist.js';
 
 export { applyEntryOverrides, entryUrlPath, type ApplyEntryOverridesResult } from './entries.js';
 
-export { resolveSiteUrl, buildArtifactUrl, hostnameFromUrl } from './site-url.js';
+export { resolveSiteUrl, buildArtifactUrl, buildUrn, hostnameFromUrl } from './site-url.js';
 
 export { findAppDir } from './app-dir.js';
 

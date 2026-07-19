@@ -36,7 +36,7 @@ describe('detectLlmsTxt — detection', () => {
     });
 
     expect(result.entry).toMatchObject({
-      identifier: 'urn:ora-catalog:llms-txt',
+      identifier: 'urn:air:example.com:llms-txt',
       type: 'text/markdown',
       url: 'https://example.com/llms.txt',
     });
