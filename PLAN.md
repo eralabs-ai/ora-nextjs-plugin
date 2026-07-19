@@ -265,15 +265,6 @@ Goal: the `next-sitemap`-style production core. Stable regardless of spec churn.
 - [x] Denylist support, with a default-on denylist (`/api/auth/**`, `/api/webhooks/**`); allowlist
       to re-include. (`src/denylist.ts`.)
 
-**Decision (2026-07-19, superseding this section's original "validated with Zod" wording):** this
-is build-time tooling, so dependency count matters (see *Core design decisions*). The package
-already needs a JSON Schema validator for the AI Catalog spec itself (`ajv`) — a second, different
-validator (`zod`) just for `ard.config` would be redundant, since Ajv validates any parsed
-JS object regardless of whether it came from JSON or from executing a `.ts` file. So
-`ard.config` is validated by a small hand-written JSON Schema (`src/config-schema.ts`)
-through the same shared Ajv instance (`src/ajv-instance.ts`) as `validate.ts`. `jiti` is still a
-new dependency — unavoidably so, since *something* has to execute a `.ts`/`.mjs`/`.cjs` config
-file at runtime, which is an orthogonal problem to schema validation.
 
 ### 2.2 Zero-config inference & artifact detection (aligned with Ora's index)
 
