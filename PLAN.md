@@ -40,7 +40,7 @@ by this plugin, and Ora's registry successfully crawls and indexes them.
   bundler-agnostic, keeps heavy work (subprocess evaluation, AST scans) out of the dev server,
   and gives CI/dry-run/review flows a natural entry point. The CLI reads the user's
   `next.config.*` itself for the values it needs (`basePath`, `distDir`, `output`), so nothing is
-  duplicated in `ora-catalog.config.ts` (the `next-sitemap` model).
+  duplicated in `ard.config.ts` (the `next-sitemap` model).
 
 ---
 
@@ -54,7 +54,7 @@ way — become discoverable to agents, generating an ai-catalog from what the ap
 - MCP servers configured the Next.js way (`mcp-handler`) → `application/mcp-server-card+json`.
 - A static `public/openapi.json` → `application/vnd.oai.openapi+json`.
 - A configurable way for the developer to declare where their **docs** and **skills** live (URLs in
-  `ora-catalog.config`) → `text/html` / `application/ai-skill+md` entries.
+  `ard.config`) → `text/html` / `application/ai-skill+md` entries.
 - **`llms.txt`** served the Next.js way — reference an existing one (a route handler at
   `app/llms.txt/route.ts`, or a static `public/llms.txt`), and scaffold a starter route handler when
   absent → `text/markdown`. (Idiomatic Next.js pattern; cheap.)
@@ -192,6 +192,9 @@ CommonJS `.js` config), `deploy-variants` (`.ts` config) — so the CLI's config
       `application/vnd.oai.openapi+json` entry (the Telnyx shape).
 - [x] `llms-txt` — app serving `/llms.txt` via a route handler (`app/llms.txt/route.ts`,
       `force-static`); detect-and-reference for a `text/markdown` entry.
+- [x] `config-overrides` — app with an `ard.config.ts` declaring entries plus denylist/allowlist
+      (added Phase 2.1); exercises config loading, config-declared entries, and the
+      denylist-with-allowlist-re-inclusion safety net end to end.
 
 **Done when:** spec vendored + validator green on a hand-written sample catalog; fixtures build;
 CI runs on PR; Ora has signed off on the open questions.
@@ -244,8 +247,10 @@ Goal: the `next-sitemap`-style production core. Stable regardless of spec churn.
 
 ### 2.1 Config
 
-- [x] `ora-catalog.config.ts` — typed config, validated via JSON Schema through the existing Ajv
-      instance (not Zod — see *decision* below), loaded via the CLI.
+- [x] `ard.config.{ts,mts,cts,mjs,js,cjs}` — typed config, validated via JSON Schema through the
+      existing Ajv instance (not Zod — see *decision* below), loaded via the CLI. Named `ard.config`
+      (Agentic Resource Discovery), not after this package or Ora — it's a file committed into the
+      consumer's repo, so it stays vendor-neutral (endgame: upstreaming into Next.js).
 - [x] Load the user's `next.config.*` (js/mjs/ts) and extract `basePath`, `distDir`, and `output`
       so users never repeat Next settings in plugin config. Handle both object and function-form
       configs; on load failure, warn and fall back to defaults (never crash over their config).
@@ -254,7 +259,7 @@ Goal: the `next-sitemap`-style production core. Stable regardless of spec churn.
 - [x] Test next-config loading against the `deploy-variants` and `monorepo` fixtures.
       (`test/fixtures-integration.test.ts`.)
 - [x] Build-time validation fails loudly with actionable messages on invalid config.
-      (`OraCatalogConfigError`, caught in `cli.ts` and reported without a stack trace.)
+      (`ArdConfigError`, caught in `cli.ts` and reported without a stack trace.)
 - [x] Config **overrides/extends** inferred entries; it never silently replaces them.
       (`src/entries.ts` `applyEntryOverrides` — merges by `identifier`, appends otherwise.)
 - [x] Denylist support, with a default-on denylist (`/api/auth/**`, `/api/webhooks/**`); allowlist
@@ -263,9 +268,9 @@ Goal: the `next-sitemap`-style production core. Stable regardless of spec churn.
 **Decision (2026-07-19, superseding this section's original "validated with Zod" wording):** this
 is build-time tooling, so dependency count matters (see *Core design decisions*). The package
 already needs a JSON Schema validator for the AI Catalog spec itself (`ajv`) — a second, different
-validator (`zod`) just for `ora-catalog.config` would be redundant, since Ajv validates any parsed
+validator (`zod`) just for `ard.config` would be redundant, since Ajv validates any parsed
 JS object regardless of whether it came from JSON or from executing a `.ts` file. So
-`ora-catalog.config` is validated by a small hand-written JSON Schema (`src/config-schema.ts`)
+`ard.config` is validated by a small hand-written JSON Schema (`src/config-schema.ts`)
 through the same shared Ajv instance (`src/ajv-instance.ts`) as `validate.ts`. `jiti` is still a
 new dependency — unavoidably so, since *something* has to execute a `.ts`/`.mjs`/`.cjs` config
 file at runtime, which is an orthogonal problem to schema validation.
@@ -282,7 +287,7 @@ already rewards. Zero-config, in rough priority order:
 - [ ] Detect a static **`public/openapi.json`** and reference its URL →
       `application/vnd.oai.openapi+json`. Details in Phase 3.
 - [ ] Emit **docs** and **skills** entries (`text/html` / `application/ai-skill+md`) from URLs the
-      developer **declares in `ora-catalog.config`**. Config-driven, not guessed — the developer knows
+      developer **declares in `ard.config`**. Config-driven, not guessed — the developer knows
       where their docs and skills live; the plugin doesn't spider for them.
 - [ ] Reference an existing **`llms.txt`** served the Next.js way — a route handler at
       `app/llms.txt/route.ts` (often `dynamic = 'force-static'`) or a static `public/llms.txt` →

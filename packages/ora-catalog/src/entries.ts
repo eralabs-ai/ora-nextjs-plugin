@@ -1,4 +1,4 @@
-import type { OraCatalogEntryOverride } from './config-schema.js';
+import type { ArdEntryOverride } from './config-schema.js';
 import type { CatalogEntry } from './types.js';
 
 export interface ApplyEntryOverridesResult {
@@ -17,7 +17,7 @@ export interface ApplyEntryOverridesResult {
  */
 export function applyEntryOverrides(
   inferred: readonly CatalogEntry[],
-  overrides: readonly OraCatalogEntryOverride[],
+  overrides: readonly ArdEntryOverride[],
 ): ApplyEntryOverridesResult {
   const entries = inferred.map((entry) => ({ ...entry }));
   const notes: string[] = [];

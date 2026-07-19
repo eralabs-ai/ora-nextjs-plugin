@@ -1,43 +1,39 @@
 import { createJiti } from 'jiti';
 
-import {
-  DEFAULT_DENYLIST,
-  type OraCatalogConfig,
-  type ResolvedOraCatalogConfig,
-} from './config-schema.js';
+import { DEFAULT_DENYLIST, type ArdConfig, type ResolvedArdConfig } from './config-schema.js';
 import { findConfigFile } from './find-config-file.js';
-import { formatConfigErrors, validateOraCatalogConfig } from './validate-config.js';
+import { formatConfigErrors, validateArdConfig } from './validate-config.js';
 
 /**
- * Thrown for a present-but-invalid `ora-catalog.config.*` — the CLI's "fail loudly" gate
- * (PLAN.md 2.1: "Build-time validation fails loudly with actionable messages on invalid
- * config."). Deliberately a distinct type so `runCli` can report it without a stack trace, the
- * same way it already handles bad CLI args.
+ * Thrown for a present-but-invalid `ard.config.*` — the CLI's "fail loudly" gate (PLAN.md 2.1:
+ * "Build-time validation fails loudly with actionable messages on invalid config."). Deliberately
+ * a distinct type so `runCli` can report it without a stack trace, the same way it already handles
+ * bad CLI args.
  */
-export class OraCatalogConfigError extends Error {
+export class ArdConfigError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = 'OraCatalogConfigError';
+    this.name = 'ArdConfigError';
   }
 }
 
-export interface LoadOraCatalogConfigResult {
-  config: ResolvedOraCatalogConfig;
+export interface LoadArdConfigResult {
+  config: ResolvedArdConfig;
   /** Absolute path of the config file that was loaded, or undefined when none was found. */
   path?: string;
 }
 
 /**
- * Finds and loads `ora-catalog.config.{ts,mts,cts,mjs,js,cjs}` from `cwd`, validates it against
- * this package's own schema, and returns it with every optional field defaulted.
+ * Finds and loads `ard.config.{ts,mts,cts,mjs,js,cjs}` from `cwd`, validates it against this
+ * package's own schema, and returns it with every optional field defaulted.
  *
  * A missing file is a normal, silent case (defaults apply, nothing to warn about). A file that
  * exists but fails to evaluate, or evaluates to something that doesn't match the schema, throws
- * `OraCatalogConfigError` — unlike `next-config.ts`'s warn-and-fall-back, this is the plugin's own
- * config surface, so an invalid one is this plugin's bug to report loudly, not paper over.
+ * `ArdConfigError` — unlike `next-config.ts`'s warn-and-fall-back, this is the plugin's own config
+ * surface, so an invalid one is this plugin's bug to report loudly, not paper over.
  */
-export async function loadOraCatalogConfig(cwd: string): Promise<LoadOraCatalogConfigResult> {
-  const path = findConfigFile(cwd, 'ora-catalog.config');
+export async function loadArdConfig(cwd: string): Promise<LoadArdConfigResult> {
+  const path = findConfigFile(cwd, 'ard.config');
   if (!path) {
     return { config: withDefaults({}) };
   }
@@ -54,18 +50,18 @@ export async function loadOraCatalogConfig(cwd: string): Promise<LoadOraCatalogC
     });
     raw = await jiti.import(path, { default: true });
   } catch (err) {
-    throw new OraCatalogConfigError(`Failed to load ${path}:\n  ${(err as Error).message}`);
+    throw new ArdConfigError(`Failed to load ${path}:\n  ${(err as Error).message}`);
   }
 
-  const result = validateOraCatalogConfig(raw);
+  const result = validateArdConfig(raw);
   if (!result.valid) {
-    throw new OraCatalogConfigError(`${path} is invalid:\n${formatConfigErrors(result.errors)}`);
+    throw new ArdConfigError(`${path} is invalid:\n${formatConfigErrors(result.errors)}`);
   }
 
-  return { config: withDefaults(raw as OraCatalogConfig), path };
+  return { config: withDefaults(raw as ArdConfig), path };
 }
 
-function withDefaults(config: OraCatalogConfig): ResolvedOraCatalogConfig {
+function withDefaults(config: ArdConfig): ResolvedArdConfig {
   return {
     denylist: config.denylist ?? [...DEFAULT_DENYLIST],
     allowlist: config.allowlist ?? [],

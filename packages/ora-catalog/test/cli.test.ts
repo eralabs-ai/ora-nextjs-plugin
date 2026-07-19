@@ -96,17 +96,13 @@ describe('runCli', () => {
     expect(parsed.entries).toEqual([]);
   });
 
-  it('exits 1 with an actionable message and writes nothing on an invalid ora-catalog.config', async () => {
-    writeFileSync(
-      join(dir, 'ora-catalog.config.mjs'),
-      'export default { denylist: 123 };\n',
-      'utf8',
-    );
+  it('exits 1 with an actionable message and writes nothing on an invalid ard.config', async () => {
+    writeFileSync(join(dir, 'ard.config.mjs'), 'export default { denylist: 123 };\n', 'utf8');
 
     const code = await runCli([], { ...io, cwd: dir });
 
     expect(code).toBe(1);
-    expect(stderr.some((l) => l.includes('ora-catalog.config'))).toBe(true);
+    expect(stderr.some((l) => l.includes('ard.config'))).toBe(true);
     expect(existsSync(join(dir, CATALOG_OUTPUT_PATH))).toBe(false);
   });
 

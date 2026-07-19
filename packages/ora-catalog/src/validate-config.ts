@@ -1,7 +1,7 @@
 import type { ValidateFunction } from 'ajv';
 
 import { ajv } from './ajv-instance.js';
-import { oraCatalogConfigSchema } from './config-schema.js';
+import { ardConfigSchema } from './config-schema.js';
 import {
   formatValidationErrors,
   toValidationError,
@@ -15,14 +15,14 @@ export interface ConfigValidationResult {
   errors: ConfigValidationError[];
 }
 
-const validateFn: ValidateFunction = ajv.compile(oraCatalogConfigSchema);
+const validateFn: ValidateFunction = ajv.compile(ardConfigSchema);
 
 /**
- * Validate a parsed `ora-catalog.config.*` module's default export against this package's own
- * config schema. This is the "build-time validation fails loudly" gate from PLAN.md 2.1 — an
- * invalid config must never be silently ignored or half-applied.
+ * Validate a parsed `ard.config.*` module's default export against this package's own config
+ * schema. This is the "build-time validation fails loudly" gate from PLAN.md 2.1 — an invalid
+ * config must never be silently ignored or half-applied.
  */
-export function validateOraCatalogConfig(json: unknown): ConfigValidationResult {
+export function validateArdConfig(json: unknown): ConfigValidationResult {
   const valid = validateFn(json) as boolean;
   if (valid) {
     return { valid: true, errors: [] };

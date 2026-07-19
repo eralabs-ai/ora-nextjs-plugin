@@ -31,6 +31,24 @@ describe('generateCatalog against the fixture corpus', () => {
   });
 });
 
+// Phase 2.1 end-to-end: the config-overrides fixture ships a real `ard.config.ts`, so this
+// exercises the whole config path (jiti load -> validate -> entry overrides -> denylist/allowlist)
+// against a committed fixture rather than a synthetic tmp dir.
+describe('generateCatalog with the config-overrides fixture', () => {
+  it('emits config-declared entries and applies denylist + allowlist', async () => {
+    const catalog = await generateCatalog({ cwd: `${fixturesDir}config-overrides` });
+    expect(validateCatalog(catalog).valid).toBe(true);
+
+    const ids = catalog.entries.map((entry) => entry.identifier);
+    expect(ids).toContain('urn:example:docs');
+    expect(ids).toContain('urn:example:skills');
+    // Denylisted by default (/api/auth/**) but re-included via the config's allowlist.
+    expect(ids).toContain('urn:example:auth-status');
+    // Denylisted by default and NOT allowlisted — dropped even though the config declares it.
+    expect(ids).not.toContain('urn:example:auth-internal');
+  });
+});
+
 // PLAN.md 2.1: "Test next-config loading against the deploy-variants and monorepo fixtures."
 describe('loadNextConfig against the fixture corpus', () => {
   it('extracts basePath and output from the deploy-variants TypeScript next.config.ts', async () => {

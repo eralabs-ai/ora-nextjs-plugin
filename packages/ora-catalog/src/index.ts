@@ -18,21 +18,17 @@ export { readSiteMetadata, type SiteMetadata } from './site-metadata.js';
 export { runCli, type CliIO } from './cli.js';
 
 export {
-  oraCatalogConfigSchema,
+  ardConfigSchema,
   DEFAULT_DENYLIST,
-  type OraCatalogConfig,
-  type OraCatalogEntryOverride,
-  type ResolvedOraCatalogConfig,
+  type ArdConfig,
+  type ArdEntryOverride,
+  type ResolvedArdConfig,
 } from './config-schema.js';
 
-export {
-  loadOraCatalogConfig,
-  OraCatalogConfigError,
-  type LoadOraCatalogConfigResult,
-} from './config.js';
+export { loadArdConfig, ArdConfigError, type LoadArdConfigResult } from './config.js';
 
 export {
-  validateOraCatalogConfig,
+  validateArdConfig,
   formatConfigErrors,
   type ConfigValidationResult,
   type ConfigValidationError,

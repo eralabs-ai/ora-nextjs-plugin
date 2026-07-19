@@ -7,7 +7,7 @@ discover the site's capabilities.
 > **Status:** pre-release, under active development. See [`PLAN.md`](./PLAN.md) for the phased
 > roadmap. This repo currently implements Phase 0 groundwork (spec + validator, workspace, fixture
 > corpus), the Phase 1 walking skeleton (CLI that emits a minimal, spec-valid, site-metadata-only
-> catalog as a `postbuild` step), and Phase 2.1 (config: `ora-catalog.config.*`, `next.config.*`
+> catalog as a `postbuild` step), and Phase 2.1 (config: `ard.config.*`, `next.config.*`
 > reading, denylist/allowlist, entry overrides). Zero-config artifact detection (MCP, OpenAPI,
 > docs/skills, llms.txt — Phase 2.2) is next. Deploying a fixture to Vercel and running it through
 > Ora's AgentJourney is also still pending — see `PLAN.md` Phase 1.
@@ -62,19 +62,21 @@ npm install --save-dev ora-catalog
 ```
 
 This writes `public/.well-known/ai-catalog.json` with site-level metadata (`displayName` /
-`description` from `package.json`) plus any entries you declare in `ora-catalog.config` — validated
+`description` from `package.json`) plus any entries you declare in `ard.config` — validated
 against the AI Catalog spec before it's written; the CLI refuses to write (and exits non-zero) if
 generation ever produces an invalid catalog. Zero-config artifact _detection_ (MCP servers,
 `openapi.json`, `llms.txt`, docs/skills) lands in Phase 2.2 — see `PLAN.md`.
 
-### Config (`ora-catalog.config.{ts,js,mjs,cjs}`)
+### Config (`ard.config.{ts,js,mjs,cjs}`)
 
-Optional. Loaded from your project root; `.ts`/`.mjs`/`.cjs`/`.js` all work.
+Optional. Loaded from your project root; `.ts`/`.mjs`/`.cjs`/`.js` all work. (Named `ard.config`
+after the Agentic Resource Discovery spec rather than after this package — it's a file you commit,
+so it stays vendor-neutral.)
 
 ```ts
-import type { OraCatalogConfig } from 'ora-catalog';
+import type { ArdConfig } from 'ora-catalog';
 
-const config: OraCatalogConfig = {
+const config: ArdConfig = {
   // Glob patterns that must never be published, even once zero-config detection (Phase 2.2)
   // would otherwise infer an entry for them. `/api/auth/**` and `/api/webhooks/**` are denied
   // by default; list them again here only if you also want an `allowlist` exception below.
@@ -95,7 +97,7 @@ specific, actionable message — it is never silently ignored or partially appli
 ### `next.config` reading
 
 The CLI reads your `next.config.{ts,js,mjs,cjs}` (object or function form) to extract `basePath`,
-`distDir`, and `output`, so you never repeat them in `ora-catalog.config`. Unlike the plugin's own
+`distDir`, and `output`, so you never repeat them in `ard.config`. Unlike the plugin's own
 config above, a `next.config` that fails to load only warns and falls back to defaults — it's not
 this plugin's place to fail your build over your Next.js config.
 

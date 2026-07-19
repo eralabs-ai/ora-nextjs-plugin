@@ -1,4 +1,4 @@
-import { OraCatalogConfigError } from './config.js';
+import { ArdConfigError } from './config.js';
 import { generateCatalog } from './generate.js';
 import { writeCatalog } from './write.js';
 
@@ -55,8 +55,8 @@ function parseArgs(argv: string[]): ParsedArgs {
 
 /**
  * Runs the CLI end to end and returns a process exit code. Never throws for expected failure
- * modes (bad args, invalid catalog, invalid `ora-catalog.config`) — those are reported via
- * `stderr` and a non-zero code. Only an unexpected environment failure (e.g. an unwritable disk)
+ * modes (bad args, invalid catalog, invalid `ard.config`) — those are reported via `stderr` and a
+ * non-zero code. Only an unexpected environment failure (e.g. an unwritable disk)
  * propagates as a thrown error, since the bin entry point is better placed to decide how to
  * present that.
  */
@@ -85,7 +85,7 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   try {
     catalog = await generateCatalog({ cwd, onWarning: (message) => warnings.push(message) });
   } catch (err) {
-    if (err instanceof OraCatalogConfigError) {
+    if (err instanceof ArdConfigError) {
       stderr(`[ora-catalog] ${err.message}`);
       return 1;
     }
