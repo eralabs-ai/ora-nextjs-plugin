@@ -4,13 +4,13 @@ Generates a spec-valid [`ai-catalog.json`](https://github.com/Agent-Card/ai-cata
 Resource Discovery / AI Catalog) from a Next.js app at build time, so agents and registries can
 discover the site's capabilities.
 
-> **Status:** pre-release, under active development. See [`PLAN.md`](./PLAN.md) for the phased
+> **Status:** pre-release, under active development. See [`docs-internal/PLAN.md`](./docs-internal/PLAN.md) for the phased
 > roadmap. This repo currently implements Phase 0 groundwork (spec + validator, workspace, fixture
 > corpus), the Phase 1 walking skeleton (CLI that emits a minimal, spec-valid, site-metadata-only
 > catalog as a `postbuild` step), Phase 2.1 (config: `ard.config.*`, `next.config.*` reading,
 > denylist/allowlist, entry overrides), and Phase 2.2 (zero-config artifact detection: MCP servers,
 > `public/openapi.json`, `llms.txt`, config-declared docs/skills). Deploying a fixture to Vercel and
-> running it through Ora's AgentJourney is still pending — see `PLAN.md` Phase 1.
+> running it through Ora's AgentJourney is still pending — see `docs-internal/PLAN.md` Phase 1.
 
 ## Design posture
 
@@ -34,7 +34,7 @@ This matrix is a public contract from day one. Anything outside it is out of sco
 | Monorepo        | Turborepo: **detect-and-warn** for v1               | Full nested-workspace resolution |
 
 > Some matrix rows (Pages Router exclusion, monorepo support level) are pending final confirmation
-> with Ora — see the open-questions table in `PLAN.md`.
+> with Ora — see the open-questions table in `docs-internal/PLAN.md`.
 
 ## Repository layout
 
@@ -76,7 +76,7 @@ This writes `public/.well-known/ai-catalog.json` with:
 Every entry above is validated against the AI Catalog spec before writing; the CLI refuses to
 write (and exits non-zero) if generation ever produces an invalid catalog. The plugin only ever
 **detects and references** — it never invents a per-route entry or synthesizes a doc from route
-handlers (see `PLAN.md`'s _Scope_ and _Core design decisions_).
+handlers (see `docs-internal/PLAN.md`'s _Scope_ and _Core design decisions_).
 
 **Absolute URLs need a known site origin.** The spec requires every entry's `url` to be an
 absolute URI, so a detector skips emitting its entry (with a warning) unless it can resolve one —
