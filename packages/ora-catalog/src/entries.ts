@@ -10,10 +10,10 @@ export interface ApplyEntryOverridesResult {
 /**
  * Applies config-declared entry overrides over a set of inferred entries.
  *
- * PLAN.md 2.1: "Config overrides/extends inferred entries; it never silently replaces them." So:
- * an override whose `identifier` matches an inferred entry is shallow-merged into it (override
- * fields win; fields it doesn't mention are kept from the inferred entry) — it never removes an
- * inferred entry outright. An override with no matching `identifier` is appended as a new entry.
+ * Config overrides/extends inferred entries; it never silently replaces them. So: an override
+ * whose `identifier` matches an inferred entry is shallow-merged into it (override fields win;
+ * fields it doesn't mention are kept from the inferred entry) — it never removes an inferred
+ * entry outright. An override with no matching `identifier` is appended as a new entry.
  */
 export function applyEntryOverrides(
   inferred: readonly CatalogEntry[],

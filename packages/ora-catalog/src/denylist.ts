@@ -33,8 +33,8 @@ export function matchesAnyGlob(path: string, patterns: readonly string[]): boole
 
 /**
  * True if `path` should be excluded: it matches the denylist and isn't re-included by the
- * allowlist. Allowlist always wins over denylist — PLAN.md 2.1: "Denylist support, with a
- * default-on denylist ...; allowlist to re-include."
+ * allowlist. Allowlist always wins over denylist — a default-on denylist, with allowlist to
+ * re-include.
  */
 export function isPathDenied(
   path: string,

@@ -86,9 +86,14 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   const cwd = resolve(args.cwd ?? io.cwd ?? process.cwd());
 
   const warnings: string[] = [];
-  let catalog;
+  const recommendations: string[] = [];
+  let generated;
   try {
-    catalog = await generateCatalog({ cwd, onWarning: (message) => warnings.push(message) });
+    generated = await generateCatalog({
+      cwd,
+      onWarning: (message) => warnings.push(message),
+      onRecommendation: (message) => recommendations.push(message),
+    });
   } catch (err) {
     if (err instanceof ArdConfigError) {
       stderr(`[ora-catalog] ${err.message}`);
@@ -97,9 +102,14 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     throw err;
   }
 
+  const { catalog, emit } = generated;
+
   for (const warning of warnings) stdout(`[ora-catalog] ⚠ ${warning}`);
 
-  const result = writeCatalog(cwd, catalog);
+  const result = writeCatalog(cwd, catalog, {
+    target: emit,
+    warn: (message) => stdout(`[ora-catalog] ⚠ ${message}`),
+  });
 
   if (!result.ok) {
     stderr('[ora-catalog] Generated catalog failed spec validation — refusing to write it:');
@@ -112,5 +122,11 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
 
   stdout(`[ora-catalog] ✓ wrote ${result.path}`);
   stdout(`[ora-catalog] ✓ ${catalog.entries.length} entries referenced`);
+
+  if (recommendations.length > 0) {
+    stdout('[ora-catalog] Recommendations to improve agent-readiness:');
+    for (const recommendation of recommendations) stdout(`[ora-catalog]   → ${recommendation}`);
+  }
+
   return 0;
 }

@@ -22,7 +22,7 @@ interface OpenApiDocShape {
 }
 
 /**
- * Detect-and-reference for a static `public/openapi.json` (PLAN.md Phase 3.1). Never synthesizes
+ * Detect-and-reference for a static `public/openapi.json`. Never synthesizes
  * or regenerates a doc from route handlers — it only references one the app already produces, and
  * only once it's confirmed to actually parse as an OpenAPI 3.x document. A missing, unparseable,
  * or unrecognized doc yields no entry at all (never a guess, never a build failure).

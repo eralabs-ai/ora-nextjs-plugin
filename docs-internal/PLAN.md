@@ -397,29 +397,45 @@ Precision over recall, applied to the plugin's own output, not just to what it d
 
 ### 2.4 Emission targets
 
-- [ ] Static file into `public/.well-known/` (default).
-- [ ] Alternative: generate a route handler (`app/.well-known/ai-catalog.json/route.ts`) for
-      `basePath`/proxy setups — also the future path to dynamic catalogs.
-- [ ] **Spec-blessed alternate discovery mechanisms (ARD §6.1)** — the in-spec fix for the Phase 1
+- [x] Static file into `public/.well-known/` (default). (`src/write.ts` — the Phase 1 target.)
+- [x] Alternative: generate a route handler (`app/.well-known/ai-catalog.json/route.{ts,js}`) for
+      `basePath`/proxy setups — also the future path to dynamic catalogs. Opt in via `ard.config`'s
+      new **`emit: 'route'`** (default `'static'`); the validated catalog is embedded as a
+      `force-static` response. (`src/write.ts` `writeRouteHandler`.) **Finding:** a route handler is
+      *also* subject to `basePath`, so it is not itself the `basePath` fix — the §6.1 discovery
+      pointer below is. `.ts`/`.js` mirrors the project; falls back to the static target (with a
+      warning) when there's no App Router dir.
+- [x] **Spec-blessed alternate discovery mechanisms (ARD §6.1)** — the in-spec fix for the Phase 1
       `basePath` finding (catalog serves under the prefix, 404s at the conventional well-known
-      path): emit/recommend an HTML `<link rel="ai-catalog" href="...">` tag (root layout) and/or
-      a robots.txt `Agentmap:` directive (Next's `app/robots.ts`) pointing at wherever the catalog
-      actually lives. DNS SRV-style records are also in §6.1 but are out of the plugin's reach —
-      document only.
-- [ ] **robots.txt — detect-and-recommend (scored by Ora: `robots-ai-policy-quality`).** Detect an
-      existing `public/robots.txt` or `app/robots.ts`; warn if it blocks the agent user-agents the
-      site wants to reach (Ora's crawler first) and print the exact `Allow` lines to add — scoped to
-      specific user-agents, **never `User-agent: *`**; recommend the catalog pointer. Auto-write only
-      when absent, opt-in. Never unblock training scrapers on the owner's behalf. (`MetadataRoute.Robots`
-      supports `rules` but has no field for the custom pointer directive — recommend that line for
-      `app/robots.ts`, only auto-write it into a static `public/robots.txt`.)
-- [ ] **sitemap.xml — detect + warn-if-absent (scored by Ora: `sitemap`).** Detect `app/sitemap.ts` /
-      `public/sitemap.xml`; if absent, warn and recommend `next-sitemap`. **Never reimplement** — it
-      is a solved, idiomatic Next.js concern. Ensure robots.txt references it.
-- [ ] **agents.md — detect-and-recommend (scored by Ora).** Detect an existing `public/agents.md`; if
-      absent, recommend one. Content (the when-to-use / when-NOT-to-use guidance) is authored by the
-      companion skill (Phase 6), not guessed by the plugin.
-- [ ] Fixture + test for each target, including the `deploy-variants` fixture.
+      path): recommend an HTML `<link rel="ai-catalog" href="...">` tag (root layout) and a
+      robots.txt `Agentmap:` directive pointing at wherever the catalog actually lives. Emitted only
+      when a `basePath` is set (no prefix ⇒ already at the conventional path ⇒ no pointer needed).
+      (`src/discovery.ts`, surfaced via the new recommendation channel.) DNS SRV-style records are
+      also in §6.1 but are out of the plugin's reach — document only.
+- [x] **robots.txt — detect-and-recommend (scored by Ora: `robots-ai-policy-quality`).** Detect an
+      existing `public/robots.txt` or `app/robots.ts`; recommend Allow rules scoped to specific
+      user-agents, **never `User-agent: *`**, plus the `Sitemap:` / `Agentmap:` pointers; when absent,
+      recommend adding one. Never unblocks scrapers on the owner's behalf. (`src/detect-robots.ts`.)
+      **Deviation:** recommend-only for now — no auto-write. The exact `Allow` token depends on Ora's
+      crawler user-agent (open question #17, still pending), so writing a *guessed* policy would
+      violate precision-over-recall; the opt-in auto-write is deferred until #17 resolves. Also noted:
+      `MetadataRoute.Robots` (`app/robots.ts`) has no field for the `Agentmap:` pointer, so that line
+      is recommended for a static `public/robots.txt`.
+- [x] **sitemap.xml — detect + recommend (scored by Ora: `sitemap`).** Detect `app/sitemap.ts` /
+      `public/sitemap.xml`; when absent, recommend `next-sitemap` (or `app/sitemap.ts`) and reference
+      it from robots.txt. **Never reimplements** — a solved, idiomatic Next.js concern.
+      (`src/detect-sitemap.ts`. The plan said "warn-if-absent"; implemented on the advisory
+      recommendation channel alongside robots/agents.md, so all three read as one consistent block.)
+- [x] **agents.md — detect-and-recommend (scored by Ora).** Detect an existing `public/agents.md` (or
+      an App Router `agents.md/route.*`); when absent, recommend one. Content (the when-to-use /
+      when-NOT-to-use guidance) is authored by the companion skill (Phase 6), never guessed.
+      (`src/detect-agents-md.ts`.)
+- [x] Fixture + test for each target. Unit tests per module (`detect-robots`/`detect-sitemap`/
+      `detect-agents-md`/`discovery`, and the `'route'` target in `write.test.ts`), generate-level
+      recommendation + `emit` tests, and a new **`discovery` fixture** (ships robots.txt + a
+      `sitemap.ts` + agents.md, exercised through a real `next build`). Live serving of the route
+      target under `.well-known` is only verifiable on a real deploy — folded into the Phase 1 / 3.5
+      Vercel step, same as the other deploy-only checks.
 
 ### 2.5 Drift detection (fold in here — it's nearly free)
 

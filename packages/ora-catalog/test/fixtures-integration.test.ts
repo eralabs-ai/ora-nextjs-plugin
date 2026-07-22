@@ -16,7 +16,7 @@ describe('generateCatalog against the fixture corpus', () => {
   it.each(['bare', 'bare-js', 'deploy-variants'])(
     'produces a spec-valid catalog for %s',
     async (name) => {
-      const catalog = await generateCatalog({ cwd: `${fixturesDir}${name}` });
+      const { catalog } = await generateCatalog({ cwd: `${fixturesDir}${name}` });
       expect(validateCatalog(catalog).valid).toBe(true);
       expect(validateCatalogArd(catalog).valid).toBe(true);
       expect(catalog.host?.displayName).toBeTruthy();
@@ -38,7 +38,7 @@ describe('generateCatalog against the fixture corpus', () => {
 // against a committed fixture rather than a synthetic tmp dir.
 describe('generateCatalog with the config-overrides fixture', () => {
   it('emits config-declared entries and applies denylist + allowlist', async () => {
-    const catalog = await generateCatalog({ cwd: `${fixturesDir}config-overrides` });
+    const { catalog } = await generateCatalog({ cwd: `${fixturesDir}config-overrides` });
     expect(validateCatalog(catalog).valid).toBe(true);
     expect(validateCatalogArd(catalog).valid).toBe(true);
 
@@ -58,7 +58,7 @@ describe('generateCatalog with the config-overrides fixture', () => {
 // (`false`) here — these fixtures must never gain files as a side effect of running this suite.
 describe('generateCatalog zero-config detection against the fixture corpus', () => {
   it('detects the mcp-handler mount in the mcp-adapter fixture', async () => {
-    const catalog = await generateCatalog({ cwd: `${fixturesDir}mcp-adapter` });
+    const { catalog } = await generateCatalog({ cwd: `${fixturesDir}mcp-adapter` });
     expect(validateCatalogArd(catalog).valid).toBe(true);
 
     const entry = catalog.entries.find(
@@ -72,7 +72,7 @@ describe('generateCatalog zero-config detection against the fixture corpus', () 
   });
 
   it('detects public/openapi.json in the openapi fixture', async () => {
-    const catalog = await generateCatalog({ cwd: `${fixturesDir}openapi` });
+    const { catalog } = await generateCatalog({ cwd: `${fixturesDir}openapi` });
     expect(validateCatalogArd(catalog).valid).toBe(true);
 
     const entry = catalog.entries.find(
@@ -85,7 +85,7 @@ describe('generateCatalog zero-config detection against the fixture corpus', () 
   });
 
   it('detects app/llms.txt/route.ts in the llms-txt fixture', async () => {
-    const catalog = await generateCatalog({ cwd: `${fixturesDir}llms-txt` });
+    const { catalog } = await generateCatalog({ cwd: `${fixturesDir}llms-txt` });
     expect(validateCatalogArd(catalog).valid).toBe(true);
 
     const entry = catalog.entries.find(
@@ -107,7 +107,7 @@ describe('generateCatalog zero-config detection against the fixture corpus', () 
   });
 });
 
-// PLAN.md 2.1: "Test next-config loading against the deploy-variants and monorepo fixtures."
+// Test next-config loading against the deploy-variants and monorepo fixtures.
 describe('loadNextConfig against the fixture corpus', () => {
   it('extracts basePath and output from the deploy-variants TypeScript next.config.ts', async () => {
     const result = await loadNextConfig(`${fixturesDir}deploy-variants`);
