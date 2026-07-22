@@ -456,6 +456,94 @@ Precision over recall, applied to the plugin's own output, not just to what it d
 **Done when:** all fixtures generate validated, snapshotted catalogs through both emission targets;
 drift diff runs in this repo's own CI.
 
+### 2.7 Discovery-signal expansion — next up (added 2026-07-22)
+
+Grounded in a 2026-07-22 call with Ora plus research (JSON-LD / OpenAPI / MCP server-card). These
+widen the plugin's detect-and-recommend/emit surface to more artifacts Ora scores. Precision over
+recall is unchanged: the plugin still only detects/recommends/emits what is unambiguous, and never
+authors judgment content. **This is the immediate work.**
+
+- [ ] **OpenAPI — recommend when absent (extends Phase 3.1).** `detect-openapi.ts` is warn-only today
+      (it references a committed `public/openapi.json`); add a recommendation on the advisory channel
+      when no doc is present, mirroring robots/sitemap/agents.md. This is the highest-density single
+      fix: one doc feeds `openapi-spec` (Discovery) **and** several Usability checks (`public-api-docs`,
+      `api-schema-analysis`, `response-schema-coverage`, `function-calling-compat`). **Recommend, never
+      build** — name the idiomatic Next.js path (`zod-openapi` / `@asteasolutions/zod-to-openapi` if the
+      app validates with Zod; else `next-swagger-doc` / `next-openapi-gen`). Add a second message when a
+      doc exists but declares no `components.securitySchemes` (nudge toward the auth declaration Phase
+      2.8 reads). Telnyx (A+) confirms the pattern: a full committed OpenAPI doc.
+- [ ] **JSON-LD — detect + recommend (new `detect-json-ld.ts`).** Ora scores structured data:
+      `json-ld`, `org-schema-completeness`, `schema-type-breadth`, `json-ld-entity-linking`,
+      `speakable-content` (Discovery). Telnyx ships 7 JSON-LD blocks incl. an `Organization` with a
+      10-URL `sameAs` (LinkedIn/GitHub/Crunchbase/npm/socials) — `sameAs` is the entity-disambiguation
+      signal registries value. Text-scan `app/**/{layout,page}.{tsx,jsx}` for `application/ld+json`;
+      recommend adding an `Organization` block with `sameAs` when absent. **Detect-and-recommend only:**
+      JSON-LD lives in rendered HTML (`<script type="application/ld+json">` in the layout), not a file
+      the plugin emits, and the scoring fields (`sameAs`, address, logo, extra types) are
+      external/judgment → the companion skill authors them (Phase 6). An opt-in scaffold of a minimal
+      `Organization` component (name/url/description from `package.json`/`siteUrl`, empty `sameAs` +
+      TODO) is possible but low-priority — the weakest fit, since the valuable fields aren't derivable.
+- [ ] **MCP — generate `/.well-known/mcp/server-card.json`.** Empirical finding (2026-07-22 Ora scan of
+      a deployed `mcp-handler` server): a working MCP server moved the score **0 points** because Ora
+      discovers MCP via the well-known **server card**, not the ARD catalog entry — `mcp-server-card`
+      ("No MCP server card found at /.well-known/mcp/server-card.json") and `mcp-well-known-discovery`
+      stayed failing while `ard-catalog` passed. So the plugin must *also* emit the card. Generate the
+      **SEP-1649 / PR-2127** server card (media type `application/mcp-server-card+json`) from the mount
+      the plugin already detects: `serverInfo` (from `package.json`), `transport`
+      (`streamable-http`, endpoint = mount URL), `tools` (names — plus per-tool schema/description only
+      when statically extractable, else `"dynamic"`). Optional compatibility alias at
+      `/.well-known/mcp.json` (SEP-1649's original path). Emit as a static file or route handler per the
+      existing `emit` target logic, governed by the same gating as catalog entries. **Auth on the card
+      is deferred to Phase 2.8** — for now emit only statically-provable fields and **omit** the
+      `authentication` block (never assert "open"). This is **not** issue
+      `agentic-community/mcp-gateway-registry#119` (that proposes a different vendor's multi-server
+      `/.well-known/mcp-servers` registry format — confirm the intended shape with Ora; see open
+      questions).
+- [ ] Fixture + tests for each: OpenAPI-absent recommendation, JSON-LD detect/recommend, and a
+      server-card emission fixture. Re-scan a deployed MCP fixture to confirm the `mcp-*` checks flip
+      (the 0-point result becomes a measured win).
+
+**Done when:** the CLI recommends OpenAPI when absent, detects+recommends JSON-LD, and emits a valid
+`/.well-known/mcp/server-card.json` that Ora's `mcp-server-card`/`mcp-well-known-discovery` checks
+accept on a deployed fixture.
+
+### 2.8 Gating & auth — deferred, but before the Phase 3.5 canary publish (added 2026-07-22)
+
+Out of scope for the first demo, **but must be resolved before any public/canary publish**: emitting a
+catalog entry or server-card that advertises a *gated* surface as open is the exact precision-over-recall
+failure this project exists to prevent (agents hit blind 401s; a token prompt could leak into a public
+crawl). Design converged 2026-07-22; grounded in research on OpenAPI `securitySchemes`, MCP SEP-1649/2127,
+and how Clerk actually gates routes.
+
+- [ ] **Detection-first, per-kind — never infer, never guess.** Each artifact carries its own native
+      auth-declaration; read the right one per kind:
+      - MCP → detect the `withMcpAuth` / `verifyToken` wrapper and/or a served
+        `/.well-known/oauth-protected-resource` (RFC 9728) route → mark gated; read `withMcpAuth`'s
+        `resourceMetadataPath` (a literal) to cross-link it in the server card. (Clerk's official MCP
+        path uses exactly `withMcpAuth` + RFC 9728, so this is ecosystem-idiomatic.)
+      - OpenAPI/REST → read `components.securitySchemes` + the effective `security` from the committed
+        doc → a compact, **secret-free** `auth` descriptor (`apiKey` / `http-bearer` / `oauth2` /
+        `openIdConnect`). Emit only URLs/names/scope-keys; a **secret-guard** rejects token/key-looking
+        values; skip `description` prose.
+- [ ] **Safe default:** a detected auth signal → the artifact is not advertised as open. **Never infer
+      "open" from the absence of a signal** (auth may sit in middleware, a reverse proxy, a WAF, or
+      Vercel Deployment Protection — none statically visible).
+- [ ] **Escape hatch:** optional `isGated?: (target: { kind: 'mcp' | 'openapi' | 'entry'; path: string;
+      tools?: string[] }) => boolean` in `ard.config` for infra auth the plugin can't detect. Boolean,
+      whole-artifact for v1. **Not** built on reusing Clerk's `createRouteMatcher` — that API is
+      deprecated and has a bypass CVE (GHSA-vqx2-fgx2-5wq9), and Clerk differentiates MCP-vs-API by auth
+      *mechanism* (OAuth bearer vs session cookie), not by a shared path matcher.
+- [ ] **Backstop = review-before-publish (Phase 2.3).** Surface the exposure surface and require `--yes`
+      in CI before writing; flag `withMcpAuth`-vs-`isGated` disagreements. **This means Phase 2.3 must
+      also land before Phase 3.5.**
+- [ ] **Config cleanup:** `isGated` supersedes `denylist`/`allowlist` (a matcher subsumes both; there is
+      no over-exclusion for an allowlist to undo). Breaking pre-1.0 config change → migrate the
+      `config-overrides` fixture + README. No agentic-auth descriptor modeling in v1 — deferred until
+      agentic auth is common.
+
+**Done when:** no artifact (catalog entry or server-card) for a detected/declared-gated surface is ever
+advertised as open; review-before-publish gates the ambiguous case; and this lands before the canary.
+
 ---
 
 ## Phase 3 — OpenAPI: reference the app's `public/openapi.json`
@@ -630,6 +718,9 @@ Goal: prove the output is *usable by agents*, not just spec-valid, and lock in c
 | 16 | Once the skill's `api-catalog`→`ai-catalog` bug is fixed, do the **registry crawler and the score scanner** both key on ARD `/.well-known/ai-catalog.json`? | Confirm they agree — the plugin's headline output depends on it | _pending (Ora aware of the skill bug 2026-07-22, fix expected)_ |
 | 17 | What `User-agent` token does **Ora's crawler** send? | Needed to detect a blocking robots.txt and to author the scoped `Allow` recommendation | _pending_ |
 | 18 | Does the plugin/companion skill scope include `agents.md` content and the robots.txt policy, or does Ora expect those from its own `agent-ready-website` skill? | Plugin detects/scaffolds structure; companion skill authors content and defers to Ora's skill for the scan loop | _pending_ |
+| 19 | Confirm the **MCP server-card path/schema** Ora's `mcp-server-card` check expects: SEP-1649/PR-2127 `/.well-known/mcp/server-card.json` (media type `application/mcp-server-card+json`)? The contact cited `agentic-community/mcp-gateway-registry#119`, but that issue is a *different* vendor's multi-server `/.well-known/mcp-servers` registry format — likely a miscitation. Also: should we emit the `/.well-known/mcp.json` alias (SEP-1649's original name)? | Build the SEP-1649/2127 server card (matches the path Ora already probes); alias `mcp.json` if it helps clients | _pending (raise 2026-07-22 findings)_ |
+| 20 | Should Ora's **MCP discovery consume the ARD catalog's `application/mcp-server-card+json` entry**? Empirically (2026-07-22 scan) Ora validates the catalog (`ard-catalog: pass`) but ignores it for MCP discovery — it only reads `/.well-known/mcp/server-card.json`, so a real MCP server scored **0**. If discovery consumed the catalog entry, the plugin's existing output would already work. | Ideally yes — otherwise the plugin must emit the well-known card too (Phase 2.7) | _pending_ |
+| 21 | Which **auth shape** does Ora reward, and where does it read it — OpenAPI `securitySchemes`, the server-card `authentication` block, or RFC 9728 `/.well-known/oauth-protected-resource`? Drives Phase 2.8. | Read the native per-kind declaration (securitySchemes for REST, `withMcpAuth`+RFC 9728 for MCP); confirm Ora's weighting | _pending_ |
 
 ---
 
