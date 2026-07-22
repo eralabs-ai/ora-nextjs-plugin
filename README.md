@@ -8,9 +8,11 @@ discover the site's capabilities.
 > roadmap. This repo currently implements Phase 0 groundwork (spec + validator, workspace, fixture
 > corpus), the Phase 1 walking skeleton (CLI that emits a minimal, spec-valid, site-metadata-only
 > catalog as a `postbuild` step), Phase 2.1 (config: `ard.config.*`, `next.config.*` reading,
-> denylist/allowlist, entry overrides), and Phase 2.2 (zero-config artifact detection: MCP servers,
-> `public/openapi.json`, `llms.txt`, config-declared docs/skills). Deploying a fixture to Vercel and
-> running it through Ora's AgentJourney is still pending — see `docs-internal/PLAN.md` Phase 1.
+> denylist/allowlist, entry overrides), Phase 2.2 (zero-config artifact detection: MCP servers,
+> `public/openapi.json`, `llms.txt`, config-declared docs/skills), and Phase 2.4 (emission targets —
+> static file or an `emit: 'route'` handler; ARD §6.1 discovery-pointer recommendations; and
+> detect-and-recommend for `robots.txt` / `sitemap.xml` / `agents.md`). Deploying a fixture to Vercel
+> and running it through Ora's AgentJourney is still pending — see `docs-internal/PLAN.md` Phase 1.
 
 ## Design posture
 
@@ -105,6 +107,10 @@ const config: ArdConfig = {
   // This file is real code, so reading it from your own env var works too:
   //   siteUrl: process.env.SITE_URL,
   siteUrl: 'https://example.com',
+  // Where to write the catalog. 'static' (default) writes public/.well-known/ai-catalog.json;
+  // 'route' writes an App Router handler at app/.well-known/ai-catalog.json/route.ts instead
+  // (for proxy setups and future dynamic catalogs). See the basePath note below.
+  emit: 'static',
   // Scaffold a starter app/llms.txt/route.ts when neither it nor public/llms.txt exists.
   // Opt-in (defaults to false) — it writes into your source tree, not just the catalog file.
   scaffoldLlmsTxt: true,
@@ -133,10 +139,21 @@ The CLI reads your `next.config.{ts,js,mjs,cjs}` (object or function form) to ex
 config above, a `next.config` that fails to load only warns and falls back to defaults — it's not
 this plugin's place to fail your build over your Next.js config.
 
-**Known limitation:** if your app sets `basePath`, the static file above is served under that
-prefix (e.g. `/app/.well-known/ai-catalog.json`), not at the domain root crawlers expect — the CLI
-warns about this on every build. A route-handler emission target that isn't affected by `basePath`
-is planned for Phase 2.4.
+**`basePath` and where the catalog is served.** If your app sets `basePath`, the catalog is served
+under that prefix (e.g. `/app/.well-known/ai-catalog.json`), not at the domain root crawlers probe.
+Switching `emit` to `'route'` does **not** change this — an App Router route handler is subject to
+`basePath` too. The in-spec fix (ARD §6.1) is to point crawlers at wherever the catalog actually
+lives: on a `basePath` build the CLI prints a recommendation to add an HTML
+`<link rel="ai-catalog" href="...">` tag to your root layout and an `Agentmap:` line to your
+`robots.txt`.
+
+## Discovery recommendations
+
+Beyond the catalog, the CLI detects the discovery/access artifacts agent registries score and prints
+advisory recommendations (never catalog entries, never a build failure): whether you have a
+`robots.txt` with agent-scoped `Allow` rules, a `sitemap` (it recommends `next-sitemap` /
+`app/sitemap.ts` — it never generates one itself), and an `agents.md`. These are recommendations
+only; you decide what to act on.
 
 ## Development
 

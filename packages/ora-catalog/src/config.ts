@@ -5,10 +5,10 @@ import { findConfigFile } from './find-config-file.js';
 import { formatConfigErrors, validateArdConfig } from './validate-config.js';
 
 /**
- * Thrown for a present-but-invalid `ard.config.*` — the CLI's "fail loudly" gate (PLAN.md 2.1:
- * "Build-time validation fails loudly with actionable messages on invalid config."). Deliberately
- * a distinct type so `runCli` can report it without a stack trace, the same way it already handles
- * bad CLI args.
+ * Thrown for a present-but-invalid `ard.config.*` — the CLI's "fail loudly" gate: build-time
+ * validation fails loudly with actionable messages on invalid config. Deliberately a distinct
+ * type so `runCli` can report it without a stack trace, the same way it already handles bad CLI
+ * args.
  */
 export class ArdConfigError extends Error {
   constructor(message: string) {
@@ -64,6 +64,7 @@ export async function loadArdConfig(cwd: string): Promise<LoadArdConfigResult> {
 function withDefaults(config: ArdConfig): ResolvedArdConfig {
   return {
     siteUrl: config.siteUrl,
+    emit: config.emit ?? 'static',
     scaffoldLlmsTxt: config.scaffoldLlmsTxt ?? false,
     denylist: config.denylist ?? [...DEFAULT_DENYLIST],
     allowlist: config.allowlist ?? [],

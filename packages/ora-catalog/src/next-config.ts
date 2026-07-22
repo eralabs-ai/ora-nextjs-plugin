@@ -2,7 +2,7 @@ import { createJiti } from 'jiti';
 
 import { findConfigFile } from './find-config-file.js';
 
-/** The subset of `next.config` this plugin needs — see PLAN.md 2.1. */
+/** The subset of `next.config` this plugin needs. */
 export interface ExtractedNextConfig {
   basePath?: string;
   distDir?: string;
@@ -25,7 +25,7 @@ const PRODUCTION_BUILD_PHASE = 'phase-production-build';
 
 /**
  * Loads the user's `next.config.{ts,mts,cts,mjs,js,cjs}` and extracts `basePath`, `distDir`, and
- * `output` — so users never repeat these in `ard.config` (PLAN.md 2.1). Handles both
+ * `output` — so users never repeat these in `ard.config`. Handles both
  * object-form and function-form (`(phase, { defaultConfig }) => config`) configs, sync or async.
  *
  * Never throws: an app's `next.config` is not this plugin's problem to fail a build over. A

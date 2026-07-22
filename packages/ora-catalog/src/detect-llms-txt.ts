@@ -21,7 +21,7 @@ export interface DetectLlmsTxtResult {
   scaffoldedPath?: string;
 }
 
-const STARTER_ROUTE_TS = `// Starter llms.txt, scaffolded by ora-catalog because no llms.txt was found (PLAN.md 2.2).
+const STARTER_ROUTE_TS = `// Starter llms.txt, scaffolded by ora-catalog because no llms.txt was found.
 // Edit the content below, then commit this file — ora-catalog will detect and reference it as
 // soon as it's live on your next build (this run's catalog can't reference it: nothing served it
 // during the build that just ran).
@@ -41,7 +41,7 @@ export function GET(): Response {
 }
 `;
 
-const STARTER_ROUTE_JS = `// Starter llms.txt, scaffolded by ora-catalog because no llms.txt was found (PLAN.md 2.2).
+const STARTER_ROUTE_JS = `// Starter llms.txt, scaffolded by ora-catalog because no llms.txt was found.
 // Edit the content below, then commit this file — ora-catalog will detect and reference it as
 // soon as it's live on your next build (this run's catalog can't reference it: nothing served it
 // during the build that just ran).
@@ -62,7 +62,7 @@ export function GET() {
 `;
 
 /**
- * Detect-and-reference for `llms.txt` (PLAN.md 2.2), served either as a route handler at
+ * Detect-and-reference for `llms.txt`, served either as a route handler at
  * `app/llms.txt/route.*` or as a static `public/llms.txt`. When neither exists and the caller
  * opted in via `scaffoldLlmsTxt: true`, scaffolds a starter route handler so a *future* build
  * serves one — this run's catalog never references a path nothing served during the build that
