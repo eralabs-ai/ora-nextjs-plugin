@@ -58,6 +58,10 @@ way — become discoverable to agents, generating an ai-catalog from what the ap
 - **`llms.txt`** served the Next.js way — reference an existing one (a route handler at
   `app/llms.txt/route.ts`, or a static `public/llms.txt`), and scaffold a starter route handler when
   absent → `text/markdown`. (Idiomatic Next.js pattern; cheap.)
+- **Discovery/access artifacts Ora scores (detect-and-recommend, never reimplement):** `robots.txt`
+  (agent-crawler allow rules + catalog pointer), `sitemap.xml` (delegate generation to
+  `next-sitemap`; detect + warn-if-absent only), and `agents.md` (agent-guidance file; content
+  authored by the companion skill, not guessed). See the 2026-07-22 ground-truth update below.
 
 **Near-future (post-v1):**
 
@@ -68,6 +72,15 @@ way — become discoverable to agents, generating an ai-catalog from what the ap
 - **GraphQL.** Not idiomatic to Next.js, so the plugin does not emit `application/graphql` even though
   Ora's crawler ingests it for other stacks.
 - Synthesizing an OpenAPI doc from bare route handlers, or any invented marker convention.
+- **Sitemap generation.** `sitemap.xml` is scored by Ora, but generating it is a solved, idiomatic
+  Next.js concern (`app/sitemap.ts` / `next-sitemap`) — the plugin detects and recommends, never
+  reimplements.
+- **Ora's Payments layer (10 pts)** — agentic payment rails; nothing a catalog generator emits.
+- **Runtime API-behavior checks** — `rate-limit-headers`, `idempotency-key-support`, JSON error
+  model, catch-all JSON 404, JSON index at `/api` roots. These are route-handler *behavior*, not
+  build-time output; companion-skill/docs territory or out of scope (see 2026-07-22 update).
+- **An invented `agents.txt`.** We do not invent a parallel announcement file — but note Ora *does*
+  score `agents.md` (in scope above; distinct from the speculative `agents.txt` name).
 
 ---
 
@@ -119,6 +132,49 @@ catalog entries — nobody publishes those. They are the *source* for a single g
 document (one `application/vnd.oai.openapi+json` entry, the Telnyx shape). If an app already serves an
 OpenAPI doc, the plugin **detects and references** it rather than regenerating. (GraphQL is out of
 scope — see *Scope*.)
+
+---
+
+## Ground truth from Ora's published skill (added 2026-07-22 — corrected the artifact scope)
+
+Ora publishes a live skill for coding agents over MCP (`ora.ai/skill/mcp` → `agent-ready-website`),
+served dynamically and updated as standards evolve. Fetching it directly (2026-07-22) is the
+strongest ground truth yet — it lists the exact checks behind the **Ora score** (0–100, A+–F) and
+**corrected three assumptions in this plan.**
+
+**Ora's score = 4 weighted layers** (capability categories, not files):
+**Usability 40** (operate APIs/UI) · **Accessibility 30** (reach + parse content) ·
+**Discovery 20** (off-site findability) · **Payments 10** (agentic payment rails).
+
+**Corrections (each is a live scored check):**
+
+- **robots.txt is scored** — `robots-ai-policy-quality`, `bot-detection`, `agent-crawler-reachability`.
+  Explicitly allow reputable AI crawlers (or state a documented policy). Earlier assumption
+  ("gate only, not ingested") was wrong.
+- **sitemap.xml is scored** — `sitemap` ("all public routes; reference it from robots.txt"). Earlier
+  assumption ("not ingested") was wrong. Still **delegate generation** to `next-sitemap`; the plugin
+  detects + warns-if-absent only.
+- **agents.md is scored** — an agent-guidance file with explicit *when-to-use / when-NOT-to-use*
+  sections. Earlier dismissal ("speculative, don't build") was wrong. In scope as a
+  detect-and-recommend / skill-authored target — distinct from the invented `agents.txt` we still
+  reject (this is the file Ora actually checks).
+
+**`ai-catalog.json` stays the core.** The skill currently references RFC 9727 `/.well-known/api-catalog`
+(`application/linkset+json`) rather than ARD `/.well-known/ai-catalog.json` — **confirmed with Ora
+(2026-07-22) to be a known bug in the skill; a fix to reference `ai-catalog.json` is expected.** So
+the plugin's headline output is unchanged (open question #16 tracks the confirmation).
+
+**Two acknowledged gaps — neither reopens the plugin's core:**
+
+- **Payments layer (10 pts)** — agentic payment rails. Out of plugin scope; documented gap.
+- **Runtime API-behavior checks** — `api-error-model`, `rate-limit-headers`, `idempotency-key-support`,
+  JSON error responses, catch-all JSON 404, JSON index at `/api` roots. These are route-handler
+  *behavior* a build-time catalog generator cannot emit — companion-skill/docs territory or out of
+  scope, not plugin work.
+
+**Plugin-vs-skill division (validated):** Ora already ships `agent-ready-website` as a scan→fix→rescan
+skill. Our companion skill **composes with it** rather than duplicating the loop — the plugin owns the
+deterministic detect/emit/validate half; the skill owns the judgment/authoring half. See Phase 6.
 
 ---
 
@@ -353,6 +409,19 @@ Precision over recall, applied to the plugin's own output, not just to what it d
       a robots.txt `Agentmap:` directive (Next's `app/robots.ts`) pointing at wherever the catalog
       actually lives. DNS SRV-style records are also in §6.1 but are out of the plugin's reach —
       document only.
+- [ ] **robots.txt — detect-and-recommend (scored by Ora: `robots-ai-policy-quality`).** Detect an
+      existing `public/robots.txt` or `app/robots.ts`; warn if it blocks the agent user-agents the
+      site wants to reach (Ora's crawler first) and print the exact `Allow` lines to add — scoped to
+      specific user-agents, **never `User-agent: *`**; recommend the catalog pointer. Auto-write only
+      when absent, opt-in. Never unblock training scrapers on the owner's behalf. (`MetadataRoute.Robots`
+      supports `rules` but has no field for the custom pointer directive — recommend that line for
+      `app/robots.ts`, only auto-write it into a static `public/robots.txt`.)
+- [ ] **sitemap.xml — detect + warn-if-absent (scored by Ora: `sitemap`).** Detect `app/sitemap.ts` /
+      `public/sitemap.xml`; if absent, warn and recommend `next-sitemap`. **Never reimplement** — it
+      is a solved, idiomatic Next.js concern. Ensure robots.txt references it.
+- [ ] **agents.md — detect-and-recommend (scored by Ora).** Detect an existing `public/agents.md`; if
+      absent, recommend one. Content (the when-to-use / when-NOT-to-use guidance) is authored by the
+      companion skill (Phase 6), not guessed by the plugin.
 - [ ] Fixture + test for each target, including the `deploy-variants` fixture.
 
 ### 2.5 Drift detection (fold in here — it's nearly free)
@@ -407,6 +476,39 @@ lands at `public/openapi.json` the plugin references it.
 
 **Done when:** the `openapi` fixture produces a single correct `application/vnd.oai.openapi+json` entry,
 and an app without a doc produces none.
+
+---
+
+## Phase 3.5 — First npm publish (canary) — *makes the real Vercel workflow adoptable*
+
+Goal: graduate from the interim **committed-tarball** mechanism (a `pnpm pack` `.tgz` referenced via
+`file:` inside a demo repo — fine for the first Vercel deploy, but not something a real user can
+adopt) to a genuinely installable package on the npm registry under the **`canary`** dist-tag. This
+is the smallest publish that makes the intended workflow real — *add one dependency, deploy on Vercel,
+watch the Ora score* — for Ora's own site and 1–2 friendly partners, ahead of a public `latest`. Full
+release engineering (strict semver, changesets, docs, `latest`) stays in Phase 6; this phase does only
+the minimum to ship a canary.
+
+**Prerequisite — resolve open question #7 first** (package name / npm scope / who owns publish
+rights). You cannot publish without a decided, available name: check `npm view ora-catalog` and, if
+it's taken, fall back to a scope (e.g. `@ora/catalog`).
+
+- [ ] Secure the name: create the npm account/org; verify the name is free or claim the scope.
+- [ ] Minimal publish config: confirm the `files` allowlist (`dist` only) and `publishConfig`
+      (`access: public` if scoped); enable **npm provenance** on publish. (`package.json` already
+      carries `files: ["dist"]` and a `publishConfig` block.)
+- [ ] Version + tag: publish a prerelease (e.g. `0.1.0-canary.0`) under the **`canary`** dist-tag, so
+      a plain `npm install ora-catalog` (default `latest`) never resolves an unfinished build — only
+      an explicit `ora-catalog@canary` does.
+- [ ] **Verify the real workflow end-to-end:** in a scratch Next.js template *outside* this repo,
+      `npm install ora-catalog@canary`, add the `postbuild` script, deploy on Vercel, and confirm the
+      catalog serves at `/.well-known/ai-catalog.json`. Then scan the production domain with Ora's
+      `agent-ready-website` skill and record the score. (Same manual loop Phase 1 left open — now
+      driven through the published package instead of a tarball.)
+- [ ] Document the `@canary` install + Vercel `postbuild` in the README as the current adoption path.
+
+**Done when:** `ora-catalog@canary` installs cleanly into an external template, a Vercel deploy serves
+a valid catalog at the well-known URL, and Ora scans it. The public `latest` release is Phase 6.
 
 ---
 
@@ -471,14 +573,21 @@ Goal: prove the output is *usable by agents*, not just spec-valid, and lock in c
 - [ ] Strict semver: catalog output changes ≥ minor; breaking config changes = major; spec-version
       bumps called out explicitly in release notes.
 - [ ] Changesets for changelogs; catalog snapshot diffs double as honest release notes.
-- [ ] Dist-tags: `canary` → Ora's own site + 1–2 friendly partners run it before `latest`. With
-      near-zero ecosystem adoption of the spec, these first users are the real integration test.
+- [ ] Dist-tags: the `canary` line (first cut in Phase 3.5) is what Ora's own site + 1–2 friendly
+      partners run; Phase 6 **promotes a proven canary to `latest`**. With near-zero ecosystem
+      adoption of the spec, these first users are the real integration test.
 - [ ] Docs generated from fixtures (guaranteed-working examples): quickstart, artifact detection
       (MCP/OpenAPI/docs/skills), config reference, denylist/security defaults, drift-diff reading
       guide, `basePath`/deployment
       notes, degradation policy.
-- [ ] Developer-facing SKILL.md / setup guide for coding agents — written last, once the config
-      surface stabilizes.
+- [ ] Developer-facing **companion skill** (SKILL.md) for coding agents — a thin, Next-specific layer
+      that **composes with Ora's own `agent-ready-website` skill** rather than duplicating its
+      scan→fix→rescan loop. Owns the judgment/authoring half the plugin refuses to guess: authoring
+      `llms.txt` and `agents.md` content from the repo, drafting `representativeQueries` / entry
+      descriptions / `capabilities`, advising the robots.txt allow-and-pointer policy, and explaining
+      the sitemap (delegate to `next-sitemap`). Defers to Ora's skill for the score scan and for the
+      runtime API-behavior fixes (rate-limit headers, idempotency, JSON errors) the build-time plugin
+      can't emit. Written last, once the config surface stabilizes.
 - [ ] Supply-chain: npm provenance on publish, lockfile committed, dependency count reviewed before
       v1 (target: near-zero runtime deps).
 
@@ -505,17 +614,22 @@ Goal: prove the output is *usable by agents*, not just spec-valid, and lock in c
 | 13 | Is the agent-readiness score essentially a **checklist of artifact types** (OpenAPI / MCP / GraphQL / llms.txt / docs / skills)? Top-site data suggests breadth drives the grade. | If yes, target the checklist directly and report per-artifact coverage in the build summary. | _pending_ |
 | 14 | Which entry fields should a first-party catalog self-declare? (`auth`, `capabilities`, `representativeQueries`, `provenance`, `trustManifest.attestations`) | **Partly resolved by the spec (2026-07-19):** `capabilities` / `representativeQueries` / `trustManifest` are first-class ARD fields, not Ora extensions — `representativeQueries` (2–5 items) drives registry search embeddings, so it's plainly worth self-declaring; supported via `ard.config` `entries`. `capabilities` emitted zero-config for MCP. Only `auth` / entry-level `provenance` are true extensions — confirm with Ora how they weigh those. | _mostly resolved_ |
 | 15 | Agent **skills** (`application/ai-skill+md`): does Ora expect skills in a published GitHub repo, and should the plugin help scaffold/reference one? | Detect-and-reference a skills repo if present; do not invent skills. Scaffolding = later. | _pending_ |
+| 16 | Once the skill's `api-catalog`→`ai-catalog` bug is fixed, do the **registry crawler and the score scanner** both key on ARD `/.well-known/ai-catalog.json`? | Confirm they agree — the plugin's headline output depends on it | _pending (Ora aware of the skill bug 2026-07-22, fix expected)_ |
+| 17 | What `User-agent` token does **Ora's crawler** send? | Needed to detect a blocking robots.txt and to author the scoped `Allow` recommendation | _pending_ |
+| 18 | Does the plugin/companion skill scope include `agents.md` content and the robots.txt policy, or does Ora expect those from its own `agent-ready-website` skill? | Plugin detects/scaffolds structure; companion skill authors content and defers to Ora's skill for the scan loop | _pending_ |
 
 ---
 
 ## Sequencing logic (why this order)
 
-Fixtures → skeleton → catalog core → OpenAPI detection → WebMCP → evals, ordered by risk-of-rework:
-the skeleton de-risks the untested Ora-crawler integration in week one; the catalog core — centered on
-**detect-and-reference** of the Next-idiomatic artifacts (MCP, `public/openapi.json`, config-declared
-docs/skills) — is stable regardless of spec churn and is the cheapest high-value work; OpenAPI
-detection reuses the same detect-and-reference machinery; WebMCP depends on the least-stable spec so it
-goes late; evals only make sense once there's real output to consume.
+Fixtures → skeleton → catalog core → OpenAPI detection → first canary publish → WebMCP → evals,
+ordered by risk-of-rework: the skeleton de-risks the untested Ora-crawler integration in week one; the
+catalog core — centered on **detect-and-reference** of the Next-idiomatic artifacts (MCP,
+`public/openapi.json`, config-declared docs/skills) — is stable regardless of spec churn and is the
+cheapest high-value work; OpenAPI detection reuses the same detect-and-reference machinery; the first
+canary publish (Phase 3.5) comes once that core is real, so partners can adopt the intended Vercel
+workflow before the least-stable work lands; WebMCP depends on the least-stable spec so it goes late;
+evals only make sense once there's real output to consume.
 
 **If timelines compress:** the shippable, useful v1 is **detect-and-reference alone** — site metadata
 + MCP-server detection + a `public/openapi.json` + config-declared docs/skills + `llms.txt`. That
