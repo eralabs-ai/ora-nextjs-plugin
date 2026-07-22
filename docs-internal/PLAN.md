@@ -79,8 +79,6 @@ way — become discoverable to agents, generating an ai-catalog from what the ap
 - **Runtime API-behavior checks** — `rate-limit-headers`, `idempotency-key-support`, JSON error
   model, catch-all JSON 404, JSON index at `/api` roots. These are route-handler *behavior*, not
   build-time output; companion-skill/docs territory or out of scope (see 2026-07-22 update).
-- **An invented `agents.txt`.** We do not invent a parallel announcement file — but note Ora *does*
-  score `agents.md` (in scope above; distinct from the speculative `agents.txt` name).
 
 ---
 
@@ -156,8 +154,7 @@ strongest ground truth yet — it lists the exact checks behind the **Ora score*
   detects + warns-if-absent only.
 - **agents.md is scored** — an agent-guidance file with explicit *when-to-use / when-NOT-to-use*
   sections. Earlier dismissal ("speculative, don't build") was wrong. In scope as a
-  detect-and-recommend / skill-authored target — distinct from the invented `agents.txt` we still
-  reject (this is the file Ora actually checks).
+  detect-and-recommend / skill-authored target.
 
 **`ai-catalog.json` stays the core.** The skill currently references RFC 9727 `/.well-known/api-catalog`
 (`application/linkset+json`) rather than ARD `/.well-known/ai-catalog.json` — **confirmed with Ora
