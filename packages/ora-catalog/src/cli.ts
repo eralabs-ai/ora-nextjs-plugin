@@ -1,3 +1,5 @@
+import { resolve } from 'node:path';
+
 import { ArdConfigError } from './config.js';
 import { generateCatalog } from './generate.js';
 import { writeCatalog } from './write.js';
@@ -78,7 +80,10 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     return 0;
   }
 
-  const cwd = args.cwd ?? io.cwd ?? process.cwd();
+  // Resolve to an absolute path: a relative `--cwd` would otherwise pass `existsSync` checks
+  // (resolved against the shell's process.cwd()) but fail when `config.ts` resolves the same
+  // relative path via jiti against this package's own location instead.
+  const cwd = resolve(args.cwd ?? io.cwd ?? process.cwd());
 
   const warnings: string[] = [];
   let catalog;
