@@ -1,36 +1,76 @@
-import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+import { findAppDir } from './app-dir.js';
 import type { AiCatalog } from './types.js';
 import { formatCatalogErrors, validateCatalogArd } from './validate.js';
 
-/** Where the Phase 1 static emission target lands, relative to the project root. */
+/** Where the static emission target lands, relative to the project root. */
 export const CATALOG_OUTPUT_PATH = join('public', '.well-known', 'ai-catalog.json');
 
-export type WriteCatalogResult = { ok: true; path: string } | { ok: false; errors: string };
+/** App Router route segments that serve the catalog for the `'route'` emission target. */
+const CATALOG_ROUTE_SEGMENTS = ['.well-known', 'ai-catalog.json'];
+
+export type EmissionTarget = 'static' | 'route';
+
+export interface WriteCatalogOptions {
+  /** Which emission target to write. Defaults to `'static'`. */
+  target?: EmissionTarget;
+  /** Non-fatal notices (e.g. a `'route'` request that has to fall back to `'static'`). */
+  warn?: (message: string) => void;
+}
+
+export type WriteCatalogResult =
+  { ok: true; path: string; target: EmissionTarget } | { ok: false; errors: string };
 
 /**
- * Validates a catalog against the strict official ARD schema and, only if valid, writes it to
- * `public/.well-known/ai-catalog.json` under `cwd`. Never writes an invalid catalog — this is the
- * hard-fail gate the plan calls for: a bad catalog is worse than none, so it must never reach a
- * real deployment. The strict (not permissive) schema gates here because this is *emitted* output:
- * it must survive the official conformance tool, not merely count as a catalog.
+ * Validates a catalog against the strict official ARD schema and, only if valid, writes it — either
+ * as the static `public/.well-known/ai-catalog.json` (default) or as an App Router route handler at
+ * `app/.well-known/ai-catalog.json/route.{ts,js}` (`target: 'route'`). Never writes an
+ * invalid catalog — this is the hard-fail gate the plan calls for: a bad catalog is worse than none,
+ * so it must never reach a real deployment. The strict (not permissive) schema gates here because
+ * this is *emitted* output: it must survive the official conformance tool, not merely count as a
+ * catalog.
  *
- * The write itself is atomic (write to a temp file, then rename into place) so a crash or
- * concurrent build never leaves a half-written, unparseable catalog on disk.
+ * The static write is atomic (write to a temp file, then rename into place) so a crash or concurrent
+ * build never leaves a half-written, unparseable catalog on disk. A `'route'` request on a project
+ * with no App Router directory falls back to `'static'` with a warning rather than failing the build.
  */
-export function writeCatalog(cwd: string, catalog: AiCatalog): WriteCatalogResult {
+export function writeCatalog(
+  cwd: string,
+  catalog: AiCatalog,
+  options: WriteCatalogOptions = {},
+): WriteCatalogResult {
   const result = validateCatalogArd(catalog);
   if (!result.valid) {
     return { ok: false, errors: formatCatalogErrors(result.errors) };
   }
 
+  const target = options.target ?? 'static';
+  const warn = options.warn ?? (() => {});
+
+  if (target === 'route') {
+    const appDir = findAppDir(cwd);
+    if (appDir) {
+      return { ok: true, path: writeRouteHandler(cwd, appDir, catalog), target: 'route' };
+    }
+    warn(
+      "emit: 'route' was requested but no App Router directory (app/ or src/app/) was found — " +
+        'falling back to the static public/.well-known/ai-catalog.json target.',
+    );
+  }
+
+  return { ok: true, path: writeStaticFile(cwd, catalog), target: 'static' };
+}
+
+/** Atomically writes the static `public/.well-known/ai-catalog.json`. */
+function writeStaticFile(cwd: string, catalog: AiCatalog): string {
   const outPath = join(cwd, CATALOG_OUTPUT_PATH);
   const tmpPath = `${outPath}.tmp-${process.pid}-${Date.now()}`;
 
   mkdirSync(dirname(outPath), { recursive: true });
   try {
-    writeFileSync(tmpPath, `${JSON.stringify(catalog, null, 2)}\n`, 'utf8');
+    writeFileSync(tmpPath, catalogJson(catalog), 'utf8');
     renameSync(tmpPath, outPath);
   } catch (err) {
     try {
@@ -41,5 +81,48 @@ export function writeCatalog(cwd: string, catalog: AiCatalog): WriteCatalogResul
     throw err;
   }
 
-  return { ok: true, path: outPath };
+  return outPath;
+}
+
+/**
+ * Writes the route-handler emission target: `app/.well-known/ai-catalog.json/route.{ts,js}`. The
+ * validated catalog is embedded as a `force-static` response so the build materializes it just like
+ * the static file, but the file lives in the source tree (survives `basePath`/proxy rewrites the way
+ * a `public/` asset can't, and is the seam for future dynamic catalogs). `.ts` vs `.js` mirrors the
+ * project (a `tsconfig.json` at the root).
+ */
+function writeRouteHandler(cwd: string, appDir: string, catalog: AiCatalog): string {
+  const useTypeScript = existsSync(join(cwd, 'tsconfig.json'));
+  const routeDir = join(appDir, ...CATALOG_ROUTE_SEGMENTS);
+  const routeFile = join(routeDir, useTypeScript ? 'route.ts' : 'route.js');
+
+  mkdirSync(routeDir, { recursive: true });
+  writeFileSync(routeFile, routeHandlerSource(catalog, useTypeScript), 'utf8');
+  return routeFile;
+}
+
+function catalogJson(catalog: AiCatalog): string {
+  return `${JSON.stringify(catalog, null, 2)}\n`;
+}
+
+/**
+ * Renders the route-handler source. The catalog is embedded as a *JSON string literal* — we
+ * `JSON.stringify` the pretty-printed JSON text again, which produces a safely-escaped JS string
+ * (no risk from backticks or `${}` in any field value), then serve it verbatim.
+ */
+function routeHandlerSource(catalog: AiCatalog, useTypeScript: boolean): string {
+  const bodyLiteral = JSON.stringify(catalogJson(catalog));
+  const signature = useTypeScript ? 'export function GET(): Response {' : 'export function GET() {';
+  return `// Generated by ora-catalog (route emission target). Do not edit by hand — re-run
+// \`ora-catalog\` to regenerate. Serves the ai-catalog at /.well-known/ai-catalog.json.
+export const dynamic = 'force-static';
+
+const body = ${bodyLiteral};
+
+${signature}
+  return new Response(body, {
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+  });
+}
+`;
 }

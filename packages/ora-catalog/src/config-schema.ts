@@ -32,20 +32,32 @@ export interface ArdEntryOverride {
    */
   representativeQueries?: string[];
   metadata?: Record<string, unknown>;
-  // Entries also remain an open extension point (auth, top-level provenance, ...) — see PLAN.md
-  // "Ground truth from Ora's index". Config overrides mirror that.
+  // Entries also remain an open extension point (auth, top-level provenance, ...). Config
+  // overrides mirror that.
   [key: string]: unknown;
 }
 
 export interface ArdConfig {
   /**
    * The site's absolute production URL (e.g. `https://example.com`, no trailing slash). Zero-config
-   * detectors (PLAN.md 2.2 — MCP/OpenAPI/llms.txt) need this to build the absolute `url` the spec's
+   * detectors (MCP/OpenAPI/llms.txt) need this to build the absolute `url` the spec's
    * schema requires for every referenced artifact; without it (and without Vercel's build-time
    * `VERCEL_PROJECT_PRODUCTION_URL`), those detectors still run but skip emitting a URL-bearing entry
    * rather than guess or emit an invalid one — set this explicitly on non-Vercel hosts.
    */
   siteUrl?: string;
+  /**
+   * Where to emit the catalog. Defaults to `'static'`.
+   *
+   * - `'static'` — write `public/.well-known/ai-catalog.json`. Simplest, but served under any
+   *   `next.config` `basePath` prefix, not at the domain root crawlers expect.
+   * - `'route'` — write an App Router route handler at `app/.well-known/ai-catalog.json/route.{ts,js}`
+   *   (`force-static`, `Content-Type: application/json`). The path for proxy setups and the future
+   *   path to dynamic catalogs. Note: a route handler is *also* subject to `basePath`, so on a
+   *   `basePath` app the true fix is the `<link rel="ai-catalog">` / robots `Agentmap:` pointer this
+   *   plugin recommends (ARD §6.1) — see the build output.
+   */
+  emit?: 'static' | 'route';
   /**
    * Whether to scaffold a starter `app/llms.txt/route.ts` (or `.js`) when neither it nor a static
    * `public/llms.txt` exists. Never overwrites an existing file. **Opt-in — defaults to `false`.**
@@ -74,7 +86,7 @@ export interface ArdConfig {
 export type ResolvedArdConfig = Required<Omit<ArdConfig, 'siteUrl'>> & Pick<ArdConfig, 'siteUrl'>;
 
 /**
- * Default-on denylist (PLAN.md 2.1): auth and webhook routes are never safe to publish
+ * Default-on denylist: auth and webhook routes are never safe to publish
  * unconditionally, so they're excluded even with zero config. `allowlist` re-includes.
  */
 export const DEFAULT_DENYLIST: readonly string[] = ['/api/auth/**', '/api/webhooks/**'];
@@ -111,12 +123,13 @@ export const ardConfigSchema: Record<string, unknown> = {
       // Must be an absolute http(s) origin — the detectors resolve every artifact URL against it.
       pattern: '^https?://',
     },
+    emit: { type: 'string', enum: ['static', 'route'] },
     scaffoldLlmsTxt: { type: 'boolean' },
     denylist: { type: 'array', items: { type: 'string', minLength: 1 } },
     allowlist: { type: 'array', items: { type: 'string', minLength: 1 } },
     entries: { type: 'array', items: entryOverrideSchema },
   },
   // Unlike entries, the top-level config shape is closed — an unrecognized key is almost always a
-  // typo, and this is the "fails loudly" surface PLAN.md 2.1 calls for.
+  // typo, and this is the "fails loudly" surface this validation exists for.
   additionalProperties: false,
 };

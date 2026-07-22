@@ -16,9 +16,19 @@ export {
 
 export type { AiCatalog, CatalogEntry, CatalogHost, CatalogPublisher } from './types.js';
 
-export { generateCatalog, type GenerateCatalogOptions } from './generate.js';
+export {
+  generateCatalog,
+  type GenerateCatalogOptions,
+  type GenerateCatalogResult,
+} from './generate.js';
 
-export { writeCatalog, CATALOG_OUTPUT_PATH, type WriteCatalogResult } from './write.js';
+export {
+  writeCatalog,
+  CATALOG_OUTPUT_PATH,
+  type WriteCatalogResult,
+  type WriteCatalogOptions,
+  type EmissionTarget,
+} from './write.js';
 
 export { readSiteMetadata, type SiteMetadata } from './site-metadata.js';
 
@@ -64,3 +74,27 @@ export {
   type DetectLlmsTxtOptions,
   type DetectLlmsTxtResult,
 } from './detect-llms-txt.js';
+
+export {
+  detectRobots,
+  type DetectRobotsOptions,
+  type DetectRobotsResult,
+} from './detect-robots.js';
+
+export {
+  detectSitemap,
+  type DetectSitemapOptions,
+  type DetectSitemapResult,
+} from './detect-sitemap.js';
+
+export {
+  detectAgentsMd,
+  type DetectAgentsMdOptions,
+  type DetectAgentsMdResult,
+} from './detect-agents-md.js';
+
+export {
+  catalogServedPath,
+  buildDiscoveryRecommendations,
+  type DiscoveryRecommendationOptions,
+} from './discovery.js';

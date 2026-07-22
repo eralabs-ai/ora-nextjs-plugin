@@ -1,0 +1,9 @@
+# Scoped to specific agents, never "User-agent: *" for the allow rules.
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+Sitemap: https://discovery-fixture.example.com/sitemap.xml
+Agentmap: https://discovery-fixture.example.com/.well-known/ai-catalog.json

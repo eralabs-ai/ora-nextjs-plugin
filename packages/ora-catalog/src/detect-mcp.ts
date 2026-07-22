@@ -5,20 +5,20 @@ import { buildArtifactUrl, buildUrn } from './site-url.js';
 import type { CatalogEntry } from './types.js';
 import { pathSegments, ROUTE_FILE_NAMES, walkFiles } from './walk-files.js';
 
-// An existing MCP server is unambiguous intent to publish (PLAN.md 2.2), so this is the one
-// zero-config detector that runs with no opt-in marker. Detection is deliberately textual, not
-// AST-based — PLAN.md's core design decisions confine AST work to WebMCP (Phase 4) "for location,
-// not semantics." A route file mounts an MCP server the Next.js way when it both imports the
-// package and calls the handler factory it exports; requiring both cuts down on false positives
-// from a file that merely mentions the package name in a comment or unrelated string.
+// An existing MCP server is unambiguous intent to publish, so this is the one zero-config
+// detector that runs with no opt-in marker. Detection is deliberately textual, not AST-based —
+// the core design decisions confine AST work to WebMCP (Phase 4) "for location, not semantics." A
+// route file mounts an MCP server the Next.js way when it both imports the package and calls the
+// handler factory it exports; requiring both cuts down on false positives from a file that merely
+// mentions the package name in a comment or unrelated string.
 const MCP_IMPORT_RE =
   /from\s+['"](mcp-handler|@vercel\/mcp-adapter)['"]|require\(\s*['"](mcp-handler|@vercel\/mcp-adapter)['"]\s*\)/;
 const MCP_HANDLER_CALL_RE = /createMcpHandler\s*\(/;
 // Best-effort capability extraction: `<anything>.tool('name', ...)` calls in the same file,
 // matching the MCP SDK's `server.tool(name, ...)` convention the mcp-adapter fixture uses. This is
 // intentionally a plain regex, not a schema/AST evaluation — "populate capabilities where
-// statically derivable" (PLAN.md 2.2), cheaply. A file with no such calls simply gets none; this
-// never invents a tool name that isn't a literal string in the source.
+// statically derivable" — cheaply. A file with no such calls simply gets none; this never invents
+// a tool name that isn't a literal string in the source.
 const TOOL_NAME_RE = /\.tool\(\s*['"`]([^'"`]+)['"`]/g;
 
 export interface DetectMcpOptions {

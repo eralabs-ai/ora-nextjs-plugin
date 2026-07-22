@@ -19,8 +19,8 @@ const validateFn: ValidateFunction = ajv.compile(ardConfigSchema);
 
 /**
  * Validate a parsed `ard.config.*` module's default export against this package's own config
- * schema. This is the "build-time validation fails loudly" gate from PLAN.md 2.1 — an invalid
- * config must never be silently ignored or half-applied.
+ * schema. This is the "build-time validation fails loudly" gate — an invalid config must never be
+ * silently ignored or half-applied.
  */
 export function validateArdConfig(json: unknown): ConfigValidationResult {
   const valid = validateFn(json) as boolean;

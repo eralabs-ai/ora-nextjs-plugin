@@ -25,6 +25,7 @@ describe('loadArdConfig', () => {
     expect(path).toBeUndefined();
     expect(config).toEqual({
       siteUrl: undefined,
+      emit: 'static',
       scaffoldLlmsTxt: false,
       denylist: [...DEFAULT_DENYLIST],
       allowlist: [],
