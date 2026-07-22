@@ -1,3 +1,5 @@
+import { resolve } from 'node:path';
+
 import { loadArdConfig } from './config.js';
 import { isPathDenied } from './denylist.js';
 import { detectAgentsMd } from './detect-agents-md.js';
@@ -47,7 +49,10 @@ export interface GenerateCatalogResult {
 export async function generateCatalog(
   options: GenerateCatalogOptions = {},
 ): Promise<GenerateCatalogResult> {
-  const cwd = options.cwd ?? process.cwd();
+  // Resolve to an absolute path so relative-path lookups inside `loadArdConfig` (which delegates
+  // to jiti — resolved against this package's location, not the caller's) behave the same as
+  // `existsSync`-based checks, which resolve relative paths against `process.cwd()`.
+  const cwd = resolve(options.cwd ?? process.cwd());
   const warn = options.onWarning ?? (() => {});
   const recommend = options.onRecommendation ?? (() => {});
   const site = readSiteMetadata(cwd);

@@ -1,6 +1,6 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -47,6 +47,25 @@ describe('runCli', () => {
     const code = await runCli([`--cwd=${dir}`], io);
     expect(code).toBe(0);
     expect(existsSync(join(dir, CATALOG_OUTPUT_PATH))).toBe(true);
+  });
+
+  it('accepts a relative --cwd and still loads ard.config from it', async () => {
+    writeFileSync(
+      join(dir, 'ard.config.mjs'),
+      "export default { siteUrl: 'https://example.com' };\n",
+      'utf8',
+    );
+
+    // A relative path here regresses to a bug where `existsSync` (resolved against
+    // `process.cwd()`) found the config file, but jiti (resolved against this package's own
+    // location) then failed to load it — see cli.ts's `resolve()` call.
+    const relativeDir = relative(process.cwd(), dir);
+    const code = await runCli(['--cwd', relativeDir], io);
+
+    expect(code).toBe(0);
+    expect(existsSync(join(dir, CATALOG_OUTPUT_PATH))).toBe(true);
+    const parsed = JSON.parse(readFileSync(join(dir, CATALOG_OUTPUT_PATH), 'utf8'));
+    expect(parsed.host.identifier).toBe('did:web:example.com');
   });
 
   it('exits 1 with a clear message when --cwd= has an empty value', async () => {
