@@ -2,10 +2,6 @@
 // Catalog spec itself (see ajv-instance.ts) — one schema-validation library for the whole package.
 // This schema is this package's own contract, not the vendored spec, so it lives here rather than
 // in spec/.
-//
-// The config file is named `ard.config` (Agentic Resource Discovery) rather than after this
-// package or any specific vendor: it's a file committed into the consumer's repo, so it stays
-// vendor-neutral (the plugin's endgame is upstreaming into Next.js).
 
 /** One entry the developer declares by hand, merged over/appended to inferred entries. */
 export interface ArdEntryOverride {
