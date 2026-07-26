@@ -23,10 +23,10 @@ const SITEMAP_ROUTE_NAMES = new Set([
 
 /**
  * Detect-and-recommend for `sitemap.xml`, which lets agents and crawlers discover every public
- * route on a site. Generating a sitemap is a solved, idiomatic Next.js concern (`app/sitemap.ts`,
- * or the `next-sitemap` package), so the plugin **never reimplements** it — it only detects an
- * existing one and, when absent, recommends the idiomatic tool. Either way it reminds the developer
- * to reference the sitemap from robots.txt (`Sitemap:`).
+ * route on a site. Generating a sitemap is a solved, idiomatic Next.js concern (`app/sitemap.ts`),
+ * so the plugin **never reimplements** it — it only detects an existing one and, when absent, points
+ * at the built-in path. Either way it reminds the developer to reference the sitemap from robots.txt
+ * (`Sitemap:`).
  */
 export function detectSitemap(options: DetectSitemapOptions): DetectSitemapResult {
   const source = findSitemapSource(options.cwd);
@@ -40,9 +40,9 @@ export function detectSitemap(options: DetectSitemapOptions): DetectSitemapResul
   }
 
   options.recommend(
-    'No sitemap found — add one so agents can discover all public routes. Use the idiomatic ' +
-      'Next.js path (app/sitemap.ts) or the next-sitemap package; ora-catalog never generates a ' +
-      'sitemap itself. Then reference it from robots.txt with a "Sitemap:" line.',
+    'No sitemap found — add one so agents can discover all public routes. Use the built-in Next.js ' +
+      'path (app/sitemap.ts); ora-catalog never generates a sitemap itself. Then reference it from ' +
+      'robots.txt with a "Sitemap:" line.',
   );
   return { found: false };
 }

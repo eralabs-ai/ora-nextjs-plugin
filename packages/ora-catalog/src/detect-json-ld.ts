@@ -42,8 +42,9 @@ const ABSENT_RECOMMENDATION =
   'social profiles (the entity-disambiguation signal registries value), and at least one more ' +
   'schema.org @type beyond Organization — SoftwareApplication or Product for an app/API, or a ' +
   'FAQPage — since covering more types helps registries understand your site more fully. ' +
-  'ora-catalog won’t author it (the fields are judgment content); the companion skill can help draft ' +
-  'it from your repo.';
+  'JSON-LD pairs with an llms.txt: llms.txt tells agents what your site is for, JSON-LD identifies ' +
+  'it as an entity registries can rank — add both, not one alone. ora-catalog won’t author the ' +
+  'block (the fields are judgment content); the companion skill can help draft it from your repo.';
 
 /**
  * Detect-and-recommend for JSON-LD structured data. Text-scans the App Router's `layout`/`page`
@@ -73,7 +74,8 @@ export function detectJsonLd(options: DetectJsonLdOptions): DetectJsonLdResult {
           'with a "sameAs" array (LinkedIn/GitHub/npm/socials), a logo, and an address, and at least ' +
           'one more @type beyond Organization (SoftwareApplication/Product, or a FAQPage), so ' +
           'registries can disambiguate and rank your site — covering more schema.org types helps ' +
-          'them understand it more fully.',
+          'them understand it more fully. Make sure you also have an llms.txt: it and JSON-LD ' +
+          'reinforce each other (what your site is for vs. what entity it is).',
       );
       return { found: true, source };
     }

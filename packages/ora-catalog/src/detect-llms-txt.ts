@@ -11,9 +11,29 @@ export interface DetectLlmsTxtOptions {
   siteUrl: string | undefined;
   basePath: string;
   warn: (message: string) => void;
+  /**
+   * Advisory recommendation channel (not a warning — nothing is broken). Optional so the detector
+   * can run standalone; `generateCatalog` always supplies it. Emits a "recommend adding an llms.txt"
+   * nudge when none is present and scaffolding wasn't opted into.
+   */
+  recommend?: (message: string) => void;
   /** `ard.config` `scaffoldLlmsTxt`, resolved. Opt-in — defaults to `false`. */
   scaffold: boolean;
 }
+
+// llms.txt and JSON-LD structured data are complementary discovery signals, so each detector points
+// at the other: llms.txt is a natural-language guide that tells an agent *what your site is for* and
+// whether it fits the task at hand, while JSON-LD identifies you as an *entity* (Organization +
+// sameAs) that registries can disambiguate and rank. One without the other leaves a gap — an agent
+// that can tell you're relevant but can't identify you, or vice versa — so acting on a single
+// recommendation in isolation only gets you part of the way.
+const LLMS_TXT_ABSENT_RECOMMENDATION =
+  'No llms.txt found — a short natural-language guide agents read to decide whether your site fits ' +
+  'their task, and to find your key pages. Add one at app/llms.txt/route.ts (or public/llms.txt), ' +
+  'or set scaffoldLlmsTxt: true in ard.config to have a starter written for you. Pair it with ' +
+  'JSON-LD structured data (an Organization block with a sameAs array): llms.txt says what your ' +
+  'site is for, JSON-LD identifies it as an entity registries can rank — the two reinforce each ' +
+  'other, so add both rather than one alone.';
 
 export interface DetectLlmsTxtResult {
   entry?: CatalogEntry;
@@ -101,8 +121,9 @@ export function detectLlmsTxt(options: DetectLlmsTxtOptions): DetectLlmsTxtResul
   if (sourceFile) {
     if (!options.siteUrl) {
       options.warn(
-        'Found an existing llms.txt but no site URL is known — set "siteUrl" in ard.config, or ' +
-          'deploy on Vercel, to include it in the catalog.',
+        'Found an existing llms.txt but no site URL is known — set "siteUrl" in ard.config, or set ' +
+          'a SITE_URL (or NEXT_PUBLIC_SITE_URL) env var, to include it in the catalog. Either works ' +
+          'in a local build, so you can generate and check the catalog before deploying.',
       );
       return {};
     }
@@ -117,10 +138,18 @@ export function detectLlmsTxt(options: DetectLlmsTxtOptions): DetectLlmsTxtResul
     };
   }
 
-  if (!options.scaffold) return {};
+  if (!options.scaffold) {
+    options.recommend?.(LLMS_TXT_ABSENT_RECOMMENDATION);
+    return {};
+  }
 
   const scaffoldedPath = scaffoldLlmsTxtRoute(options.cwd, appDir, options.warn);
-  return scaffoldedPath ? { scaffoldedPath } : {};
+  if (scaffoldedPath) return { scaffoldedPath };
+
+  // Opted into scaffolding but nothing was written (no app/ dir, or a write error already warned
+  // about) — still surface the absent nudge so the signal isn't silently dropped.
+  options.recommend?.(LLMS_TXT_ABSENT_RECOMMENDATION);
+  return {};
 }
 
 /** Finds a `route.*` file directly inside `<appDir>/llms.txt/`, if any. */
@@ -169,7 +198,9 @@ function scaffoldLlmsTxtRoute(
   warn(
     `Scaffolded a starter llms.txt at ${routeFile} — fill in its content (especially the "When to ` +
       'use" section, since that\'s what tells an agent whether your site is relevant to its task) ' +
-      'and commit it; ora-catalog will reference /llms.txt starting with your next build.',
+      'and commit it; ora-catalog will reference /llms.txt starting with your next build. Pair it ' +
+      'with JSON-LD structured data (Organization + sameAs): llms.txt says what your site is for, ' +
+      'JSON-LD identifies it as an entity registries can rank — add both, not one alone.',
   );
   return routeFile;
 }

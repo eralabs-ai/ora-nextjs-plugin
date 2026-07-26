@@ -118,11 +118,14 @@ describe('detectOpenApi recommendations', () => {
     recommendations = [];
   });
 
-  it('recommends adding an OpenAPI doc (naming idiomatic tools) when none is present', () => {
+  it('recommends adding an OpenAPI doc (pointing at the conventional path) when none is present', () => {
     detectOpenApi({ cwd: dir, siteUrl: 'https://example.com', basePath: '', warn, recommend });
     const joined = recommendations.join('\n');
     expect(joined).toContain('No OpenAPI doc found');
-    expect(joined).toContain('zod-openapi');
+    expect(joined).toContain('public/openapi.json');
+    // No third-party package names — the plugin shouldn't couple to their lifecycles.
+    expect(joined).not.toContain('zod-openapi');
+    expect(joined).not.toContain('next-swagger-doc');
   });
 
   it('does not recommend "add one" when a doc already exists', () => {

@@ -8,13 +8,18 @@ import { detectLlmsTxt } from '../src/detect-llms-txt.js';
 
 let dir: string;
 let warnings: string[];
+let recommendations: string[];
 const warn = (message: string): void => {
   warnings.push(message);
+};
+const recommend = (message: string): void => {
+  recommendations.push(message);
 };
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'ora-catalog-detect-llms-txt-'));
   warnings = [];
+  recommendations = [];
 });
 
 afterEach(() => {
@@ -149,7 +154,7 @@ describe('detectLlmsTxt — scaffolding', () => {
     expect(readFileSync(expectedPath, 'utf8')).not.toContain(': Response');
   });
 
-  it('does nothing when scaffold: false', () => {
+  it('does not write when scaffold: false, but recommends adding one (with the JSON-LD pairing)', () => {
     mkdirSync(join(dir, 'app'), { recursive: true });
 
     const result = detectLlmsTxt({
@@ -157,11 +162,16 @@ describe('detectLlmsTxt — scaffolding', () => {
       siteUrl: 'https://example.com',
       basePath: '',
       warn,
+      recommend,
       scaffold: false,
     });
 
     expect(result).toEqual({});
     expect(existsSync(join(dir, 'app', 'llms.txt'))).toBe(false);
+    const message = recommendations.join('\n');
+    expect(message).toContain('No llms.txt found');
+    // Explains the dependency so an agent doesn't add llms.txt in isolation.
+    expect(message).toContain('JSON-LD');
   });
 
   it('does nothing when there is no app/ directory to scaffold into', () => {

@@ -15,7 +15,7 @@ import { loadNextConfig } from './next-config.js';
 import { SPEC_VERSION } from './schema.js';
 import { buildMcpServerCard, type McpServerCard } from './server-card.js';
 import { readSiteMetadata } from './site-metadata.js';
-import { hostnameFromUrl, resolveSiteUrl } from './site-url.js';
+import { hostnameFromUrl, readSiteUrlFromEnv, resolveSiteUrl } from './site-url.js';
 import type { AiCatalog, CatalogEntry } from './types.js';
 import type { EmissionTarget } from './write.js';
 
@@ -77,11 +77,16 @@ export async function generateCatalog(
     );
   }
 
-  // `siteUrl` wins over the Vercel-detected domain — an explicit developer declaration, and the
-  // only option on non-Vercel hosts. Every detector below skips emitting a URL-bearing entry
-  // (warning instead) when this is undefined, rather than emit a relative URL the spec's schema
-  // (`format: uri`) would reject.
-  const siteUrl = resolveSiteUrl({ configSiteUrl: config.siteUrl, detectedDomain: site.domain });
+  // Resolve the site origin in precedence order: explicit `ard.config` `siteUrl`, then a
+  // `SITE_URL` / `NEXT_PUBLIC_SITE_URL` env var (present during a local build, so the full catalog
+  // can be generated and checked before deploying), then Vercel's build-time production domain.
+  // Every detector below skips emitting a URL-bearing entry (warning instead) when this is
+  // undefined, rather than emit a relative URL the spec's schema (`format: uri`) would reject.
+  const siteUrl = resolveSiteUrl({
+    configSiteUrl: config.siteUrl,
+    envSiteUrl: readSiteUrlFromEnv(),
+    detectedDomain: site.domain,
+  });
 
   // Scan `app/` for MCP mounts once, then feed the same mounts to both the catalog entry and the
   // well-known server card (agents discover MCP via the card, not the entry — see server-card.ts).
@@ -99,6 +104,7 @@ export async function generateCatalog(
     siteUrl,
     basePath,
     warn,
+    recommend,
     scaffold: config.scaffoldLlmsTxt,
   });
   if (llmsTxtResult.entry) inferredEntries.push(llmsTxtResult.entry);
@@ -129,7 +135,9 @@ export async function generateCatalog(
   detectJsonLd({ cwd, recommend });
   for (const message of buildDiscoveryRecommendations({ siteUrl, basePath })) recommend(message);
 
-  const domain = config.siteUrl ? hostnameFromUrl(config.siteUrl) : site.domain;
+  // Derive the `did:web:` host from the resolved origin so it's consistent whatever the origin's
+  // source (config, env var, or Vercel domain), not just when `siteUrl` was set in config.
+  const domain = siteUrl ? hostnameFromUrl(siteUrl) : site.domain;
 
   // No `host.description`: the official ARD schema closes the host object
   // (`additionalProperties: false` — only displayName/identifier/documentationUrl/logoUrl/

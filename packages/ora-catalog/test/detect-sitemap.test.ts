@@ -43,13 +43,15 @@ describe('detectSitemap', () => {
     expect(result.source).toBe(join(dir, 'public', 'sitemap.xml'));
   });
 
-  it('recommends next-sitemap (never reimplements) when absent', () => {
+  it('recommends the built-in Next.js path (never reimplements) when absent', () => {
     const result = detectSitemap({ cwd: dir, recommend });
 
     expect(result.found).toBe(false);
     const message = recommendations.join('\n');
     expect(message).toContain('No sitemap found');
-    expect(message).toContain('next-sitemap');
+    expect(message).toContain('app/sitemap.ts');
     expect(message).toContain('never generates a sitemap itself');
+    // No third-party package names — the plugin shouldn't couple to their lifecycles.
+    expect(message).not.toContain('next-sitemap');
   });
 });

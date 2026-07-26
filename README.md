@@ -81,16 +81,24 @@ write (and exits non-zero) if generation ever produces an invalid catalog. The p
 handlers (see `docs-internal/PLAN.md`'s _Scope_ and _Core design decisions_).
 
 **Absolute URLs need a known site origin.** The spec requires every entry's `url` to be an
-absolute URI, so a detector skips emitting its entry (with a warning) unless it can resolve one —
-from `ard.config`'s `siteUrl`, or from Vercel's build-time `VERCEL_PROJECT_PRODUCTION_URL`. On any
-other host, set `siteUrl` explicitly (see below).
+absolute URI, so a detector skips emitting its entry (with a warning) unless it can resolve the
+site's origin. It's resolved in this order, first match wins:
+
+1. `ard.config`'s `siteUrl` — an explicit declaration, always wins.
+2. `SITE_URL`, then `NEXT_PUBLIC_SITE_URL` — the two env-var names Next.js apps most commonly use
+   for a stable production URL. Expected to be an absolute `https://…` origin.
+3. Vercel's build-time `VERCEL_PROJECT_PRODUCTION_URL` — injected automatically **on Vercel only**.
+
+**Iterating locally.** `VERCEL_PROJECT_PRODUCTION_URL` exists only during a build _on Vercel_, so a
+plain local `next build` can't resolve an origin from it — the catalog would come out without its
+URL-bearing entries (MCP, OpenAPI, llms.txt) and you couldn't check your work before deploying.
+Your production URL is the same string locally and in prod, so just declare it: set `siteUrl` in
+`ard.config`, or run the build with `SITE_URL=https://your-site.com next build` (or export
+`NEXT_PUBLIC_SITE_URL`). Any of these produces the full catalog locally.
 
 `ard.config.*` is evaluated as real code at build time (via [`jiti`](https://github.com/unjs/jiti)),
-not parsed as static JSON — so `siteUrl: process.env.SITE_URL` (or whatever env var your host/CI
-sets) works with no special support needed. The plugin doesn't guess a variable name on your
-behalf: unlike Vercel's `VERCEL_PROJECT_PRODUCTION_URL`, there's no single convention for "the
-site's URL" across hosts (`SITE_URL`, `NEXT_PUBLIC_SITE_URL`, `DEPLOY_URL`, ... all exist in the
-wild), and guessing wrong could silently point the catalog at a stale preview URL.
+not parsed as static JSON — so if your host/CI uses a different variable name, `siteUrl:
+process.env.DEPLOY_URL` (or whatever it is) works with no special support needed.
 
 ### Config (`ard.config.{ts,js,mjs,cjs}`)
 
@@ -102,10 +110,11 @@ so it stays vendor-neutral.)
 import type { ArdConfig } from 'ora-catalog';
 
 const config: ArdConfig = {
-  // Your production origin — every detected entry's URL is resolved against this. Only needed off
-  // Vercel (Vercel's own VERCEL_PROJECT_PRODUCTION_URL is used automatically when this is unset).
-  // This file is real code, so reading it from your own env var works too:
-  //   siteUrl: process.env.SITE_URL,
+  // Your production origin — every detected entry's URL is resolved against this. Optional: falls
+  // back to a SITE_URL / NEXT_PUBLIC_SITE_URL env var, then (on Vercel) to
+  // VERCEL_PROJECT_PRODUCTION_URL. Set it here to iterate locally, or to pin the URL on any host.
+  // This file is real code, so reading it from a different env var works too:
+  //   siteUrl: process.env.DEPLOY_URL,
   siteUrl: 'https://example.com',
   // Where to write the catalog. 'static' (default) writes public/.well-known/ai-catalog.json;
   // 'route' writes an App Router handler at app/.well-known/ai-catalog.json/route.ts instead
@@ -151,9 +160,12 @@ lives: on a `basePath` build the CLI prints a recommendation to add an HTML
 
 Beyond the catalog, the CLI detects the discovery/access artifacts agent registries score and prints
 advisory recommendations (never catalog entries, never a build failure): whether you have a
-`robots.txt` with agent-scoped `Allow` rules, a `sitemap` (it recommends `next-sitemap` /
-`app/sitemap.ts` — it never generates one itself), and an `agents.md`. These are recommendations
-only; you decide what to act on.
+`robots.txt` with agent-scoped `Allow` rules, a `sitemap` (it points at the built-in
+`app/sitemap.ts` — it never generates one itself), an `agents.md`, JSON-LD structured data, and an
+`llms.txt`. Where signals reinforce each other — e.g. `llms.txt` (what your site is for) and JSON-LD
+(what entity it is) — the recommendation says so, so you add the pair rather than one in isolation.
+The recommendations name Next.js conventions and file paths, not third-party packages. These are
+recommendations only; you decide what to act on.
 
 ## Development
 
