@@ -22,9 +22,10 @@ export interface DetectLlmsTxtResult {
 }
 
 const STARTER_ROUTE_TS = `// Starter llms.txt, scaffolded by ora-catalog because no llms.txt was found.
-// Edit the content below, then commit this file — ora-catalog will detect and reference it as
-// soon as it's live on your next build (this run's catalog can't reference it: nothing served it
-// during the build that just ran).
+// Fill in the sections below — especially "When to use" (this is what tells an agent whether your
+// site is relevant to its task) — then commit this file. ora-catalog references
+// /llms.txt on your next build (this run's catalog can't: nothing served it during the build that
+// just ran).
 export const dynamic = 'force-static';
 
 export function GET(): Response {
@@ -32,9 +33,19 @@ export function GET(): Response {
 
 > Add a one-line description of your site for AI agents here.
 
-## Docs
+## When to use
 
-- [Add a link to your documentation](https://example.com)
+- Describe a task an agent should use this site for
+- Add another representative use case
+
+## When NOT to use
+
+- Describe when an agent should not use this site
+
+## Key pages
+
+- [Docs](https://example.com/docs)
+- [Pricing](https://example.com/pricing)
 \`;
 
   return new Response(body, { headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
@@ -42,9 +53,10 @@ export function GET(): Response {
 `;
 
 const STARTER_ROUTE_JS = `// Starter llms.txt, scaffolded by ora-catalog because no llms.txt was found.
-// Edit the content below, then commit this file — ora-catalog will detect and reference it as
-// soon as it's live on your next build (this run's catalog can't reference it: nothing served it
-// during the build that just ran).
+// Fill in the sections below — especially "When to use" (this is what tells an agent whether your
+// site is relevant to its task) — then commit this file. ora-catalog references
+// /llms.txt on your next build (this run's catalog can't: nothing served it during the build that
+// just ran).
 export const dynamic = 'force-static';
 
 export function GET() {
@@ -52,9 +64,19 @@ export function GET() {
 
 > Add a one-line description of your site for AI agents here.
 
-## Docs
+## When to use
 
-- [Add a link to your documentation](https://example.com)
+- Describe a task an agent should use this site for
+- Add another representative use case
+
+## When NOT to use
+
+- Describe when an agent should not use this site
+
+## Key pages
+
+- [Docs](https://example.com/docs)
+- [Pricing](https://example.com/pricing)
 \`;
 
   return new Response(body, { headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
@@ -145,8 +167,9 @@ function scaffoldLlmsTxtRoute(
   }
 
   warn(
-    `Scaffolded a starter llms.txt at ${routeFile} — edit its content and commit it; ora-catalog ` +
-      'will reference /llms.txt starting with your next build.',
+    `Scaffolded a starter llms.txt at ${routeFile} — fill in its content (especially the "When to ` +
+      'use" section, since that\'s what tells an agent whether your site is relevant to its task) ' +
+      'and commit it; ora-catalog will reference /llms.txt starting with your next build.',
   );
   return routeFile;
 }

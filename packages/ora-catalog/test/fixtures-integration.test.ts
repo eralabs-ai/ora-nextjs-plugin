@@ -9,7 +9,7 @@ import { validateCatalog, validateCatalogArd } from '../src/validate.js';
 
 const fixturesDir = fileURLToPath(new URL('../../../fixtures/', import.meta.url));
 
-// Regression guard for the Phase 1 walking-skeleton wiring: generation against the real fixture
+// Regression guard for the walking-skeleton wiring: generation against the real fixture
 // corpus (not just synthetic tmp dirs) must stay spec-valid. Doesn't write files — that's covered
 // by write.test.ts — just exercises generateCatalog against real package.json shapes.
 describe('generateCatalog against the fixture corpus', () => {
@@ -23,7 +23,7 @@ describe('generateCatalog against the fixture corpus', () => {
     },
   );
 
-  it('warns about basePath for deploy-variants (Phase 1 known limitation)', async () => {
+  it('warns about basePath for deploy-variants (a known limitation)', async () => {
     const warnings: string[] = [];
     await generateCatalog({
       cwd: `${fixturesDir}deploy-variants`,
@@ -33,7 +33,7 @@ describe('generateCatalog against the fixture corpus', () => {
   });
 });
 
-// Phase 2.1 end-to-end: the config-overrides fixture ships a real `ard.config.ts`, so this
+// End-to-end: the config-overrides fixture ships a real `ard.config.ts`, so this
 // exercises the whole config path (jiti load -> validate -> entry overrides -> denylist/allowlist)
 // against a committed fixture rather than a synthetic tmp dir.
 describe('generateCatalog with the config-overrides fixture', () => {
@@ -52,7 +52,7 @@ describe('generateCatalog with the config-overrides fixture', () => {
   });
 });
 
-// Phase 2.2 end-to-end: each fixture ships a real artifact (an mcp-handler mount, a static
+// End-to-end: each fixture ships a real artifact (an mcp-handler mount, a static
 // public/openapi.json, an app/llms.txt/route.ts) plus an ard.config.ts declaring a fixture-specific
 // `siteUrl` so the resulting catalog is deterministic in CI. `scaffoldLlmsTxt` stays at its default
 // (`false`) here — these fixtures must never gain files as a side effect of running this suite.
@@ -68,6 +68,16 @@ describe('generateCatalog zero-config detection against the fixture corpus', () 
       type: 'application/mcp-server-card+json',
       url: 'https://mcp-adapter-fixture.example.com/mcp',
       capabilities: ['roll_dice'],
+    });
+  });
+
+  it('builds a well-known MCP server card from the mcp-adapter fixture mount', async () => {
+    const { serverCard } = await generateCatalog({ cwd: `${fixturesDir}mcp-adapter` });
+    expect(serverCard).toMatchObject({
+      name: 'com.example.mcp-adapter-fixture/fixture-mcp-adapter',
+      serverUrl: 'https://mcp-adapter-fixture.example.com/mcp',
+      remotes: [{ type: 'streamable-http', url: 'https://mcp-adapter-fixture.example.com/mcp' }],
+      tools: [{ name: 'roll_dice' }],
     });
   });
 
@@ -104,6 +114,29 @@ describe('generateCatalog zero-config detection against the fixture corpus', () 
     for (const name of ['bare', 'bare-js', 'mcp-adapter', 'openapi']) {
       expect(existsSync(`${fixturesDir}${name}/app/llms.txt`)).toBe(false);
     }
+  });
+});
+
+// Detect-and-recommend: the discovery fixture ships a JSON-LD Organization block in its
+// root layout, so generation must surface the "detected" recommendation (never a catalog entry).
+describe('generateCatalog JSON-LD detection against the fixture corpus', () => {
+  it('detects the JSON-LD block in the discovery fixture layout', async () => {
+    const recommendations: string[] = [];
+    const { catalog } = await generateCatalog({
+      cwd: `${fixturesDir}discovery`,
+      onRecommendation: (m) => recommendations.push(m),
+    });
+    expect(catalog.entries.every((e) => e.type !== 'application/ld+json')).toBe(true);
+    expect(recommendations.some((r) => r.includes('JSON-LD structured data detected'))).toBe(true);
+  });
+
+  it('recommends adding JSON-LD for the bare fixture (none present)', async () => {
+    const recommendations: string[] = [];
+    await generateCatalog({
+      cwd: `${fixturesDir}bare`,
+      onRecommendation: (m) => recommendations.push(m),
+    });
+    expect(recommendations.some((r) => r.includes('No JSON-LD structured data found'))).toBe(true);
   });
 });
 

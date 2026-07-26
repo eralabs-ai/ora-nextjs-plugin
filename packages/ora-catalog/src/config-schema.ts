@@ -4,8 +4,8 @@
 // in spec/.
 //
 // The config file is named `ard.config` (Agentic Resource Discovery) rather than after this
-// package or Ora: it's a file committed into the consumer's repo, so it stays vendor-neutral (the
-// plugin's endgame is upstreaming into Next.js).
+// package or any specific vendor: it's a file committed into the consumer's repo, so it stays
+// vendor-neutral (the plugin's endgame is upstreaming into Next.js).
 
 /** One entry the developer declares by hand, merged over/appended to inferred entries. */
 export interface ArdEntryOverride {

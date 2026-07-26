@@ -12,8 +12,14 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import type { McpServerCard } from '../src/server-card.js';
 import type { AiCatalog } from '../src/types.js';
-import { CATALOG_OUTPUT_PATH, writeCatalog } from '../src/write.js';
+import {
+  CATALOG_OUTPUT_PATH,
+  SERVER_CARD_OUTPUT_PATH,
+  writeCatalog,
+  writeServerCard,
+} from '../src/write.js';
 
 let dir: string;
 
@@ -21,6 +27,18 @@ const validCatalog: AiCatalog = {
   specVersion: '1.0',
   host: { displayName: 'Demo' },
   entries: [],
+};
+
+const serverCard: McpServerCard = {
+  name: 'com.example/demo',
+  description: 'Demo MCP server',
+  version: '1.0.0',
+  serverUrl: 'https://example.com/mcp',
+  remotes: [{ type: 'streamable-http', url: 'https://example.com/mcp' }],
+  tools: [{ name: 'roll_dice' }],
+  serverInfo: { name: 'Demo', version: '1.0.0' },
+  transport: { type: 'streamable-http', endpoint: 'https://example.com/mcp' },
+  capabilities: { tools: {} },
 };
 
 beforeEach(() => {
@@ -149,5 +167,52 @@ describe("writeCatalog — 'route' emission target", () => {
 
     if (result.ok) throw new Error('expected validation to fail');
     expect(existsSync(join(dir, 'app', '.well-known'))).toBe(false);
+  });
+});
+
+describe('writeServerCard', () => {
+  it('writes the static card to public/.well-known/mcp/server-card.json', () => {
+    const result = writeServerCard(dir, serverCard);
+    expect(result.target).toBe('static');
+    expect(result.path).toBe(join(dir, SERVER_CARD_OUTPUT_PATH));
+    const written = JSON.parse(readFileSync(result.path, 'utf8'));
+    expect(written).toEqual(serverCard);
+  });
+
+  it('leaves no temp file behind on a successful static write', () => {
+    writeServerCard(dir, serverCard);
+    const files = readdirSync(join(dir, 'public', '.well-known', 'mcp'));
+    expect(files).toEqual(['server-card.json']);
+  });
+
+  it("writes a route handler serving application/mcp-server-card+json on target 'route'", () => {
+    mkdirSync(join(dir, 'app'), { recursive: true });
+    writeFileSync(join(dir, 'tsconfig.json'), '{}', 'utf8');
+
+    const result = writeServerCard(dir, serverCard, { target: 'route' });
+
+    expect(result.target).toBe('route');
+    const expectedPath = join(dir, 'app', '.well-known', 'mcp', 'server-card.json', 'route.ts');
+    expect(result.path).toBe(expectedPath);
+
+    const source = readFileSync(expectedPath, 'utf8');
+    expect(source).toContain("export const dynamic = 'force-static'");
+    expect(source).toContain('application/mcp-server-card+json; charset=utf-8');
+    const bodyLiteral = /const body = (".*");/s.exec(source)?.[1];
+    if (bodyLiteral === undefined) throw new Error('expected an embedded body literal');
+    expect(JSON.parse(JSON.parse(bodyLiteral))).toEqual(serverCard);
+    // The static card was NOT written when targeting the route.
+    expect(existsSync(join(dir, SERVER_CARD_OUTPUT_PATH))).toBe(false);
+  });
+
+  it('falls back to the static target (with a warning) when there is no app/ directory', () => {
+    const warnings: string[] = [];
+    const result = writeServerCard(dir, serverCard, {
+      target: 'route',
+      warn: (m) => warnings.push(m),
+    });
+    expect(result.target).toBe('static');
+    expect(result.path).toBe(join(dir, SERVER_CARD_OUTPUT_PATH));
+    expect(warnings.some((w) => w.includes('no App Router directory'))).toBe(true);
   });
 });

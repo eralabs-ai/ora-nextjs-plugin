@@ -42,7 +42,7 @@ describe('generateCatalog', () => {
     expect(validateCatalogArd(catalog).valid).toBe(true);
   });
 
-  it('emits no entries with zero config — artifact detection is Phase 2.2', async () => {
+  it('emits no entries with zero config — artifact detection happens separately', async () => {
     const { catalog } = await generateCatalog({ cwd: dir });
     expect(catalog.entries).toEqual([]);
   });
@@ -75,7 +75,7 @@ describe('generateCatalog', () => {
 
 // detect-and-recommend: robots.txt / sitemap.xml / agents.md and the ARD §6.1 discovery
 // pointer surface as advisory recommendations, never catalog entries and never build failures.
-describe('generateCatalog agent-readiness recommendations (Phase 2.4)', () => {
+describe('generateCatalog agent-readiness recommendations', () => {
   it('recommends adding robots.txt / sitemap / agents.md when none are present', async () => {
     const recommendations: string[] = [];
     const { catalog } = await generateCatalog({
@@ -114,10 +114,10 @@ describe('generateCatalog agent-readiness recommendations (Phase 2.4)', () => {
   });
 });
 
-// Phase 2.2 end-to-end wiring: generateCatalog() must actually call the zero-config detectors and
+// End-to-end wiring: generateCatalog() must actually call the zero-config detectors and
 // fold their output into `entries`, with `ard.config`'s `siteUrl` resolving the absolute URLs they
 // need (see the detect-*.test.ts files for each detector's own behavior in isolation).
-describe('generateCatalog zero-config artifact detection (Phase 2.2)', () => {
+describe('generateCatalog zero-config artifact detection', () => {
   it('detects a public/openapi.json using the configured siteUrl', async () => {
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
     writeFileSync(
@@ -169,6 +169,54 @@ describe('generateCatalog zero-config artifact detection (Phase 2.2)', () => {
 
     expect(catalog.entries).toEqual([]);
     expect(warnings.some((w) => w.includes('no site URL is known'))).toBe(true);
+  });
+
+  it('builds an MCP server card from a detected mount, honoring the emit target', async () => {
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({ name: 'demo', description: 'Demo app', version: '2.0.0' }),
+      'utf8',
+    );
+    writeFileSync(
+      join(dir, 'ard.config.mjs'),
+      "export default { siteUrl: 'https://example.com' };\n",
+      'utf8',
+    );
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      `import { createMcpHandler } from 'mcp-handler';\n` +
+        `const handler = createMcpHandler((server) => { server.tool('roll_dice', 'd', {}, async () => ({})); });\n` +
+        `export { handler as GET };\n`,
+      'utf8',
+    );
+
+    const { serverCard } = await generateCatalog({ cwd: dir });
+    expect(serverCard).toEqual({
+      name: 'com.example/demo',
+      description: 'Demo app',
+      version: '2.0.0',
+      serverUrl: 'https://example.com/mcp',
+      remotes: [{ type: 'streamable-http', url: 'https://example.com/mcp' }],
+      tools: [{ name: 'roll_dice' }],
+      serverInfo: { name: 'demo', version: '2.0.0' },
+      transport: { type: 'streamable-http', endpoint: 'https://example.com/mcp' },
+      capabilities: { tools: {} },
+    });
+  });
+
+  it('emits no server card when there is no MCP mount', async () => {
+    const { serverCard } = await generateCatalog({ cwd: dir });
+    expect(serverCard).toBeUndefined();
+  });
+
+  it('recommends adding an OpenAPI doc and a JSON-LD block when both are absent', async () => {
+    const recommendations: string[] = [];
+    await generateCatalog({ cwd: dir, onRecommendation: (m) => recommendations.push(m) });
+    const joined = recommendations.join('\n');
+    expect(joined).toContain('No OpenAPI doc found');
+    expect(joined).toContain('No JSON-LD structured data found');
   });
 
   it('applies the denylist to a detected entry, not just config-declared ones', async () => {

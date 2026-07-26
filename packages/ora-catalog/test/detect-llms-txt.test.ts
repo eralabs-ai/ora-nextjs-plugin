@@ -124,7 +124,11 @@ describe('detectLlmsTxt — scaffolding', () => {
     const expectedPath = join(dir, 'app', 'llms.txt', 'route.ts');
     expect(result.scaffoldedPath).toBe(expectedPath);
     expect(existsSync(expectedPath)).toBe(true);
-    expect(readFileSync(expectedPath, 'utf8')).toContain('export function GET(): Response');
+    const scaffolded = readFileSync(expectedPath, 'utf8');
+    expect(scaffolded).toContain('export function GET(): Response');
+    // The scaffold ships the "When to use" section since that's what tells an agent whether your
+    // site is relevant to its task; the developer/skill fills in the actual content.
+    expect(scaffolded).toContain('## When to use');
     expect(warnings.some((w) => w.includes('Scaffolded a starter llms.txt'))).toBe(true);
   });
 

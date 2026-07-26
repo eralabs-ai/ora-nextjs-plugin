@@ -5,6 +5,8 @@ import { basename, resolve } from 'node:path';
 export interface SiteMetadata {
   displayName: string;
   description?: string;
+  /** `package.json` `version`, if present — used to stamp the MCP server card's `version`. */
+  version?: string;
   /** Best-effort production domain, from a hosting provider's build-time env vars. */
   domain?: string;
 }
@@ -12,6 +14,7 @@ export interface SiteMetadata {
 interface PackageJsonShape {
   name?: unknown;
   description?: unknown;
+  version?: unknown;
 }
 
 /** Strips an npm scope (`@scope/name` -> `name`) so it reads as a display name. */
@@ -44,8 +47,10 @@ export function readSiteMetadata(cwd: string): SiteMetadata {
     typeof pkg.description === 'string' && pkg.description.trim() !== ''
       ? pkg.description.trim()
       : undefined;
+  const version =
+    typeof pkg.version === 'string' && pkg.version.trim() !== '' ? pkg.version.trim() : undefined;
 
-  return { displayName, description, domain: readVercelDomain() };
+  return { displayName, description, version, domain: readVercelDomain() };
 }
 
 /**
@@ -53,7 +58,7 @@ export function readSiteMetadata(cwd: string): SiteMetadata {
  * truth, not a guess. Deliberately only `VERCEL_PROJECT_PRODUCTION_URL` (the stable production
  * domain), not the per-deployment `VERCEL_URL`: the latter is unique to a single preview/production
  * deployment and disappears once superseded, which would bake a dead, deployment-specific
- * `did:web:` identifier into the catalog. Absent outside Vercel (or in Phase 1's other hosts) —
+ * `did:web:` identifier into the catalog. Absent outside Vercel (or on other hosts) —
  * that's fine, `domain` stays undefined and the catalog omits `host.identifier`.
  */
 function readVercelDomain(): string | undefined {

@@ -463,7 +463,7 @@ widen the plugin's detect-and-recommend/emit surface to more artifacts Ora score
 recall is unchanged: the plugin still only detects/recommends/emits what is unambiguous, and never
 authors judgment content. **This is the immediate work.**
 
-- [ ] **OpenAPI — recommend when absent (extends Phase 3.1).** `detect-openapi.ts` is warn-only today
+- [x] **OpenAPI — recommend when absent (extends Phase 3.1).** `detect-openapi.ts` is warn-only today
       (it references a committed `public/openapi.json`); add a recommendation on the advisory channel
       when no doc is present, mirroring robots/sitemap/agents.md. This is the highest-density single
       fix: one doc feeds `openapi-spec` (Discovery) **and** several Usability checks (`public-api-docs`,
@@ -471,8 +471,9 @@ authors judgment content. **This is the immediate work.**
       build** — name the idiomatic Next.js path (`zod-openapi` / `@asteasolutions/zod-to-openapi` if the
       app validates with Zod; else `next-swagger-doc` / `next-openapi-gen`). Add a second message when a
       doc exists but declares no `components.securitySchemes` (nudge toward the auth declaration Phase
-      2.8 reads). Telnyx (A+) confirms the pattern: a full committed OpenAPI doc.
-- [ ] **JSON-LD — detect + recommend (new `detect-json-ld.ts`).** Ora scores structured data:
+      2.8 reads). Telnyx (A+) confirms the pattern: a full committed OpenAPI doc. (`detect-openapi.ts`
+      gained an optional `recommend` channel; wired through `generate.ts`.)
+- [x] **JSON-LD — detect + recommend (new `detect-json-ld.ts`).** Ora scores structured data:
       `json-ld`, `org-schema-completeness`, `schema-type-breadth`, `json-ld-entity-linking`,
       `speakable-content` (Discovery). Telnyx ships 7 JSON-LD blocks incl. an `Organization` with a
       10-URL `sameAs` (LinkedIn/GitHub/Crunchbase/npm/socials) — `sameAs` is the entity-disambiguation
@@ -483,7 +484,7 @@ authors judgment content. **This is the immediate work.**
       external/judgment → the companion skill authors them (Phase 6). An opt-in scaffold of a minimal
       `Organization` component (name/url/description from `package.json`/`siteUrl`, empty `sameAs` +
       TODO) is possible but low-priority — the weakest fit, since the valuable fields aren't derivable.
-- [ ] **MCP — generate `/.well-known/mcp/server-card.json`.** Empirical finding (2026-07-22 Ora scan of
+- [x] **MCP — generate `/.well-known/mcp/server-card.json`.** Empirical finding (2026-07-22 Ora scan of
       a deployed `mcp-handler` server): a working MCP server moved the score **0 points** because Ora
       discovers MCP via the well-known **server card**, not the ARD catalog entry — `mcp-server-card`
       ("No MCP server card found at /.well-known/mcp/server-card.json") and `mcp-well-known-discovery`
@@ -498,10 +499,22 @@ authors judgment content. **This is the immediate work.**
       `authentication` block (never assert "open"). This is **not** issue
       `agentic-community/mcp-gateway-registry#119` (that proposes a different vendor's multi-server
       `/.well-known/mcp-servers` registry format — confirm the intended shape with Ora; see open
-      questions).
-- [ ] Fixture + tests for each: OpenAPI-absent recommendation, JSON-LD detect/recommend, and a
+      questions). **Shape deviation (found 2026-07-26, from newer ground truth):** the plan's original
+      `serverInfo`/`transport`/`tools[].input_schema` fields describe an *earlier* SEP-1649 draft. The
+      current official MCP server card (`experimental-ext-server-card` `schema.json`) and the Ora-aligned
+      `agent-ready.dev` validator both converge on the MCP-registry `server.json` shape — reverse-DNS
+      `name`, `description`, `version`, `remotes[]` — and a 2026-07-22 scan-methodology note confirms
+      Ora's `mcp-server-card` check awards full credit only when `name`/`description`/`version`/`serverUrl`/`tools[]`
+      are all present. So the emitted card (`server-card.ts`) is the **union**: registry `name` +
+      `remotes[]` for spec/registry compatibility, plus top-level `serverUrl` + `tools[]` for Ora.
+      Precision over recall: no `$schema` URL is guessed and no `authentication` block is asserted (auth
+      is Phase 2.8). Emitted via the same `emit` (static/route) logic as the catalog (`write.ts`
+      `writeServerCard`); the card is gitignored fixture build output like the catalog.
+- [x] Fixture + tests for each: OpenAPI-absent recommendation, JSON-LD detect/recommend, and a
       server-card emission fixture. Re-scan a deployed MCP fixture to confirm the `mcp-*` checks flip
-      (the 0-point result becomes a measured win).
+      (the 0-point result becomes a measured win). (Unit tests per module + generate/cli wiring tests +
+      the `discovery` fixture now ships a JSON-LD block and the `mcp-adapter` fixture emits a server
+      card. The deployed re-scan remains a human/deploy step, like the other Vercel-only checks.)
 
 **Done when:** the CLI recommends OpenAPI when absent, detects+recommends JSON-LD, and emits a valid
 `/.well-known/mcp/server-card.json` that Ora's `mcp-server-card`/`mcp-well-known-discovery` checks
@@ -718,7 +731,7 @@ Goal: prove the output is *usable by agents*, not just spec-valid, and lock in c
 | 16 | Once the skill's `api-catalog`→`ai-catalog` bug is fixed, do the **registry crawler and the score scanner** both key on ARD `/.well-known/ai-catalog.json`? | Confirm they agree — the plugin's headline output depends on it | _pending (Ora aware of the skill bug 2026-07-22, fix expected)_ |
 | 17 | What `User-agent` token does **Ora's crawler** send? | Needed to detect a blocking robots.txt and to author the scoped `Allow` recommendation | _pending_ |
 | 18 | Does the plugin/companion skill scope include `agents.md` content and the robots.txt policy, or does Ora expect those from its own `agent-ready-website` skill? | Plugin detects/scaffolds structure; companion skill authors content and defers to Ora's skill for the scan loop | _pending_ |
-| 19 | Confirm the **MCP server-card path/schema** Ora's `mcp-server-card` check expects: SEP-1649/PR-2127 `/.well-known/mcp/server-card.json` (media type `application/mcp-server-card+json`)? The contact cited `agentic-community/mcp-gateway-registry#119`, but that issue is a *different* vendor's multi-server `/.well-known/mcp-servers` registry format — likely a miscitation. Also: should we emit the `/.well-known/mcp.json` alias (SEP-1649's original name)? | Build the SEP-1649/2127 server card (matches the path Ora already probes); alias `mcp.json` if it helps clients | _pending (raise 2026-07-22 findings)_ |
+| 19 | Confirm the **MCP server-card path/schema** Ora's `mcp-server-card` check expects: SEP-1649/PR-2127 `/.well-known/mcp/server-card.json` (media type `application/mcp-server-card+json`)? The contact cited `agentic-community/mcp-gateway-registry#119`, but that issue is a *different* vendor's multi-server `/.well-known/mcp-servers` registry format — likely a miscitation. Also: should we emit the `/.well-known/mcp.json` alias (SEP-1649's original name)? | Build the SEP-1649/2127 server card (matches the path Ora already probes); alias `mcp.json` if it helps clients | **Empirically pinned (2026-07-22, tunnel scans of a deployed `mcp-handler` server):** `mcp-server-card` **passes** on the plugin's generated card at `/.well-known/mcp/server-card.json` (found + accepted). But **`mcp-well-known-discovery` never extracts the server URL and all runtime `mcp-*` checks stay `na` ("No MCP server detected")** — unchanged across `serverUrl`/`remotes`/`transport.endpoint` field shapes, with a `/.well-known/mcp.json` alias also present, and with a live endpoint that answers `initialize`. So Ora's MCP *discovery* is **decoupled** from the server-card and uses an undocumented mechanism. Caveat: tested on a `*.trycloudflare.com` tunnel (the `mcp-server: pass` was a Cloudflare brand false-positive), so discovery may not run truthfully off a real domain — **re-test on the Vercel deploy.** Open for Ora: how does `mcp-well-known-discovery` find the URL, and does it connect on non-registered domains? |
 | 20 | Should Ora's **MCP discovery consume the ARD catalog's `application/mcp-server-card+json` entry**? Empirically (2026-07-22 scan) Ora validates the catalog (`ard-catalog: pass`) but ignores it for MCP discovery — it only reads `/.well-known/mcp/server-card.json`, so a real MCP server scored **0**. If discovery consumed the catalog entry, the plugin's existing output would already work. | Ideally yes — otherwise the plugin must emit the well-known card too (Phase 2.7) | _pending_ |
 | 21 | Which **auth shape** does Ora reward, and where does it read it — OpenAPI `securitySchemes`, the server-card `authentication` block, or RFC 9728 `/.well-known/oauth-protected-resource`? Drives Phase 2.8. | Read the native per-kind declaration (securitySchemes for REST, `withMcpAuth`+RFC 9728 for MCP); confirm Ora's weighting | _pending_ |
 

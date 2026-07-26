@@ -107,3 +107,45 @@ describe('detectOpenApi', () => {
     expect(warnings.some((w) => w.includes('no site URL is known'))).toBe(true);
   });
 });
+
+describe('detectOpenApi recommendations', () => {
+  let recommendations: string[];
+  const recommend = (message: string): void => {
+    recommendations.push(message);
+  };
+
+  beforeEach(() => {
+    recommendations = [];
+  });
+
+  it('recommends adding an OpenAPI doc (naming idiomatic tools) when none is present', () => {
+    detectOpenApi({ cwd: dir, siteUrl: 'https://example.com', basePath: '', warn, recommend });
+    const joined = recommendations.join('\n');
+    expect(joined).toContain('No OpenAPI doc found');
+    expect(joined).toContain('zod-openapi');
+  });
+
+  it('does not recommend "add one" when a doc already exists', () => {
+    writeDoc(JSON.stringify({ openapi: '3.1.0', info: {} }));
+    detectOpenApi({ cwd: dir, siteUrl: 'https://example.com', basePath: '', warn, recommend });
+    expect(recommendations.some((r) => r.includes('No OpenAPI doc found'))).toBe(false);
+  });
+
+  it('nudges toward declaring securitySchemes when a doc declares none', () => {
+    writeDoc(JSON.stringify({ openapi: '3.1.0', info: {} }));
+    detectOpenApi({ cwd: dir, siteUrl: 'https://example.com', basePath: '', warn, recommend });
+    expect(recommendations.some((r) => r.includes('securitySchemes'))).toBe(true);
+  });
+
+  it('does not nudge about securitySchemes when the doc declares them', () => {
+    writeDoc(
+      JSON.stringify({
+        openapi: '3.1.0',
+        info: {},
+        components: { securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } } },
+      }),
+    );
+    detectOpenApi({ cwd: dir, siteUrl: 'https://example.com', basePath: '', warn, recommend });
+    expect(recommendations.some((r) => r.includes('securitySchemes'))).toBe(false);
+  });
+});

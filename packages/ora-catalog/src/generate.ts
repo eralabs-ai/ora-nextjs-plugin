@@ -3,8 +3,9 @@ import { resolve } from 'node:path';
 import { loadArdConfig } from './config.js';
 import { isPathDenied } from './denylist.js';
 import { detectAgentsMd } from './detect-agents-md.js';
+import { detectJsonLd } from './detect-json-ld.js';
 import { detectLlmsTxt } from './detect-llms-txt.js';
-import { detectMcpServers } from './detect-mcp.js';
+import { buildMcpEntries, detectMcpMounts } from './detect-mcp.js';
 import { detectOpenApi } from './detect-openapi.js';
 import { detectRobots } from './detect-robots.js';
 import { detectSitemap } from './detect-sitemap.js';
@@ -12,6 +13,7 @@ import { buildDiscoveryRecommendations } from './discovery.js';
 import { applyEntryOverrides, entryUrlPath } from './entries.js';
 import { loadNextConfig } from './next-config.js';
 import { SPEC_VERSION } from './schema.js';
+import { buildMcpServerCard, type McpServerCard } from './server-card.js';
 import { readSiteMetadata } from './site-metadata.js';
 import { hostnameFromUrl, resolveSiteUrl } from './site-url.js';
 import type { AiCatalog, CatalogEntry } from './types.js';
@@ -34,6 +36,12 @@ export interface GenerateCatalogResult {
   catalog: AiCatalog;
   /** Emission target resolved from `ard.config` `emit` — which output `writeCatalog` should write. */
   emit: EmissionTarget;
+  /**
+   * The well-known MCP server card to emit alongside the catalog, or undefined when there's no
+   * (single, resolvable) `mcp-handler` mount to describe. Agents discover MCP via this card, not the
+   * ARD catalog entry, so it's written to `/.well-known/mcp/server-card.json` by the CLI.
+   */
+  serverCard?: McpServerCard;
 }
 
 /**
@@ -75,9 +83,15 @@ export async function generateCatalog(
   // (`format: uri`) would reject.
   const siteUrl = resolveSiteUrl({ configSiteUrl: config.siteUrl, detectedDomain: site.domain });
 
-  const inferredEntries: CatalogEntry[] = [...detectMcpServers({ cwd, siteUrl, basePath, warn })];
+  // Scan `app/` for MCP mounts once, then feed the same mounts to both the catalog entry and the
+  // well-known server card (agents discover MCP via the card, not the entry — see server-card.ts).
+  const mcpMounts = detectMcpMounts({ cwd, warn });
+  const inferredEntries: CatalogEntry[] = [
+    ...buildMcpEntries({ mounts: mcpMounts, siteUrl, basePath, warn }),
+  ];
+  const serverCard = buildMcpServerCard({ mounts: mcpMounts, siteUrl, basePath, site, recommend });
 
-  const openApiEntry = detectOpenApi({ cwd, siteUrl, basePath, warn });
+  const openApiEntry = detectOpenApi({ cwd, siteUrl, basePath, warn, recommend });
   if (openApiEntry) inferredEntries.push(openApiEntry);
 
   const llmsTxtResult = detectLlmsTxt({
@@ -90,9 +104,9 @@ export async function generateCatalog(
   if (llmsTxtResult.entry) inferredEntries.push(llmsTxtResult.entry);
 
   // Declaring entries in config is expected, not noteworthy — the per-entry notes
-  // (`applyEntryOverrides().notes`) are left for the Phase 2.3 build summary rather than surfaced
-  // as warnings here. A denylist *exclusion*, below, is worth warning about: an inferred or
-  // config-declared entry that then got dropped.
+  // (`applyEntryOverrides().notes`) are meant for a build summary rather than surfaced as warnings
+  // here. A denylist *exclusion*, below, is worth warning about: an inferred or config-declared
+  // entry that then got dropped.
   const { entries: overridden } = applyEntryOverrides(inferredEntries, config.entries);
 
   const entries = overridden.filter((entry) => {
@@ -105,13 +119,14 @@ export async function generateCatalog(
     return true;
   });
 
-  // Detect-and-recommend for the discovery/access artifacts Ora scores. These never
-  // add catalog entries and never fail a build — they only surface advisory recommendations. The
-  // plugin detects; it never reimplements a sitemap or rewrites a robots policy, and never guesses
-  // agents.md content (the companion skill authors that — Phase 6).
+  // Detect-and-recommend for the discovery/access artifacts that affect agent-readiness. These
+  // never add catalog entries and never fail a build — they only surface advisory recommendations.
+  // The plugin detects; it never reimplements a sitemap or rewrites a robots policy, and never
+  // guesses agents.md content (the companion skill authors that).
   detectRobots({ cwd, recommend });
   detectSitemap({ cwd, recommend });
   detectAgentsMd({ cwd, recommend });
+  detectJsonLd({ cwd, recommend });
   for (const message of buildDiscoveryRecommendations({ siteUrl, basePath })) recommend(message);
 
   const domain = config.siteUrl ? hostnameFromUrl(config.siteUrl) : site.domain;
@@ -130,5 +145,5 @@ export async function generateCatalog(
     entries,
   };
 
-  return { catalog, emit: config.emit };
+  return { catalog, emit: config.emit, ...(serverCard ? { serverCard } : {}) };
 }
