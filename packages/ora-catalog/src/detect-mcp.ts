@@ -1,7 +1,7 @@
 import { readFileSync, statSync } from 'node:fs';
 
 import { findAppDir } from './app-dir.js';
-import { buildArtifactUrl, buildUrn } from './site-url.js';
+import { buildArtifactUrl, buildUrn, NO_SITE_URL_HINT } from './site-url.js';
 import type { CatalogEntry } from './types.js';
 import { pathSegments, ROUTE_FILE_NAMES, walkFiles } from './walk-files.js';
 
@@ -111,8 +111,7 @@ export function buildMcpEntries(options: BuildMcpEntriesOptions): CatalogEntry[]
   if (!siteUrl) {
     options.warn(
       `Found ${mounts.length === 1 ? 'an' : `${mounts.length}`} MCP server mount` +
-        `${mounts.length === 1 ? '' : 's'} (mcp-handler) but no site URL is known — set ` +
-        '"siteUrl" in ard.config, or deploy on Vercel, to include it in the catalog.',
+        `${mounts.length === 1 ? '' : 's'} (mcp-handler) but no site URL is known — ${NO_SITE_URL_HINT}`,
     );
     return [];
   }

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { buildArtifactUrl, buildUrn } from './site-url.js';
+import { buildArtifactUrl, buildUrn, NO_SITE_URL_HINT } from './site-url.js';
 import type { CatalogEntry } from './types.js';
 
 export interface DetectOpenApiOptions {
@@ -102,8 +102,7 @@ export function detectOpenApi(options: DetectOpenApiOptions): CatalogEntry | und
 
   if (!options.siteUrl) {
     options.warn(
-      'Found a valid public/openapi.json but no site URL is known — set "siteUrl" in ard.config, ' +
-        'or deploy on Vercel, to include it in the catalog.',
+      `Found a valid public/openapi.json but no site URL is known — ${NO_SITE_URL_HINT}`,
     );
     return undefined;
   }

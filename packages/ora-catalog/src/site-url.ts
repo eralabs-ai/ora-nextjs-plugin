@@ -4,6 +4,19 @@
 // decides the site's absolute origin and joins paths onto it, so every detector stays consistent
 // about basePath handling and precedence.
 
+/**
+ * Shared tail for the "can't build an absolute URL" warning every URL-bearing detector (MCP,
+ * OpenAPI, llms.txt) emits when no origin resolved — kept in one place so the guidance can't drift
+ * out of sync between detectors. Must be explicit that the value is the *public production* URL
+ * (it's written into the catalog's entry URLs, so a localhost/preview value would be wrong), and
+ * that "locally" means you can *set* it locally — not that a local URL is acceptable.
+ */
+export const NO_SITE_URL_HINT =
+  "set your site's public production URL — e.g. https://yourdomain.com, NOT a localhost or preview " +
+  'URL, since this value is written into the catalog\'s entry URLs — via "siteUrl" in ard.config ' +
+  'or a SITE_URL / NEXT_PUBLIC_SITE_URL env var. You can set it locally to generate and preview the ' +
+  'real catalog before deploying.';
+
 /** Where the site's absolute origin can come from, in precedence order (config wins). */
 export interface ResolveSiteUrlOptions {
   /** `ard.config` `siteUrl` — an explicit developer declaration, so it always wins. */
