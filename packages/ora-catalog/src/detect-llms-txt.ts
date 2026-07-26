@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 
 import { findAppDir } from './app-dir.js';
-import { buildArtifactUrl, buildUrn } from './site-url.js';
+import { buildArtifactUrl, buildUrn, NO_SITE_URL_HINT } from './site-url.js';
 import type { CatalogEntry } from './types.js';
 import { ROUTE_FILE_NAMES } from './walk-files.js';
 
@@ -120,11 +120,7 @@ export function detectLlmsTxt(options: DetectLlmsTxtOptions): DetectLlmsTxtResul
 
   if (sourceFile) {
     if (!options.siteUrl) {
-      options.warn(
-        'Found an existing llms.txt but no site URL is known — set "siteUrl" in ard.config, or set ' +
-          'a SITE_URL (or NEXT_PUBLIC_SITE_URL) env var, to include it in the catalog. Either works ' +
-          'in a local build, so you can generate and check the catalog before deploying.',
-      );
+      options.warn(`Found an existing llms.txt but no site URL is known — ${NO_SITE_URL_HINT}`);
       return {};
     }
     return {

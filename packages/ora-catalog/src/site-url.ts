@@ -4,6 +4,16 @@
 // decides the site's absolute origin and joins paths onto it, so every detector stays consistent
 // about basePath handling and precedence.
 
+/**
+ * Shared tail for the "can't build an absolute URL" warning every URL-bearing detector (MCP,
+ * OpenAPI, llms.txt) emits when no origin resolved — kept in one place so the guidance can't drift
+ * out of sync between detectors. Names both the config field and the env vars, and points out that
+ * any of them works during a local build (unlike Vercel's, which is build-on-Vercel only).
+ */
+export const NO_SITE_URL_HINT =
+  'set "siteUrl" in ard.config, or a SITE_URL (or NEXT_PUBLIC_SITE_URL) env var, to include it in ' +
+  'the catalog — any of these works in a local build, so you can check the catalog before deploying.';
+
 /** Where the site's absolute origin can come from, in precedence order (config wins). */
 export interface ResolveSiteUrlOptions {
   /** `ard.config` `siteUrl` — an explicit developer declaration, so it always wins. */
