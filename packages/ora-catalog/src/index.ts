@@ -64,7 +64,13 @@ export { isPathDenied, matchesAnyGlob } from './denylist.js';
 
 export { applyEntryOverrides, entryUrlPath, type ApplyEntryOverridesResult } from './entries.js';
 
-export { resolveSiteUrl, buildArtifactUrl, buildUrn, hostnameFromUrl } from './site-url.js';
+export {
+  resolveSiteUrl,
+  readSiteUrlFromEnv,
+  buildArtifactUrl,
+  buildUrn,
+  hostnameFromUrl,
+} from './site-url.js';
 
 export { findAppDir } from './app-dir.js';
 

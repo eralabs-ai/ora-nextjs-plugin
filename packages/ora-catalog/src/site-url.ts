@@ -8,20 +8,37 @@
 export interface ResolveSiteUrlOptions {
   /** `ard.config` `siteUrl` — an explicit developer declaration, so it always wins. */
   configSiteUrl?: string;
+  /** Absolute URL from a build-time env var (`SITE_URL` / `NEXT_PUBLIC_SITE_URL`) — see `readSiteUrlFromEnv`. */
+  envSiteUrl?: string;
   /** Best-effort domain from `readSiteMetadata` (currently: Vercel's production-domain env var). */
   detectedDomain?: string;
 }
 
 /**
- * Resolves the site's absolute origin (no trailing slash), or undefined if neither an explicit
- * `siteUrl` nor a detected domain is available. Undefined is a normal, expected outcome (e.g. a
- * non-Vercel host with no `siteUrl` configured) — callers must treat it as "can't build absolute
- * URLs right now", not an error.
+ * Resolves the site's absolute origin (no trailing slash), or undefined if none of an explicit
+ * `siteUrl`, an env-var URL, or a detected domain is available. Undefined is a normal, expected
+ * outcome (e.g. a non-Vercel host with nothing configured) — callers must treat it as "can't build
+ * absolute URLs right now", not an error. Precedence: explicit config wins, then the env var (which
+ * is present during a local build, unlike Vercel's), then the provider-detected domain.
  */
 export function resolveSiteUrl(options: ResolveSiteUrlOptions): string | undefined {
   if (options.configSiteUrl) return stripTrailingSlash(options.configSiteUrl.trim());
+  if (options.envSiteUrl) return stripTrailingSlash(options.envSiteUrl.trim());
   if (options.detectedDomain) return `https://${options.detectedDomain}`;
   return undefined;
+}
+
+/**
+ * The site origin declared via a build-time env var — `SITE_URL` first, then `NEXT_PUBLIC_SITE_URL`
+ * (the two names Next.js apps most commonly use for a stable production URL). Unlike Vercel's
+ * `VERCEL_PROJECT_PRODUCTION_URL`, these are present during a plain local `next build`, so a
+ * developer can generate the full catalog and iterate on it *before* deploying. Expects an absolute
+ * `http(s)://` origin (same shape as `ard.config` `siteUrl`). Returns undefined when neither is set
+ * (or both are blank).
+ */
+export function readSiteUrlFromEnv(): string | undefined {
+  const value = process.env.SITE_URL ?? process.env.NEXT_PUBLIC_SITE_URL;
+  return value && value.trim() !== '' ? value.trim() : undefined;
 }
 
 /**
