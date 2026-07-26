@@ -11,6 +11,7 @@ import { detectRobots } from './detect-robots.js';
 import { detectSitemap } from './detect-sitemap.js';
 import { buildDiscoveryRecommendations } from './discovery.js';
 import { applyEntryOverrides, entryUrlPath } from './entries.js';
+import { loadProjectEnv } from './load-project-env.js';
 import { loadNextConfig } from './next-config.js';
 import { SPEC_VERSION } from './schema.js';
 import { buildMcpServerCard, type McpServerCard } from './server-card.js';
@@ -63,6 +64,12 @@ export async function generateCatalog(
   const cwd = resolve(options.cwd ?? process.cwd());
   const warn = options.onWarning ?? (() => {});
   const recommend = options.onRecommendation ?? (() => {});
+
+  // Load the project's `.env*` files first: the CLI runs as its own process (a `postbuild` step),
+  // so — unlike `next build` — nothing has populated `process.env` from them yet. Both the env-var
+  // siteUrl fallback below and any `ard.config` that reads `process.env` depend on this.
+  loadProjectEnv(cwd);
+
   const site = readSiteMetadata(cwd);
 
   const { config } = await loadArdConfig(cwd);

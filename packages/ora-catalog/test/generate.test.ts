@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { generateCatalog } from '../src/generate.js';
 import { SPEC_VERSION } from '../src/schema.js';
 import { validateCatalog, validateCatalogArd } from '../src/validate.js';
+import { installFakeNextEnv } from './fake-next-env.js';
 
 let dir: string;
 const originalEnv = { ...process.env };
@@ -45,6 +46,28 @@ describe('generateCatalog', () => {
   it('emits no entries with zero config — artifact detection happens separately', async () => {
     const { catalog } = await generateCatalog({ cwd: dir });
     expect(catalog.entries).toEqual([]);
+  });
+
+  it('resolves siteUrl from a project .env (loaded via the app @next/env in postbuild)', async () => {
+    // Regression: the CLI runs as its own process, so without loading `.env*` a
+    // NEXT_PUBLIC_SITE_URL declared there was ignored and no URL-bearing entry was emitted.
+    delete process.env.SITE_URL;
+    delete process.env.NEXT_PUBLIC_SITE_URL;
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    mkdirSync(join(dir, 'public'), { recursive: true });
+    writeFileSync(join(dir, 'public', 'llms.txt'), '# hello\n', 'utf8');
+    writeFileSync(
+      join(dir, '.env'),
+      'NEXT_PUBLIC_SITE_URL=https://from-dotenv.example.com\n',
+      'utf8',
+    );
+    installFakeNextEnv(dir);
+
+    const { catalog } = await generateCatalog({ cwd: dir });
+
+    const llmsTxt = catalog.entries.find((e) => e.url?.endsWith('/llms.txt'));
+    expect(llmsTxt?.url).toBe('https://from-dotenv.example.com/llms.txt');
+    expect(catalog.host?.identifier).toBe('did:web:from-dotenv.example.com');
   });
 
   it('sets host.identifier from the Vercel production domain when present', async () => {
