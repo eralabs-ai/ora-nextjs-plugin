@@ -2,14 +2,24 @@ import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:f
 import { dirname, join } from 'node:path';
 
 import { findAppDir } from './app-dir.js';
+import type { McpServerCard } from './server-card.js';
 import type { AiCatalog } from './types.js';
 import { formatCatalogErrors, validateCatalogArd } from './validate.js';
 
 /** Where the static emission target lands, relative to the project root. */
 export const CATALOG_OUTPUT_PATH = join('public', '.well-known', 'ai-catalog.json');
 
+/** Where the static MCP server card lands (the well-known path agent registries probe). */
+export const SERVER_CARD_OUTPUT_PATH = join('public', '.well-known', 'mcp', 'server-card.json');
+
 /** App Router route segments that serve the catalog for the `'route'` emission target. */
 const CATALOG_ROUTE_SEGMENTS = ['.well-known', 'ai-catalog.json'];
+
+/** App Router route segments that serve the MCP server card for the `'route'` emission target. */
+const SERVER_CARD_ROUTE_SEGMENTS = ['.well-known', 'mcp', 'server-card.json'];
+
+/** Media type of the MCP server card (SEP-1649 / PR-2127). */
+const SERVER_CARD_CONTENT_TYPE = 'application/mcp-server-card+json';
 
 export type EmissionTarget = 'static' | 'route';
 
@@ -27,7 +37,7 @@ export type WriteCatalogResult =
  * Validates a catalog against the strict official ARD schema and, only if valid, writes it — either
  * as the static `public/.well-known/ai-catalog.json` (default) or as an App Router route handler at
  * `app/.well-known/ai-catalog.json/route.{ts,js}` (`target: 'route'`). Never writes an
- * invalid catalog — this is the hard-fail gate the plan calls for: a bad catalog is worse than none,
+ * invalid catalog — this is a hard-fail gate by design: a bad catalog is worse than none,
  * so it must never reach a real deployment. The strict (not permissive) schema gates here because
  * this is *emitted* output: it must survive the official conformance tool, not merely count as a
  * catalog.
@@ -52,7 +62,11 @@ export function writeCatalog(
   if (target === 'route') {
     const appDir = findAppDir(cwd);
     if (appDir) {
-      return { ok: true, path: writeRouteHandler(cwd, appDir, catalog), target: 'route' };
+      const path = writeRouteHandler(cwd, appDir, CATALOG_ROUTE_SEGMENTS, jsonText(catalog), {
+        contentType: 'application/json',
+        served: '/.well-known/ai-catalog.json',
+      });
+      return { ok: true, path, target: 'route' };
     }
     warn(
       "emit: 'route' was requested but no App Router directory (app/ or src/app/) was found — " +
@@ -63,14 +77,60 @@ export function writeCatalog(
   return { ok: true, path: writeStaticFile(cwd, catalog), target: 'static' };
 }
 
+export type WriteServerCardResult = { path: string; target: EmissionTarget };
+
+/**
+ * Writes the well-known MCP server card — either as the static
+ * `public/.well-known/mcp/server-card.json` (default) or as an App Router route handler at
+ * `app/.well-known/mcp/server-card.json/route.{ts,js}` serving `application/mcp-server-card+json`
+ * (`target: 'route'`). Unlike the catalog there is no strict schema to gate on (the server-card
+ * shape isn't standardized yet), so this always writes. Follows the
+ * same `emit` target and the same static-vs-route fallback as `writeCatalog`.
+ */
+export function writeServerCard(
+  cwd: string,
+  card: McpServerCard,
+  options: WriteCatalogOptions = {},
+): WriteServerCardResult {
+  const target = options.target ?? 'static';
+  const warn = options.warn ?? (() => {});
+  const body = jsonText(card);
+
+  if (target === 'route') {
+    const appDir = findAppDir(cwd);
+    if (appDir) {
+      return {
+        path: writeRouteHandler(cwd, appDir, SERVER_CARD_ROUTE_SEGMENTS, body, {
+          contentType: SERVER_CARD_CONTENT_TYPE,
+          served: '/.well-known/mcp/server-card.json',
+        }),
+        target: 'route',
+      };
+    }
+    warn(
+      "emit: 'route' was requested but no App Router directory (app/ or src/app/) was found — " +
+        'falling back to the static public/.well-known/mcp/server-card.json target.',
+    );
+  }
+
+  return { path: atomicWrite(join(cwd, SERVER_CARD_OUTPUT_PATH), body), target: 'static' };
+}
+
 /** Atomically writes the static `public/.well-known/ai-catalog.json`. */
 function writeStaticFile(cwd: string, catalog: AiCatalog): string {
-  const outPath = join(cwd, CATALOG_OUTPUT_PATH);
+  return atomicWrite(join(cwd, CATALOG_OUTPUT_PATH), jsonText(catalog));
+}
+
+/**
+ * Atomically writes `contents` to `outPath` (write to a temp file, then rename into place) so a
+ * crash or concurrent build never leaves a half-written, unparseable file on disk.
+ */
+function atomicWrite(outPath: string, contents: string): string {
   const tmpPath = `${outPath}.tmp-${process.pid}-${Date.now()}`;
 
   mkdirSync(dirname(outPath), { recursive: true });
   try {
-    writeFileSync(tmpPath, catalogJson(catalog), 'utf8');
+    writeFileSync(tmpPath, contents, 'utf8');
     renameSync(tmpPath, outPath);
   } catch (err) {
     try {
@@ -84,44 +144,57 @@ function writeStaticFile(cwd: string, catalog: AiCatalog): string {
   return outPath;
 }
 
+interface RouteHandlerMeta {
+  /** `Content-Type` header the handler serves. */
+  contentType: string;
+  /** The path this handler serves at, for the generated comment. */
+  served: string;
+}
+
 /**
- * Writes the route-handler emission target: `app/.well-known/ai-catalog.json/route.{ts,js}`. The
- * validated catalog is embedded as a `force-static` response so the build materializes it just like
- * the static file, but the file lives in the source tree (survives `basePath`/proxy rewrites the way
- * a `public/` asset can't, and is the seam for future dynamic catalogs). `.ts` vs `.js` mirrors the
- * project (a `tsconfig.json` at the root).
+ * Writes a route-handler emission target under `appDir/<segments>/route.{ts,js}`. The payload is
+ * embedded as a `force-static` response so the build materializes it just like a static file, but
+ * the file lives in the source tree (survives `basePath`/proxy rewrites the way a `public/` asset
+ * can't, and is the seam for future dynamic output). `.ts` vs `.js` mirrors the project (a
+ * `tsconfig.json` at the root).
  */
-function writeRouteHandler(cwd: string, appDir: string, catalog: AiCatalog): string {
+function writeRouteHandler(
+  cwd: string,
+  appDir: string,
+  segments: string[],
+  body: string,
+  meta: RouteHandlerMeta,
+): string {
   const useTypeScript = existsSync(join(cwd, 'tsconfig.json'));
-  const routeDir = join(appDir, ...CATALOG_ROUTE_SEGMENTS);
+  const routeDir = join(appDir, ...segments);
   const routeFile = join(routeDir, useTypeScript ? 'route.ts' : 'route.js');
 
   mkdirSync(routeDir, { recursive: true });
-  writeFileSync(routeFile, routeHandlerSource(catalog, useTypeScript), 'utf8');
+  writeFileSync(routeFile, routeHandlerSource(body, meta, useTypeScript), 'utf8');
   return routeFile;
 }
 
-function catalogJson(catalog: AiCatalog): string {
-  return `${JSON.stringify(catalog, null, 2)}\n`;
+function jsonText(value: unknown): string {
+  return `${JSON.stringify(value, null, 2)}\n`;
 }
 
 /**
- * Renders the route-handler source. The catalog is embedded as a *JSON string literal* — we
+ * Renders the route-handler source. The payload is embedded as a *JSON string literal* — we
  * `JSON.stringify` the pretty-printed JSON text again, which produces a safely-escaped JS string
  * (no risk from backticks or `${}` in any field value), then serve it verbatim.
  */
-function routeHandlerSource(catalog: AiCatalog, useTypeScript: boolean): string {
-  const bodyLiteral = JSON.stringify(catalogJson(catalog));
+function routeHandlerSource(body: string, meta: RouteHandlerMeta, useTypeScript: boolean): string {
+  const bodyLiteral = JSON.stringify(body);
   const signature = useTypeScript ? 'export function GET(): Response {' : 'export function GET() {';
   return `// Generated by ora-catalog (route emission target). Do not edit by hand — re-run
-// \`ora-catalog\` to regenerate. Serves the ai-catalog at /.well-known/ai-catalog.json.
+// \`ora-catalog\` to regenerate. Serves ${meta.served}.
 export const dynamic = 'force-static';
 
 const body = ${bodyLiteral};
 
 ${signature}
   return new Response(body, {
-    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    headers: { 'Content-Type': '${meta.contentType}; charset=utf-8' },
   });
 }
 `;

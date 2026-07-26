@@ -1,8 +1,8 @@
 import { buildArtifactUrl } from './site-url.js';
 
 /**
- * ARD §6.1 alternate discovery mechanisms. These are the in-spec fix for the Phase 1
- * `basePath` finding: when `next.config` sets a `basePath`, the catalog is served under that prefix
+ * ARD §6.1 alternate discovery mechanisms. These are the in-spec fix for a `basePath`
+ * finding: when `next.config` sets a `basePath`, the catalog is served under that prefix
  * (e.g. `/app/.well-known/ai-catalog.json`), not at the conventional root path a crawler probes —
  * so the plugin recommends pointing crawlers at where the catalog *actually* lives, via an HTML
  * `<link rel="ai-catalog">` tag and/or a robots.txt `Agentmap:` directive.

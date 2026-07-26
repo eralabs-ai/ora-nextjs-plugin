@@ -24,8 +24,11 @@ export {
 
 export {
   writeCatalog,
+  writeServerCard,
   CATALOG_OUTPUT_PATH,
+  SERVER_CARD_OUTPUT_PATH,
   type WriteCatalogResult,
+  type WriteServerCardResult,
   type WriteCatalogOptions,
   type EmissionTarget,
 } from './write.js';
@@ -65,9 +68,31 @@ export { resolveSiteUrl, buildArtifactUrl, buildUrn, hostnameFromUrl } from './s
 
 export { findAppDir } from './app-dir.js';
 
-export { detectMcpServers, type DetectMcpOptions } from './detect-mcp.js';
+export {
+  detectMcpServers,
+  detectMcpMounts,
+  buildMcpEntries,
+  type DetectMcpOptions,
+  type DetectMcpMountsOptions,
+  type BuildMcpEntriesOptions,
+  type McpMount,
+} from './detect-mcp.js';
+
+export {
+  buildMcpServerCard,
+  type McpServerCard,
+  type McpServerCardTool,
+  type McpServerCardRemote,
+  type BuildMcpServerCardOptions,
+} from './server-card.js';
 
 export { detectOpenApi, type DetectOpenApiOptions } from './detect-openapi.js';
+
+export {
+  detectJsonLd,
+  type DetectJsonLdOptions,
+  type DetectJsonLdResult,
+} from './detect-json-ld.js';
 
 export {
   detectLlmsTxt,

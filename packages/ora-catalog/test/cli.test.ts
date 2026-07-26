@@ -1,11 +1,34 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { runCli } from '../src/cli.js';
-import { CATALOG_OUTPUT_PATH } from '../src/write.js';
+import { CATALOG_OUTPUT_PATH, SERVER_CARD_OUTPUT_PATH } from '../src/write.js';
+
+/** Writes a minimal app with a single mcp-handler mount and a configured siteUrl. */
+function writeMcpFixture(dir: string): void {
+  writeFileSync(
+    join(dir, 'package.json'),
+    JSON.stringify({ name: 'demo', version: '1.0.0' }),
+    'utf8',
+  );
+  writeFileSync(
+    join(dir, 'ard.config.mjs'),
+    "export default { siteUrl: 'https://example.com' };\n",
+    'utf8',
+  );
+  const routeDir = join(dir, 'app', '[transport]');
+  mkdirSync(routeDir, { recursive: true });
+  writeFileSync(
+    join(routeDir, 'route.ts'),
+    `import { createMcpHandler } from 'mcp-handler';\n` +
+      `const handler = createMcpHandler((server) => { server.tool('roll_dice', 'd', {}, async () => ({})); });\n` +
+      `export { handler as GET };\n`,
+    'utf8',
+  );
+}
 
 let dir: string;
 let stdout: string[];
@@ -132,5 +155,29 @@ describe('runCli', () => {
 
     expect(code).toBe(0);
     expect(stdout.some((l) => l.includes('basePath'))).toBe(true);
+  });
+
+  it('also writes the well-known MCP server card when a mount is detected', async () => {
+    writeMcpFixture(dir);
+
+    const code = await runCli([], { ...io, cwd: dir });
+
+    expect(code).toBe(0);
+    expect(existsSync(join(dir, SERVER_CARD_OUTPUT_PATH))).toBe(true);
+    const card = JSON.parse(readFileSync(join(dir, SERVER_CARD_OUTPUT_PATH), 'utf8'));
+    expect(card).toMatchObject({
+      serverUrl: 'https://example.com/mcp',
+      tools: [{ name: 'roll_dice' }],
+    });
+    expect(stdout.some((l) => l.includes('MCP server card'))).toBe(true);
+  });
+
+  it('writes no server card when there is no MCP mount', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+
+    const code = await runCli([], { ...io, cwd: dir });
+
+    expect(code).toBe(0);
+    expect(existsSync(join(dir, SERVER_CARD_OUTPUT_PATH))).toBe(false);
   });
 });

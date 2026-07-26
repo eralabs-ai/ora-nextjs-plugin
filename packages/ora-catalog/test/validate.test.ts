@@ -22,10 +22,10 @@ const officialArdExample = JSON.parse(
   ),
 ) as unknown;
 
-/** A minimal hand-written sample the plan requires the validator to be green on. */
+/** A minimal hand-written sample the validator must accept. */
 const handWrittenSample: AiCatalog = {
   specVersion: '1.0',
-  host: { displayName: 'Ora Example', identifier: 'did:web:example.com' },
+  host: { displayName: 'Example App', identifier: 'did:web:example.com' },
   entries: [
     {
       identifier: 'urn:air:example.com:tool:echo',
@@ -75,7 +75,7 @@ describe('validateCatalog', () => {
     const catalog = {
       specVersion: '1.0',
       entries: [],
-      metadata: { 'com.ora.custom': { anything: true } },
+      metadata: { 'com.example.custom': { anything: true } },
       somethingFromTheFuture: 42,
     };
     expect(validateCatalog(catalog).valid).toBe(true);

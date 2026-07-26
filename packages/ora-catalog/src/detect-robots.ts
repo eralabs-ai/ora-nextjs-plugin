@@ -19,14 +19,14 @@ export interface DetectRobotsResult {
 const ROBOTS_ROUTE_NAMES = new Set(['robots.ts', 'robots.js', 'robots.tsx', 'robots.jsx']);
 
 /**
- * Detect-and-recommend for `robots.txt` (Ora scores it — `robots-ai-policy-quality`,
- * `bot-detection`, `agent-crawler-reachability`). The plugin never rewrites a site's robots policy —
- * unblocking crawlers on the owner's behalf is theirs to decide — it only **detects** an existing
- * `public/robots.txt` or App Router `robots.{ts,js}` and **recommends** an agent-friendly policy.
+ * Detect-and-recommend for `robots.txt`, which controls whether AI crawlers and agents are allowed
+ * to reach a site at all. The plugin never rewrites a site's robots policy — unblocking crawlers on
+ * the owner's behalf is theirs to decide — it only **detects** an existing `public/robots.txt` or App
+ * Router `robots.{ts,js}` and **recommends** an agent-friendly policy.
  *
  * The recommendation is deliberately scoped to specific user-agents, never `User-agent: *`. The exact
- * token Ora's crawler sends is still open, so the advice names the shape of the rule rather than a
- * guessed token — precision over recall applied to our own advice.
+ * user-agent tokens individual AI crawlers send vary and change over time, so the advice names the
+ * shape of the rule rather than a guessed token — precision over recall applied to our own advice.
  */
 export function detectRobots(options: DetectRobotsOptions): DetectRobotsResult {
   const source = findRobotsSource(options.cwd);

@@ -6,11 +6,11 @@ import type { CatalogEntry } from './types.js';
 import { pathSegments, ROUTE_FILE_NAMES, walkFiles } from './walk-files.js';
 
 // An existing MCP server is unambiguous intent to publish, so this is the one zero-config
-// detector that runs with no opt-in marker. Detection is deliberately textual, not AST-based —
-// the core design decisions confine AST work to WebMCP (Phase 4) "for location, not semantics." A
+// detector that runs with no opt-in marker. Detection is deliberately textual, not AST-based: a
 // route file mounts an MCP server the Next.js way when it both imports the package and calls the
-// handler factory it exports; requiring both cuts down on false positives from a file that merely
-// mentions the package name in a comment or unrelated string.
+// handler factory it exports; requiring both textual signals cuts down on false positives from a
+// file that merely mentions the package name in a comment or unrelated string, without the cost of
+// a full AST parse.
 const MCP_IMPORT_RE =
   /from\s+['"](mcp-handler|@vercel\/mcp-adapter)['"]|require\(\s*['"](mcp-handler|@vercel\/mcp-adapter)['"]\s*\)/;
 const MCP_HANDLER_CALL_RE = /createMcpHandler\s*\(/;
@@ -21,30 +21,35 @@ const MCP_HANDLER_CALL_RE = /createMcpHandler\s*\(/;
 // a tool name that isn't a literal string in the source.
 const TOOL_NAME_RE = /\.tool\(\s*['"`]([^'"`]+)['"`]/g;
 
-export interface DetectMcpOptions {
+export interface DetectMcpMountsOptions {
   cwd: string;
-  /** Absolute site origin (see site-url.ts), or undefined if none could be determined. */
-  siteUrl: string | undefined;
-  /** `next.config` `basePath`, or `''` if unset. */
-  basePath: string;
   /** Reported via `generateCatalog`'s `onWarning` — never thrown, this detector never fails a build. */
   warn: (message: string) => void;
 }
 
-interface McpMount {
+export interface DetectMcpOptions extends DetectMcpMountsOptions {
+  /** Absolute site origin (see site-url.ts), or undefined if none could be determined. */
+  siteUrl: string | undefined;
+  /** `next.config` `basePath`, or `''` if unset. */
+  basePath: string;
+}
+
+/** A resolved `mcp-handler` mount: its source file, mounted URL pathname, and detected tool names. */
+export interface McpMount {
   filePath: string;
   pathname: string;
   capabilities: string[];
 }
 
 /**
- * Detects MCP servers mounted the Next.js way via `mcp-handler` (or its legacy alias
- * `@vercel/mcp-adapter`) and returns one `application/mcp-server-card+json` entry per mount that
- * resolved to both a stable URL and a known site origin. Ambiguous mounts (an unrecognized dynamic
- * route segment) and mounts that can't be resolved to an absolute URL are skipped with a warning,
- * never guessed — precision over recall.
+ * Scans `app/` for MCP servers mounted the Next.js way via `mcp-handler` (or its legacy alias
+ * `@vercel/mcp-adapter`) and returns one `McpMount` per file that both imports the package and calls
+ * the handler factory, once its route segments resolve to a stable URL pathname. Ambiguous mounts
+ * (an unrecognized dynamic route segment) are skipped with a warning, never guessed. This is the
+ * shared detection step behind both the catalog entry (`buildMcpEntries`) and the well-known server
+ * card (`buildMcpServerCard`), so `app/` is only walked once per build.
  */
-export function detectMcpServers(options: DetectMcpOptions): CatalogEntry[] {
+export function detectMcpMounts(options: DetectMcpMountsOptions): McpMount[] {
   const appDir = findAppDir(options.cwd);
   if (!appDir) return [];
 
@@ -73,6 +78,33 @@ export function detectMcpServers(options: DetectMcpOptions): CatalogEntry[] {
     mounts.push({ filePath: file.absolutePath, pathname, capabilities: extractToolNames(content) });
   }
 
+  return mounts;
+}
+
+/**
+ * Detects MCP servers (see `detectMcpMounts`) and returns one `application/mcp-server-card+json`
+ * catalog entry per mount that resolved to both a stable URL and a known site origin — the
+ * convenience wrapper used where the mounts themselves aren't needed. Mounts that can't be resolved
+ * to an absolute URL are skipped with a warning, never guessed — precision over recall.
+ */
+export function detectMcpServers(options: DetectMcpOptions): CatalogEntry[] {
+  return buildMcpEntries({ ...options, mounts: detectMcpMounts(options) });
+}
+
+export interface BuildMcpEntriesOptions {
+  mounts: McpMount[];
+  siteUrl: string | undefined;
+  basePath: string;
+  warn: (message: string) => void;
+}
+
+/**
+ * Turns resolved `McpMount`s into catalog entries. Kept separate from `detectMcpMounts` so
+ * `generateCatalog` can scan once and feed the same mounts to both this and `buildMcpServerCard`.
+ * With no known site origin, emits no entry (warning instead) rather than a relative/guessed URL.
+ */
+export function buildMcpEntries(options: BuildMcpEntriesOptions): CatalogEntry[] {
+  const { mounts } = options;
   if (mounts.length === 0) return [];
 
   const siteUrl = options.siteUrl;

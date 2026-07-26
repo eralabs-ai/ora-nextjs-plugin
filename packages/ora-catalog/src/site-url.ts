@@ -1,4 +1,4 @@
-// Every zero-config detector (Phase 2.2) needs to turn a path it found on disk (`/openapi.json`,
+// Every zero-config detector needs to turn a path it found on disk (`/openapi.json`,
 // `/llms.txt`, an MCP mount) into the *absolute* URL the catalog schema requires (`format: uri`
 // rejects relative paths — see spec/ai-catalog.schema.json). This module is the one place that
 // decides the site's absolute origin and joins paths onto it, so every detector stays consistent

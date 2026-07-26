@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 
 import { ArdConfigError } from './config.js';
 import { generateCatalog } from './generate.js';
-import { writeCatalog } from './write.js';
+import { writeCatalog, writeServerCard } from './write.js';
 
 const HELP_TEXT = `ora-catalog — generate a spec-valid ai-catalog.json at build time
 
@@ -102,7 +102,7 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     throw err;
   }
 
-  const { catalog, emit } = generated;
+  const { catalog, emit, serverCard } = generated;
 
   for (const warning of warnings) stdout(`[ora-catalog] ⚠ ${warning}`);
 
@@ -122,6 +122,16 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
 
   stdout(`[ora-catalog] ✓ wrote ${result.path}`);
   stdout(`[ora-catalog] ✓ ${catalog.entries.length} entries referenced`);
+
+  // Agents discover a live MCP server via the well-known server card, not the ARD catalog entry, so
+  // emit it alongside the catalog when a mount was detected.
+  if (serverCard) {
+    const cardResult = writeServerCard(cwd, serverCard, {
+      target: emit,
+      warn: (message) => stdout(`[ora-catalog] ⚠ ${message}`),
+    });
+    stdout(`[ora-catalog] ✓ wrote ${cardResult.path} (MCP server card)`);
+  }
 
   if (recommendations.length > 0) {
     stdout('[ora-catalog] Recommendations to improve agent-readiness:');

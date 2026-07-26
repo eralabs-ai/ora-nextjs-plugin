@@ -16,7 +16,7 @@ export interface DetectAgentsMdResult {
 }
 
 /**
- * Detect-and-recommend for `agents.md` (Ora scores it) — an agent-guidance file with
+ * Detect-and-recommend for `agents.md` — an agent-guidance file with
  * explicit *when-to-use / when-NOT-to-use* sections. The plugin only detects a served one
  * (`public/agents.md` or an App Router `agents.md/route.*`) and, when absent, recommends adding it.
  * It never guesses the *content*: authoring that guidance from the repo is judgment work owned by
@@ -35,7 +35,7 @@ export function detectAgentsMd(options: DetectAgentsMdOptions): DetectAgentsMdRe
 
   options.recommend(
     'No agents.md found — consider adding one (public/agents.md) with when-to-use / when-NOT-to-use ' +
-      "guidance for agents (Ora scores this). ora-catalog won't write its content for you; the " +
+      "guidance for agents. ora-catalog won't write its content for you; the " +
       'companion skill can help author it from your repo.',
   );
   return { found: false };
