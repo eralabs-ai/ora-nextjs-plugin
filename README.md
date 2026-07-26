@@ -82,7 +82,9 @@ handlers (see `docs-internal/PLAN.md`'s _Scope_ and _Core design decisions_).
 
 **Absolute URLs need a known site origin.** The spec requires every entry's `url` to be an
 absolute URI, so a detector skips emitting its entry (with a warning) unless it can resolve the
-site's origin. It's resolved in this order, first match wins:
+site's origin. This must be your **public production URL** (e.g. `https://yourdomain.com`) — it's
+written verbatim into the catalog's entry URLs, so a `localhost` or preview URL would publish broken
+links. It's resolved in this order, first match wins:
 
 1. `ard.config`'s `siteUrl` — an explicit declaration, always wins.
 2. `SITE_URL`, then `NEXT_PUBLIC_SITE_URL` — the two env-var names Next.js apps most commonly use
@@ -92,9 +94,10 @@ site's origin. It's resolved in this order, first match wins:
 **Iterating locally.** `VERCEL_PROJECT_PRODUCTION_URL` exists only during a build _on Vercel_, so a
 plain local `next build` can't resolve an origin from it — the catalog would come out without its
 URL-bearing entries (MCP, OpenAPI, llms.txt) and you couldn't check your work before deploying.
-Your production URL is the same string locally and in prod, so just declare it: set `siteUrl` in
-`ard.config`, or run the build with `SITE_URL=https://your-site.com next build` (or export
-`NEXT_PUBLIC_SITE_URL`). Any of these produces the full catalog locally.
+Your production URL is the same string locally and in prod, so declare that (still the public
+domain, **not** `localhost`): set `siteUrl` in `ard.config`, or run the build with
+`SITE_URL=https://yourdomain.com next build` (or export `NEXT_PUBLIC_SITE_URL`). Any of these lets
+you generate and preview the real catalog locally before deploying.
 
 `ard.config.*` is evaluated as real code at build time (via [`jiti`](https://github.com/unjs/jiti)),
 not parsed as static JSON — so if your host/CI uses a different variable name, `siteUrl:
