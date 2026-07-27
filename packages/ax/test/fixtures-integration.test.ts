@@ -33,7 +33,7 @@ describe('generateCatalog against the fixture corpus', () => {
   });
 });
 
-// End-to-end: the config-overrides fixture ships a real `ard.config.ts`, so this
+// End-to-end: the config-overrides fixture ships a real `ax.config.ts`, so this
 // exercises the whole config path (jiti load -> validate -> entry overrides -> denylist/allowlist)
 // against a committed fixture rather than a synthetic tmp dir.
 describe('generateCatalog with the config-overrides fixture', () => {
@@ -53,7 +53,7 @@ describe('generateCatalog with the config-overrides fixture', () => {
 });
 
 // End-to-end: each fixture ships a real artifact (an mcp-handler mount, a static
-// public/openapi.json, an app/llms.txt/route.ts) plus an ard.config.ts declaring a fixture-specific
+// public/openapi.json, an app/llms.txt/route.ts) plus an ax.config.ts declaring a fixture-specific
 // `siteUrl` so the resulting catalog is deterministic in CI. `scaffoldLlmsTxt` stays at its default
 // (`false`) here — these fixtures must never gain files as a side effect of running this suite.
 describe('generateCatalog zero-config detection against the fixture corpus', () => {
@@ -107,12 +107,23 @@ describe('generateCatalog zero-config detection against the fixture corpus', () 
     });
   });
 
-  it('never writes into the fixture corpus as a side effect (scaffoldLlmsTxt defaults to false)', async () => {
-    for (const name of ['bare', 'bare-js', 'mcp-adapter', 'openapi']) {
+  it('never writes into the fixture corpus as a side effect (every scaffold flag defaults to false)', async () => {
+    const fixtures = ['bare', 'bare-js', 'mcp-adapter', 'openapi'];
+    for (const name of fixtures) {
       await generateCatalog({ cwd: `${fixturesDir}${name}` });
     }
-    for (const name of ['bare', 'bare-js', 'mcp-adapter', 'openapi']) {
-      expect(existsSync(`${fixturesDir}${name}/app/llms.txt`)).toBe(false);
+    // One entry per opt-in scaffold: each writes into the consumer's source tree, so a fixture
+    // gaining any of these files means a default flipped to on.
+    const neverWritten = [
+      'app/llms.txt',
+      'public/robots.txt',
+      'app/organization-json-ld.tsx',
+      'app/organization-json-ld.jsx',
+    ];
+    for (const name of fixtures) {
+      for (const path of neverWritten) {
+        expect(existsSync(`${fixturesDir}${name}/${path}`)).toBe(false);
+      }
     }
   });
 });

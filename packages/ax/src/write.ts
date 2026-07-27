@@ -126,7 +126,7 @@ function writeStaticFile(cwd: string, catalog: AiCatalog): string {
 }
 
 /**
- * Atomically writes the machine-readable build report. `target` is `ard.config`'s `report` (or the
+ * Atomically writes the machine-readable build report. `target` is `ax.config`'s `report` (or the
  * CLI flag) already resolved to truthy: `true` means the default `.ora/report.json`, a string is a
  * project-root-relative (or absolute) path. There is no schema gate — the report *is* the
  * diagnostic channel, so it must always be writable, even for a run whose catalog failed.

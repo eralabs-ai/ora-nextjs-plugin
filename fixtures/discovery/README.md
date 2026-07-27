@@ -13,4 +13,4 @@ JSON-LD. With none of them present it would instead recommend adding each (see `
 `public/.well-known/ai-catalog.json`; the alternative route-handler target (`emit: 'route'`) is
 covered by `write.test.ts`.
 
-Ships an `ard.config.ts` declaring `siteUrl` so the catalog is deterministic in CI.
+Ships an `ax.config.ts` declaring `siteUrl` so the catalog is deterministic in CI.

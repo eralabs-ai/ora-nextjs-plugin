@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-/** Extensions checked for both `next.config.*` and `ard.config.*`, in lookup order. */
+/** Extensions checked for both `next.config.*` and `ax.config.*`, in lookup order. */
 export const CONFIG_FILE_EXTENSIONS: readonly string[] = [
   '.ts',
   '.mts',

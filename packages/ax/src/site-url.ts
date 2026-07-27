@@ -13,13 +13,13 @@
  */
 export const NO_SITE_URL_HINT =
   "set your site's public production URL — e.g. https://yourdomain.com, NOT a localhost or preview " +
-  'URL, since this value is written into the catalog\'s entry URLs — via "siteUrl" in ard.config ' +
+  'URL, since this value is written into the catalog\'s entry URLs — via "siteUrl" in ax.config ' +
   'or a SITE_URL / NEXT_PUBLIC_SITE_URL env var. You can set it locally to generate and preview the ' +
   'real catalog before deploying.';
 
 /** Where the site's absolute origin can come from, in precedence order (config wins). */
 export interface ResolveSiteUrlOptions {
-  /** `ard.config` `siteUrl` — an explicit developer declaration, so it always wins. */
+  /** `ax.config` `siteUrl` — an explicit developer declaration, so it always wins. */
   configSiteUrl?: string;
   /** Absolute URL from a build-time env var (`SITE_URL` / `NEXT_PUBLIC_SITE_URL`) — see `readSiteUrlFromEnv`. */
   envSiteUrl?: string;
@@ -46,7 +46,7 @@ export function resolveSiteUrl(options: ResolveSiteUrlOptions): string | undefin
  * (the two names Next.js apps most commonly use for a stable production URL). Unlike Vercel's
  * `VERCEL_PROJECT_PRODUCTION_URL`, these are present during a plain local `next build`, so a
  * developer can generate the full catalog and iterate on it *before* deploying. Expects an absolute
- * `http(s)://` origin (same shape as `ard.config` `siteUrl`). Returns undefined when neither is set
+ * `http(s)://` origin (same shape as `ax.config` `siteUrl`). Returns undefined when neither is set
  * (or both are blank).
  */
 export function readSiteUrlFromEnv(): string | undefined {

@@ -325,6 +325,16 @@ Goal: the `next-sitemap`-style production core. Stable regardless of spec churn.
 
 ### 2.1 Config
 
+> **Renamed `ard.config` → `ax.config` (2026-07-27, per Ora's decision).** The bullets below keep
+> their original wording; what shipped is `ax.config.{ts,mts,cts,mjs,js,cjs}`, typed with `AxConfig`
+> and failing loudly via `AxConfigError`. This supersedes the vendor-neutrality rationale recorded
+> below — the file is now named after the `ax` tool that reads it, so a file committed into a
+> consumer's repo says which tool it configures. A legacy `ard.config.*` still loads, with a
+> deprecation warning; when both exist the `ax.config.*` wins and the `ard.config.*` is ignored
+> (also warned). `ArdConfig` / `ArdEntryOverride` / `ResolvedArdConfig` / `ArdConfigError` /
+> `loadArdConfig` / `validateArdConfig` / `ardConfigSchema` remain exported as deprecated aliases,
+> so existing imports keep resolving.
+
 - [x] `ard.config.{ts,mts,cts,mjs,js,cjs}` — typed config, validated via JSON Schema through the
       existing Ajv instance (not Zod — see *decision* below), loaded via the CLI. Named `ard.config`
       (Agentic Resource Discovery), not after this package or Ora — it's a file committed into the

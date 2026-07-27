@@ -1,4 +1,4 @@
-import type { ArdEntryOverride } from './config-schema.js';
+import type { AxEntryOverride } from './config-schema.js';
 import type { CatalogEntry } from './types.js';
 
 export interface ApplyEntryOverridesResult {
@@ -17,7 +17,7 @@ export interface ApplyEntryOverridesResult {
  */
 export function applyEntryOverrides(
   inferred: readonly CatalogEntry[],
-  overrides: readonly ArdEntryOverride[],
+  overrides: readonly AxEntryOverride[],
 ): ApplyEntryOverridesResult {
   const entries = inferred.map((entry) => ({ ...entry }));
   const notes: string[] = [];

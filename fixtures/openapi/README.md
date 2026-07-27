@@ -8,6 +8,6 @@ An app that already serves an OpenAPI 3.1 document at `public/openapi.json`.
 (Ora's top-ranked A+ site) publishes. It must **not** regenerate or fan the API out into per-route
 entries.
 
-Ships an `ard.config.ts` declaring `siteUrl` so the emitted entry's URL is deterministic in CI
+Ships an `ax.config.ts` declaring `siteUrl` so the emitted entry's URL is deterministic in CI
 (without it, this detector still runs, but skips emitting a URL-bearing entry since none of this
 repo's test environments set Vercel's production-domain env var).

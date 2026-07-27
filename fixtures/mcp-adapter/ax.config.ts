@@ -1,4 +1,4 @@
-import type { ArdConfig } from '@ora-ai/ax';
+import type { AxConfig } from '@ora-ai/ax';
 
 // `siteUrl` makes the fixture deterministic regardless of where it's built (CI, a laptop, ...) —
 // without it, zero-config MCP detection (Phase 2.2) would still run but skip emitting a
@@ -10,7 +10,7 @@ import type { ArdConfig } from '@ora-ai/ax';
 // `siteUrl: process.env.SITE_URL` works with no special support from the plugin. It's a literal
 // here only so this fixture's expected output is identical everywhere it's built, regardless of
 // what env vars happen to be set.
-const config: ArdConfig = {
+const config: AxConfig = {
   siteUrl: 'https://mcp-adapter-fixture.example.com',
 };
 

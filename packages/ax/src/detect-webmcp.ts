@@ -2,6 +2,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 import { findAppDir, resolvePagePathname } from './app-dir.js';
+import { scrubSource } from './scrub-source.js';
 import { buildArtifactUrl, buildUrn, NO_SITE_URL_HINT } from './site-url.js';
 import type { CatalogEntry } from './types.js';
 import { DEFAULT_IGNORED_DIRS, walkFiles } from './walk-files.js';
@@ -17,22 +18,41 @@ import { DEFAULT_IGNORED_DIRS, walkFiles } from './walk-files.js';
 //     `useWebMCP()` hook from `@mcp-b/react-webmcp` / `usewebmcp`). Runtime-only — invisible in
 //     server-rendered HTML, so scanners can't see these tools statically.
 //
-// Detection here is deliberately textual, not AST-based, matching detect-mcp.ts: requiring the
+// Detection here is deliberately textual, not AST-based, matching detect-mcp.ts. Anchoring on the
 // `modelContext` receiver (or the hook's import + call pair) keeps a user-defined function that
-// happens to be named `registerTool` from matching, without the cost of a full AST parse.
+// happens to be named `registerTool` from matching, but on its own it says nothing about whether
+// the text is *code*. Three further guards do that work, and they are what keep prose and comments
+// out of the emitted catalog:
+//
+//   1. Every scan below runs against `scrubSource(content)` (see scrub-source.ts): comment bodies
+//      and template-literal contents are blanked to spaces, with offsets and line numbers intact.
+//      Ordinary '...'/"..." strings are left alone — that is where tool names and JSX attribute
+//      values live.
+//   2. A per-line unclosed-quote check (`insideStringLiteral`) drops matches sitting inside such a
+//      string: a metadata description or a log message mentioning the API is a mention, not a call.
+//   3. The call regexes require a non-empty argument list. Rendered prose like "register tools with
+//      navigator.modelContext.registerTool()." reads as a call to a regex but registers nothing, so
+//      requiring an argument removes it without costing a single real registration.
+//
+// The result is lexer-grade, not AST-grade: scrub-source.ts documents where the heuristics stop.
 //
 // One API-churn note this detector encodes: the WebMCP entry point moved from
 // `navigator.modelContext` to `document.modelContext` in the May 2026 draft, and Chrome 150+
 // deprecates the `navigator` alias — so `navigator.modelContext` usage is detected but warned about.
 
-/** `modelContext.registerTool(...)` / `modelContext.provideContext(...)` behind a known receiver. */
+/**
+ * `modelContext.registerTool(...)` / `modelContext.provideContext(...)` behind a known receiver.
+ * The trailing `(?!\s*\))` requires an actual argument: a registration with an empty argument list
+ * registers nothing, so the only things that shape matches are prose and pseudo-code. (The
+ * whitespace lives inside the lookahead on purpose — a `\s*` before it would just backtrack.)
+ */
 const IMPERATIVE_RE =
-  /\b(document|navigator|window)\s*\.\s*modelContext\s*\.\s*(registerTool|provideContext)\s*\(/g;
+  /\b(document|navigator|window)\s*\.\s*modelContext\s*\.\s*(registerTool|provideContext)\s*\((?!\s*\))/g;
 
 // The `useWebMCP()` hook needs both textual signals — the import and the call — mirroring the
 // two-signal rule detect-mcp.ts uses, so a user-defined hook with the same name never matches.
 const HOOK_IMPORT_RE = /from\s+['"](?:@mcp-b\/react-webmcp|usewebmcp)['"]/;
-const HOOK_CALL_RE = /\buseWebMCP\s*\(/g;
+const HOOK_CALL_RE = /\buseWebMCP\s*\((?!\s*\))/g;
 
 /**
  * A declarative WebMCP form: `<form ... toolname="...">`. Handles the three JSX attribute value
@@ -46,6 +66,9 @@ const DECLARATIVE_FORM_RE =
 const ANY_FORM_RE = /<form[\s>]/;
 
 const TOOL_DESCRIPTION_ATTR_RE = /\btooldescription\s*=/;
+
+/** Cap on how far `formTagText` looks for a form tag's closing `>`. */
+const FORM_TAG_WINDOW = 2000;
 
 /** `name: '...'` inside a registerTool/provideContext/useWebMCP argument window. */
 const TOOL_NAME_PROP_RE = /\bname\s*:\s*['"`]([^'"`]+)['"`]/g;
@@ -121,31 +144,36 @@ export function detectWebMcp(options: DetectWebMcpOptions): DetectWebMcpResult {
   let sawAnyForm = false;
 
   for (const file of files) {
-    let content: string;
+    let raw: string;
     try {
-      content = readFileSync(file.absolutePath, 'utf8');
+      raw = readFileSync(file.absolutePath, 'utf8');
     } catch {
       continue;
     }
+    // Every pattern scan below reads the scrubbed copy so comments and template-literal contents
+    // can't register anything. `USE_CLIENT_RE` is the one exception: it runs on the raw text
+    // because it has its own rule about which comments may precede the directive.
+    const content = scrubSource(raw);
 
     const source = relative(cwd, file.absolutePath);
     if (ANY_FORM_RE.test(content)) sawAnyForm = true;
 
     const declarative = scanDeclarative(content, file.absolutePath, appDir);
     if (declarative) {
-      sites.push({ ...declarative, source });
-      if (!TOOL_DESCRIPTION_ATTR_RE.test(content)) {
+      sites.push({ ...declarative.site, source });
+      if (declarative.missingDescription.length > 0) {
         recommend(
-          `${source} declares <form toolname> without a tooldescription attribute — the description ` +
-            'is what tells an agent when to call the tool (and HTML scanners like Ora’s webmcp ' +
-            'check look for both attributes). Add tooldescription to every toolname form.',
+          `${source} declares <form toolname> without a tooldescription attribute ` +
+            `(${declarative.missingDescription.join(', ')}) — the description is what tells an ` +
+            'agent when to call the tool (and HTML scanners like Ora’s webmcp check look for both ' +
+            'attributes). Add tooldescription to every toolname form.',
         );
       }
     }
 
     const imperative = scanImperative(content);
     if (imperative) {
-      const missingUseClient = !USE_CLIENT_RE.test(content);
+      const missingUseClient = !USE_CLIENT_RE.test(raw);
       sites.push({ kind: 'imperative', source, missingUseClient, ...imperative });
 
       if (imperative.receiver === 'navigator') {
@@ -170,7 +198,7 @@ export function detectWebMcp(options: DetectWebMcpOptions): DetectWebMcpResult {
         kind: 'hook',
         source,
         names: extractNamesNearCalls(content, HOOK_CALL_RE),
-        missingUseClient: !USE_CLIENT_RE.test(content),
+        missingUseClient: !USE_CLIENT_RE.test(raw),
       });
     }
   }
@@ -183,24 +211,61 @@ export function detectWebMcp(options: DetectWebMcpOptions): DetectWebMcpResult {
   return { sites, entries, toolNames };
 }
 
+interface DeclarativeScan {
+  site: Omit<WebMcpToolSite, 'source'>;
+  /** Tool names whose own `<form>` tag carries no `tooldescription` attribute. */
+  missingDescription: string[];
+}
+
 /** Declarative scan of one file: toolname values, plus the page pathname when resolvable. */
 function scanDeclarative(
   content: string,
   absolutePath: string,
   appDir: string | undefined,
-): Omit<WebMcpToolSite, 'source'> | undefined {
+): DeclarativeScan | undefined {
   const names: string[] = [];
+  const missingDescription: string[] = [];
   for (const match of content.matchAll(DECLARATIVE_FORM_RE)) {
     // A `<form toolname=...>` that sits inside a string literal (a metadata description, a log
     // message, docs prose) is a *mention*, not markup — skip it. Cheap textual guard: an unclosed
     // quote between the start of the line and the `<form` means we're inside a string.
-    if (insideStringLiteral(content, match.index ?? 0)) continue;
+    const index = match.index ?? 0;
+    if (insideStringLiteral(content, index)) continue;
     const name = match[1] ?? match[2] ?? match[3];
-    if (name !== undefined && !names.includes(name)) names.push(name);
+    if (name === undefined || names.includes(name)) continue;
+    names.push(name);
+    // Scoped to this form's own tag: one compliant form elsewhere in the file says nothing about
+    // whether *this* one is described.
+    if (!TOOL_DESCRIPTION_ATTR_RE.test(formTagText(content, index))) missingDescription.push(name);
   }
   if (names.length === 0) return undefined;
 
-  return { kind: 'declarative', names, pagePathname: resolvePagePathname(absolutePath, appDir) };
+  return {
+    site: { kind: 'declarative', names, pagePathname: resolvePagePathname(absolutePath, appDir) },
+    missingDescription,
+  };
+}
+
+/**
+ * The text of the `<form ...>` opening tag starting at `index`. Scans to the `>` that closes the
+ * tag, stepping over quoted attribute values and `{...}` JSX expressions so an arrow function in an
+ * `onSubmit` handler doesn't end the tag early. Falls back to a bounded window if no `>` turns up.
+ */
+function formTagText(content: string, index: number): string {
+  let depth = 0;
+  for (let i = index; i < content.length && i < index + FORM_TAG_WINDOW; i++) {
+    const char = content[i];
+    if (char === '"' || char === "'") {
+      const close = content.indexOf(char, i + 1);
+      if (close === -1) break;
+      i = close;
+      continue;
+    }
+    if (char === '{') depth++;
+    else if (char === '}') depth = Math.max(0, depth - 1);
+    else if (char === '>' && depth === 0) return content.slice(index, i + 1);
+  }
+  return content.slice(index, index + FORM_TAG_WINDOW);
 }
 
 /** Imperative scan of one file: receiver used and tool names near each call site. */
@@ -210,6 +275,9 @@ function scanImperative(content: string): Pick<WebMcpToolSite, 'names' | 'receiv
   const names: string[] = [];
 
   for (const match of content.matchAll(IMPERATIVE_RE)) {
+    // Same guard the declarative scan uses: a registration quoted inside a string (a page's
+    // `metadata.description`, an error message, a docs snippet) is a mention, not a call.
+    if (insideStringLiteral(content, match.index ?? 0)) continue;
     const matchedReceiver = match[1] as 'document' | 'navigator' | 'window';
     // `navigator` (the deprecated alias) wins the reported receiver so the deprecation warning
     // fires even in files that use both forms during a migration.
@@ -224,9 +292,10 @@ function scanImperative(content: string): Pick<WebMcpToolSite, 'names' | 'receiv
 
 /**
  * Whether `index` sits inside a string literal, judged from the start of its line: an odd count of
- * any unescaped quote kind before the match means an unclosed string. Line-scoped on purpose —
- * full lexing is AST territory, and a multi-line template literal evading this is an accepted
- * recall loss, not a precision loss.
+ * any unescaped quote kind before the match means an unclosed string. Line-scoped, and that is
+ * enough here only because callers pass scrubbed source (see scrub-source.ts): a `<form toolname>`
+ * or a registration spread across a *multi-line* template literal has already been blanked out, so
+ * this guard is left with the single-line `'...'` / `"..."` case it can actually judge.
  */
 function insideStringLiteral(content: string, index: number): boolean {
   const lineStart = content.lastIndexOf('\n', index - 1) + 1;

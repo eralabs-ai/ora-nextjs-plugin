@@ -90,7 +90,7 @@ describe('generateCatalog', () => {
     const asDefault = await generateCatalog({ cwd: dir });
     expect(asDefault.emit).toBe('static');
 
-    writeFileSync(join(dir, 'ard.config.mjs'), "export default { emit: 'route' };\n", 'utf8');
+    writeFileSync(join(dir, 'ax.config.mjs'), "export default { emit: 'route' };\n", 'utf8');
     const asRoute = await generateCatalog({ cwd: dir });
     expect(asRoute.emit).toBe('route');
   });
@@ -117,7 +117,7 @@ describe('generateCatalog agent-readiness recommendations', () => {
   it('emits the ARD §6.1 discovery-pointer recommendation only when basePath is set', async () => {
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
     writeFileSync(
-      join(dir, 'ard.config.mjs'),
+      join(dir, 'ax.config.mjs'),
       "export default { siteUrl: 'https://example.com' };\n",
       'utf8',
     );
@@ -137,14 +137,86 @@ describe('generateCatalog agent-readiness recommendations', () => {
   });
 });
 
+// The build report is what a coding agent reads instead of the CLI output, and its `ora` section is
+// what makes it actionable: each artifact the plugin knows about, expressed as the Ora checks it
+// contributes to.
+describe('generateCatalog build report (v2)', () => {
+  it('reports version 2 with the Ora handoff section filled in', async () => {
+    const { report } = await generateCatalog({ cwd: dir });
+
+    expect(report.reportVersion).toBe(2);
+    expect(report.ora.skillMcp).toBe('https://ora.ai/skill/mcp');
+    expect(report.ora.skillUrl).toContain('agent-ready-website');
+    expect(report.ora.scanApi).toEqual({
+      scan: 'POST https://ora.ai/api/scan',
+      score: 'GET https://ora.ai/api/score/{domain}',
+    });
+    expect(report.ora.checks.length).toBeGreaterThan(0);
+  });
+
+  it('always addresses the catalog checks — every run produces an ai-catalog.json', async () => {
+    const { report } = await generateCatalog({ cwd: dir });
+
+    const catalogChecks = report.ora.checks.filter((c) => c.artifact === 'ai-catalog.json');
+    expect(catalogChecks.map((c) => c.id)).toEqual(['ard-catalog', 'agent-discovery-file']);
+    expect(catalogChecks.every((c) => c.status === 'addressed')).toBe(true);
+  });
+
+  it('marks a check addressed once the artifact it maps to is present', async () => {
+    const before = await generateCatalog({ cwd: dir });
+    expect(before.report.ora.checks.find((c) => c.id === 'sitemap')?.status).toBe('actionable');
+
+    mkdirSync(join(dir, 'app'), { recursive: true });
+    writeFileSync(join(dir, 'app', 'sitemap.ts'), 'export default function s() { return []; }\n');
+
+    const after = await generateCatalog({ cwd: dir });
+    expect(after.report.ora.checks.find((c) => c.id === 'sitemap')?.status).toBe('addressed');
+  });
+
+  it('reports no scaffold outcomes when every scaffold flag is off (the default)', async () => {
+    const { report } = await generateCatalog({ cwd: dir });
+    expect(report.scaffolds).toEqual({});
+  });
+
+  it('records what the opt-in scaffolds wrote, and why a check is still actionable', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(join(dir, 'tsconfig.json'), '{}', 'utf8');
+    mkdirSync(join(dir, 'app'), { recursive: true });
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com', scaffoldRobots: true, scaffoldJsonLd: true };\n",
+      'utf8',
+    );
+
+    const { report } = await generateCatalog({ cwd: dir });
+
+    expect(report.scaffolds.robotsTxt).toMatchObject({
+      action: 'created',
+      path: join(dir, 'public', 'robots.txt'),
+    });
+    expect(report.scaffolds.jsonLd).toMatchObject({
+      action: 'created',
+      path: join(dir, 'app', 'organization-json-ld.tsx'),
+    });
+    // robots.txt now exists, so its check flips; the JSON-LD component exists but nothing renders
+    // it, so its checks stay actionable — with the specific next step rather than "it's missing".
+    expect(report.ora.checks.find((c) => c.id === 'robots-ai-policy-quality')?.status).toBe(
+      'addressed',
+    );
+    const jsonLdCheck = report.ora.checks.find((c) => c.id === 'json-ld');
+    expect(jsonLdCheck?.status).toBe('actionable');
+    expect(jsonLdCheck?.note).toContain('<OrganizationJsonLd />');
+  });
+});
+
 // End-to-end wiring: generateCatalog() must actually call the zero-config detectors and
-// fold their output into `entries`, with `ard.config`'s `siteUrl` resolving the absolute URLs they
+// fold their output into `entries`, with `ax.config`'s `siteUrl` resolving the absolute URLs they
 // need (see the detect-*.test.ts files for each detector's own behavior in isolation).
 describe('generateCatalog zero-config artifact detection', () => {
   it('detects a public/openapi.json using the configured siteUrl', async () => {
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
     writeFileSync(
-      join(dir, 'ard.config.mjs'),
+      join(dir, 'ax.config.mjs'),
       "export default { siteUrl: 'https://example.com' };\n",
       'utf8',
     );
@@ -169,7 +241,7 @@ describe('generateCatalog zero-config artifact detection', () => {
   it('sets host.identifier from a configured siteUrl even without a Vercel domain', async () => {
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
     writeFileSync(
-      join(dir, 'ard.config.mjs'),
+      join(dir, 'ax.config.mjs'),
       "export default { siteUrl: 'https://example.com' };\n",
       'utf8',
     );
@@ -201,7 +273,7 @@ describe('generateCatalog zero-config artifact detection', () => {
       'utf8',
     );
     writeFileSync(
-      join(dir, 'ard.config.mjs'),
+      join(dir, 'ax.config.mjs'),
       "export default { siteUrl: 'https://example.com' };\n",
       'utf8',
     );
@@ -245,7 +317,7 @@ describe('generateCatalog zero-config artifact detection', () => {
   it('applies the denylist to a detected entry, not just config-declared ones', async () => {
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
     writeFileSync(
-      join(dir, 'ard.config.mjs'),
+      join(dir, 'ax.config.mjs'),
       "export default { siteUrl: 'https://example.com', denylist: ['/openapi.json'] };\n",
       'utf8',
     );
@@ -266,7 +338,7 @@ describe('generateCatalog zero-config artifact detection', () => {
   it('a config-declared override extends a zero-config-detected entry by identifier', async () => {
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
     writeFileSync(
-      join(dir, 'ard.config.mjs'),
+      join(dir, 'ax.config.mjs'),
       "export default { siteUrl: 'https://example.com', entries: [{ identifier: 'urn:air:example.com:openapi', description: 'Hand-written.' }] };\n",
       'utf8',
     );

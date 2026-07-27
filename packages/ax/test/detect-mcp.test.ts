@@ -213,6 +213,112 @@ describe('detectMcpServers', () => {
     expect(entries[0]).not.toHaveProperty('capabilities');
   });
 
+  it('ignores a createMcpHandler( call that only appears in a // comment', () => {
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    // A real import of the package plus a *commented-out* mount: the two-signal rule alone is
+    // satisfied, so without comment scrubbing this publishes an endpoint that doesn't exist.
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      `import { createMcpHandler } from 'mcp-handler';\n` +
+        `// const handler = createMcpHandler((server) => {});\n` +
+        `export function GET() { return new Response(String(createMcpHandler)); }\n`,
+      'utf8',
+    );
+
+    expect(
+      detectMcpServers({ cwd: dir, siteUrl: 'https://example.com', basePath: '', warn }),
+    ).toEqual([]);
+  });
+
+  it('ignores a createMcpHandler( call that only appears in a /* */ comment', () => {
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      `import { createMcpHandler } from 'mcp-handler';\n` +
+        `/**\n * Mount it with:\n *   const handler = createMcpHandler((server) => {});\n */\n` +
+        `export function GET() { return new Response(String(createMcpHandler)); }\n`,
+      'utf8',
+    );
+
+    expect(
+      detectMcpServers({ cwd: dir, siteUrl: 'https://example.com', basePath: '', warn }),
+    ).toEqual([]);
+  });
+
+  it('does not scrape a .tool( name that only appears in a comment', () => {
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      `import { createMcpHandler } from 'mcp-handler';\n` +
+        `const handler = createMcpHandler((server) => {\n` +
+        `  server.tool('real_tool', 'desc', {}, async () => ({}));\n` +
+        `  // server.tool('commented_out_tool', 'desc', {}, async () => ({}));\n` +
+        `  /* server.tool('block_commented_tool'); */\n` +
+        `});\n` +
+        `export { handler as GET };\n`,
+      'utf8',
+    );
+
+    const entries = detectMcpServers({
+      cwd: dir,
+      siteUrl: 'https://example.com',
+      basePath: '',
+      warn,
+    });
+    expect(entries[0]?.capabilities).toEqual(['real_tool']);
+  });
+
+  it('does not scrape a .tool( name from inside a template literal', () => {
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      `import { createMcpHandler } from 'mcp-handler';\n` +
+        `const docs = \`\n  Register tools like this:\n  server.tool('documented_tool', 'desc', {});\n\`;\n` +
+        `const handler = createMcpHandler((server) => {\n` +
+        `  server.tool('real_tool', 'desc', {}, async () => ({}));\n` +
+        `});\n` +
+        `export { handler as GET, docs };\n`,
+      'utf8',
+    );
+
+    const entries = detectMcpServers({
+      cwd: dir,
+      siteUrl: 'https://example.com',
+      basePath: '',
+      warn,
+    });
+    expect(entries[0]?.capabilities).toEqual(['real_tool']);
+  });
+
+  it('still detects a real mount whose file also carries explanatory comments', () => {
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      `// This route mounts an MCP server via createMcpHandler( ... ) — see mcp-handler docs.\n` +
+        `import { createMcpHandler } from 'mcp-handler';\n` +
+        `/* The handler below is the real mount. */\n` +
+        `const handler = createMcpHandler((server) => {\n` +
+        `  server.tool('roll_dice', 'desc', {}, async () => ({}));\n` +
+        `});\n` +
+        `export { handler as GET, handler as POST };\n`,
+      'utf8',
+    );
+
+    const entries = detectMcpServers({
+      cwd: dir,
+      siteUrl: 'https://example.com',
+      basePath: '',
+      warn,
+    });
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.capabilities).toEqual(['roll_dice']);
+  });
+
   it('finds an app dir nested under src/', () => {
     const routeDir = join(dir, 'src', 'app', '[transport]');
     mkdirSync(routeDir, { recursive: true });

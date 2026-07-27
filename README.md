@@ -7,13 +7,15 @@ discover the site's capabilities.
 > **Status:** pre-release, under active development. See [`docs-internal/PLAN.md`](./docs-internal/PLAN.md) for the phased
 > roadmap. This repo currently implements Phase 0 groundwork (spec + validator, workspace, fixture
 > corpus), the Phase 1 walking skeleton (CLI that emits a minimal, spec-valid, site-metadata-only
-> catalog as a `postbuild` step), Phase 2.1 (config: `ard.config.*`, `next.config.*` reading,
+> catalog as a `postbuild` step), Phase 2.1 (config: `ax.config.*`, `next.config.*` reading,
 > denylist/allowlist, entry overrides), Phase 2.2 (zero-config artifact detection: MCP servers,
 > `public/openapi.json`, `llms.txt`, config-declared docs/skills), and Phase 2.4 (emission targets —
 > static file or an `emit: 'route'` handler; ARD §6.1 discovery-pointer recommendations; and
 > detect-and-recommend for `robots.txt` / `sitemap.xml` / `agents.md`), plus Phase 4 (WebMCP
-> detection), the agent-aware 404 scaffold (`scaffoldAgent404`), and the machine-readable build
-> report (`--report` / `report`). Deploying a fixture to Vercel
+> detection), the agent-aware 404 scaffold (`scaffoldAgent404`), the opt-in `robots.txt` /
+> `Organization` JSON-LD scaffolds (`scaffoldRobots` / `scaffoldJsonLd`), and the machine-readable
+> build report (`--report` / `report`), whose `ora` section maps every finding onto Ora's
+> agent-readiness checks. Deploying a fixture to Vercel
 > and running it through Ora's AgentJourney is still pending — see `docs-internal/PLAN.md` Phase 1.
 
 ## Design posture
@@ -74,7 +76,7 @@ This writes `public/.well-known/ai-catalog.json` with:
   - A static **`public/openapi.json`** → `application/vnd.oai.openapi+json`.
   - An **`llms.txt`** served either as `app/llms.txt/route.ts` or `public/llms.txt` →
     `text/markdown`.
-- **Config-declared entries** — anything you list in `ard.config`'s `entries`, e.g. docs/skills
+- **Config-declared entries** — anything you list in `ax.config`'s `entries`, e.g. docs/skills
   pointers (`text/html` / `application/ai-skill+md`).
 
 Every entry above is validated against the AI Catalog spec before writing; the CLI refuses to
@@ -88,7 +90,7 @@ site's origin. This must be your **public production URL** (e.g. `https://yourdo
 written verbatim into the catalog's entry URLs, so a `localhost` or preview URL would publish broken
 links. It's resolved in this order, first match wins:
 
-1. `ard.config`'s `siteUrl` — an explicit declaration, always wins.
+1. `ax.config`'s `siteUrl` — an explicit declaration, always wins.
 2. `SITE_URL`, then `NEXT_PUBLIC_SITE_URL` — the two env-var names Next.js apps most commonly use
    for a stable production URL. Expected to be an absolute `https://…` origin.
 3. Vercel's build-time `VERCEL_PROJECT_PRODUCTION_URL` — injected automatically **on Vercel only**.
@@ -97,24 +99,28 @@ links. It's resolved in this order, first match wins:
 plain local `next build` can't resolve an origin from it — the catalog would come out without its
 URL-bearing entries (MCP, OpenAPI, llms.txt) and you couldn't check your work before deploying.
 Your production URL is the same string locally and in prod, so declare that (still the public
-domain, **not** `localhost`): set `siteUrl` in `ard.config`, or run the build with
+domain, **not** `localhost`): set `siteUrl` in `ax.config`, or run the build with
 `SITE_URL=https://yourdomain.com next build` (or export `NEXT_PUBLIC_SITE_URL`). Any of these lets
 you generate and preview the real catalog locally before deploying.
 
-`ard.config.*` is evaluated as real code at build time (via [`jiti`](https://github.com/unjs/jiti)),
+`ax.config.*` is evaluated as real code at build time (via [`jiti`](https://github.com/unjs/jiti)),
 not parsed as static JSON — so if your host/CI uses a different variable name, `siteUrl:
 process.env.DEPLOY_URL` (or whatever it is) works with no special support needed.
 
-### Config (`ard.config.{ts,js,mjs,cjs}`)
+### Config (`ax.config.{ts,js,mjs,cjs}`)
 
-Optional. Loaded from your project root; `.ts`/`.mjs`/`.cjs`/`.js` all work. (Named `ard.config`
-after the Agentic Resource Discovery spec rather than after this package — it's a file you commit,
-so it stays vendor-neutral.)
+Optional. Loaded from your project root; `.ts`/`.mjs`/`.cjs`/`.js` all work — named after the `ax`
+tool that reads it, so the file you commit says plainly which tool it configures.
+
+> **Renamed from `ard.config.*` (2026-07-27).** An `ard.config.*` is still loaded when no
+> `ax.config.*` exists, with a deprecation warning; if both exist the `ax.config.*` wins and the
+> legacy file is ignored (also warned). The `AxConfig` type is likewise exported as `ArdConfig`,
+> deprecated. Rename the file — the fallback is a migration aid, not a supported second name.
 
 ```ts
-import type { ArdConfig } from '@ora-ai/ax';
+import type { AxConfig } from '@ora-ai/ax';
 
-const config: ArdConfig = {
+const config: AxConfig = {
   // Your production origin — every detected entry's URL is resolved against this. Optional: falls
   // back to a SITE_URL / NEXT_PUBLIC_SITE_URL env var, then (on Vercel) to
   // VERCEL_PROJECT_PRODUCTION_URL. Set it here to iterate locally, or to pin the URL on any host.
@@ -125,12 +131,19 @@ const config: ArdConfig = {
   // 'route' writes an App Router handler at app/.well-known/ai-catalog.json/route.ts instead
   // (for proxy setups and future dynamic catalogs). See the basePath note below.
   emit: 'static',
-  // Scaffold a starter app/llms.txt/route.ts when neither it nor public/llms.txt exists.
-  // Opt-in (defaults to false) — it writes into your source tree, not just the catalog file.
+  // Scaffold a starter app/llms.txt/route.ts when neither it nor public/llms.txt exists, filled in
+  // with your real routes and artifacts. Opt-in (defaults to false) — it writes into your source
+  // tree, not just the catalog file.
   scaffoldLlmsTxt: true,
   // Scaffold an agent-aware app/not-found.tsx (written once, yours to edit) plus a route-manifest
   // data module regenerated on every build. Opt-in (defaults to false) — see "Agent-aware 404".
   scaffoldAgent404: true,
+  // Append the Sitemap:/Agentmap: discovery pointers to your public/robots.txt, or write one when
+  // you have no robots source at all. Opt-in (defaults to false) — see "Generated artifacts".
+  scaffoldRobots: true,
+  // Scaffold an app/organization-json-ld.tsx server component when no JSON-LD is rendered
+  // anywhere. Opt-in (defaults to false); ax never edits your layout to wire it up.
+  scaffoldJsonLd: true,
   // Write .ora/report.json, the machine-readable twin of the CLI output (true, or a custom path).
   // Opt-in (defaults to false); the CLI flag --report[=path] does the same per run.
   report: true,
@@ -155,7 +168,7 @@ specific, actionable message — it is never silently ignored or partially appli
 ### `next.config` reading
 
 The CLI reads your `next.config.{ts,js,mjs,cjs}` (object or function form) to extract `basePath`,
-`distDir`, and `output`, so you never repeat them in `ard.config`. Unlike the plugin's own
+`distDir`, and `output`, so you never repeat them in `ax.config`. Unlike the plugin's own
 config above, a `next.config` that fails to load only warns and falls back to defaults — it's not
 this plugin's place to fail your build over your Next.js config.
 
@@ -192,7 +205,7 @@ tool that two attributes make callable.
 ## Agent-aware 404 (`scaffoldAgent404`)
 
 An agent that fetches a URL that doesn't exist gets a dead-end 404 and either gives up or
-guesses. Setting `scaffoldAgent404: true` in `ard.config` scaffolds an **agent-aware
+guesses. Setting `scaffoldAgent404: true` in `ax.config` scaffolds an **agent-aware
 `app/not-found.tsx`** — written once, yours to edit, never overwritten — that tells agents why the
 404 happened (the URL doesn't exist; don't retry) and how to continue: links to the site's
 discovery artifacts (`ai-catalog.json`, `llms.txt`, sitemap — only the ones that actually exist)
@@ -204,15 +217,130 @@ can supply, since nothing at runtime knows the route table. Dynamic (`[slug]`) r
 guessed. Without the opt-in, the CLI detects your existing `not-found.*` and recommends adding
 agent signposts if it has none.
 
+## Generated artifacts (opt-in scaffolds)
+
+Most of what makes a site agent-ready is judgment work — what your site is _for_, which crawlers you
+want, who you are as an entity. But the skeleton around that judgment is mechanical, and a build
+step is better placed to write it than a person is: it already knows your route table, your
+package.json, and which artifacts this build produced. So where the plugin can derive real content
+it generates instead of advising, and stops at exactly the line where a guess would start.
+
+Every scaffold follows the same three rules: **opt-in** via a config flag (it writes into your
+source tree, not just the one file the plugin exists to produce), **write-once** (the file is yours
+the moment it exists — ax never overwrites it), and **honest** (nothing invented; anything ax can't
+derive ships as a marked TODO rather than plausible-looking filler).
+
+### `scaffoldLlmsTxt` — a starter `llms.txt` with your actual content
+
+`app/llms.txt/route.ts` (or `.js`), written once, containing: your `package.json` name and
+description, a **Key pages** section listing your app's real statically-addressable routes (dynamic
+segments are never guessed), and a **Machine-readable resources** section linking the artifacts this
+build actually produced or detected — the catalog, `openapi.json`, an MCP endpoint — as absolute
+URLs when the site origin resolved and served paths otherwise.
+
+The **When to use** section is deliberately a TODO, and the comment says why: agent-readiness checks
+look for real guidance about which tasks belong on your site, and an unedited placeholder scores the
+same as no section at all. That paragraph is the one part of an llms.txt no build tool can derive,
+so it's the one part left for you (or your coding agent) to write.
+
+### `scaffoldRobots` — discovery pointers in `robots.txt`
+
+What ax knows that your `robots.txt` doesn't is where the catalog it just generated lives, and
+whether you actually have a sitemap. So:
+
+- **You have a `public/robots.txt`** → ax _appends_ a `Sitemap:` line (only when a sitemap really
+  exists) and an `Agentmap:` line pointing at the generated catalog, in a block marked
+  `# Added by @ora-ai/ax`, and only when they're missing. Existing lines are never modified or
+  reordered, a directive you already wrote counts as written (in any casing), and running twice
+  appends nothing the second time.
+- **You have an `app/robots.ts` route** → ax doesn't touch it. That file is code, and it owns your
+  policy. (Next's `MetadataRoute.Robots` has no field for `Agentmap:` at all, so ax says so and
+  leaves the choice to move to you.)
+- **You have neither** → ax writes `public/robots.txt` with `User-agent: *` / `Allow: /`, explicit
+  `Allow` blocks for reputable AI agent crawlers (GPTBot, ClaudeBot, Claude-User, PerplexityBot,
+  Google-Extended), and the pointer lines above.
+
+The generated file also carries a **commented-out** example of restricting training-only crawlers
+(CCBot, Bytespider). It stays commented out on purpose: whether to block a crawler is a decision
+about your content and your business, and the plugin says as much in the file rather than making it
+for you.
+
+### `scaffoldJsonLd` — an `Organization` block you can fill in
+
+When nothing in your app renders JSON-LD, ax writes `app/organization-json-ld.tsx` — a small server
+component rendering one `<script type="application/ld+json">` with a schema.org `Organization`:
+`name` and `description` from `package.json`, `url` from the resolved site origin. `sameAs` ships
+empty with a TODO, because the external profiles that actually do the entity-disambiguating
+(LinkedIn, GitHub, npm, socials) live outside your repo and nothing at build time can derive them.
+
+ax does **not** add the component to your `layout.tsx`. Editing the file every page renders through,
+to insert an element, is not a change a postbuild step should make behind your back — so the CLI
+prints the exact import and element to add, phrased for a coding agent to apply mechanically, and
+the build report carries the same two strings. Until something imports it, the component publishes
+nothing, and the report keeps saying so.
+
 ## Machine-readable build report (`--report` / `report`)
 
-`ax --report` (or `report: true` in `ard.config`; a string value customizes the path)
+`ax --report` (or `report: true` in `ax.config`; a string value customizes the path)
 writes **`.ora/report.json`** — the machine-readable twin of the CLI output: catalog entries and
 where they were written, detected MCP mounts and the server card path, WebMCP tool sites, presence
 of every detect-and-recommend artifact (robots.txt / sitemap / agents.md / JSON-LD / llms.txt /
-openapi.json), agent-404 status, and every warning and recommendation verbatim. A coding agent (or
-CI step) reads one JSON file instead of parsing log lines — point your agent at it after a build
-and let it work through the recommendations.
+openapi.json), agent-404 status, what each opt-in scaffold wrote or skipped and why, and every
+warning and recommendation verbatim. A coding agent (or CI step) reads one JSON file instead of
+parsing log lines — point your agent at it after a build and let it work through the
+recommendations.
+
+### The `ora` section — recommendations in Ora's check language
+
+A list of recommendations tells an agent what to do but not whether it worked.
+[Ora](https://ora.ai) scores agent-readiness against a registry of named checks, so the report's
+`ora` section translates this build's findings into those check IDs and hands over everything needed
+to close the loop:
+
+```jsonc
+{
+  "reportVersion": 2,
+  "ora": {
+    // MCP server for Ora's agent-ready-website skill (tools: list_skills, get_skill)
+    "skillMcp": "https://ora.ai/skill/mcp",
+    "skillUrl": "https://ora.ai/.well-known/agent-skills/agent-ready-website/SKILL.md",
+    "scanApi": {
+      "scan": "POST https://ora.ai/api/scan",
+      "score": "GET https://ora.ai/api/score/{domain}",
+    },
+    "checks": [
+      { "id": "ard-catalog", "artifact": "ai-catalog.json", "status": "addressed" },
+      { "id": "llms-txt-exists", "artifact": "llms.txt", "status": "actionable" },
+      {
+        "id": "json-ld",
+        "artifact": "json-ld",
+        "status": "actionable",
+        // A scaffold that's started but unfinished is still actionable — with the specific next
+        // step, not just "it's missing".
+        "note": "An Organization JSON-LD component was scaffolded at … but nothing renders it yet…",
+      },
+    ],
+  },
+}
+```
+
+`status` is two-valued on purpose (`addressed` / `actionable`): the report is read by an agent
+deciding what to work on, and every richer vocabulary collapses to that question anyway. The mapping
+lives in [`src/ora-checks.ts`](./packages/ax/src/ora-checks.ts) and is intentionally conservative —
+an artifact is listed against a check only when its _presence_ is what the check looks for, and a
+check ax has no build-time signal for is absent rather than guessed at. A check missing from the
+section is not a claim that your site fails it; it means this build can't speak to it.
+
+When anything is still actionable, the CLI closes with a short handoff footer pointing at the
+report, Ora's skill server, and the scan that verifies the result against your deployed site:
+
+```
+[ax] Agent handoff: .ora/report.json maps every recommendation to Ora's agent-readiness checks.
+[ax]   Point your coding agent at it and connect Ora's skill server (MCP): https://ora.ai/skill/mcp
+[ax]   Then scan your deployed site: POST https://ora.ai/api/scan {"url": "https://yourdomain.com"}
+```
+
+A build with nothing left to do prints no footer.
 
 ## Discovery recommendations
 
@@ -223,7 +351,9 @@ advisory recommendations (never catalog entries, never a build failure): whether
 `llms.txt`. Where signals reinforce each other — e.g. `llms.txt` (what your site is for) and JSON-LD
 (what entity it is) — the recommendation says so, so you add the pair rather than one in isolation.
 The recommendations name Next.js conventions and file paths, not third-party packages. These are
-recommendations only; you decide what to act on.
+recommendations only; you decide what to act on — though for `robots.txt`, `llms.txt` and JSON-LD you
+can opt into having the derivable part written for you instead (see
+[Generated artifacts](#generated-artifacts-opt-in-scaffolds)).
 
 ## Development
 

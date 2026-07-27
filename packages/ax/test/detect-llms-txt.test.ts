@@ -195,6 +195,120 @@ describe('detectLlmsTxt — scaffolding', () => {
     expect(readFileSync(join(routeDir, 'route.ts'), 'utf8')).toBe('# custom content\n');
   });
 
+  it('fills the starter with the app’s real content, not example.com boilerplate', () => {
+    mkdirSync(join(dir, 'app', 'pricing'), { recursive: true });
+    mkdirSync(join(dir, 'app', 'docs'), { recursive: true });
+    mkdirSync(join(dir, 'app', 'blog', '[slug]'), { recursive: true });
+    for (const page of [['page.tsx'], ['pricing', 'page.tsx'], ['docs', 'page.tsx']]) {
+      writeFileSync(join(dir, 'app', ...page), 'export default function P() {}\n', 'utf8');
+    }
+    writeFileSync(
+      join(dir, 'app', 'blog', '[slug]', 'page.tsx'),
+      'export default function P() {}\n',
+      'utf8',
+    );
+    writeFileSync(join(dir, 'tsconfig.json'), '{}', 'utf8');
+
+    detectLlmsTxt({
+      cwd: dir,
+      siteUrl: 'https://example.com',
+      basePath: '',
+      warn,
+      scaffold: true,
+      site: { displayName: 'acme', description: 'Acme sells widgets.' },
+      resources: { openApi: true, mcpPathnames: ['/mcp'] },
+    });
+
+    const scaffolded = readFileSync(join(dir, 'app', 'llms.txt', 'route.ts'), 'utf8');
+    expect(scaffolded).toContain('# acme');
+    expect(scaffolded).toContain('> Acme sells widgets.');
+    // Real routes, absolute — and never a dynamic segment, whose concrete URL isn't knowable.
+    expect(scaffolded).toContain('- [/](https://example.com/)');
+    expect(scaffolded).toContain('- [/docs](https://example.com/docs)');
+    expect(scaffolded).toContain('- [/pricing](https://example.com/pricing)');
+    expect(scaffolded).not.toContain('[slug]');
+    // Only the artifacts this build actually has.
+    expect(scaffolded).toContain('https://example.com/.well-known/ai-catalog.json');
+    expect(scaffolded).toContain('https://example.com/openapi.json');
+    expect(scaffolded).toContain('https://example.com/mcp');
+    // The invented boilerplate the old template shipped is gone.
+    expect(scaffolded).not.toContain('# Your site');
+    expect(scaffolded).not.toContain('[Docs](');
+    expect(scaffolded).not.toContain('[Pricing](');
+  });
+
+  it('lists only the machine-readable artifacts that exist', () => {
+    mkdirSync(join(dir, 'app'), { recursive: true });
+
+    detectLlmsTxt({
+      cwd: dir,
+      siteUrl: 'https://example.com',
+      basePath: '',
+      warn,
+      scaffold: true,
+      site: { displayName: 'acme' },
+    });
+
+    const scaffolded = readFileSync(join(dir, 'app', 'llms.txt', 'route.js'), 'utf8');
+    expect(scaffolded).toContain('AI Catalog');
+    expect(scaffolded).not.toContain('OpenAPI');
+    expect(scaffolded).not.toContain('MCP server');
+  });
+
+  it('marks "When to use" as a TODO and says why a placeholder earns nothing', () => {
+    mkdirSync(join(dir, 'app'), { recursive: true });
+
+    detectLlmsTxt({
+      cwd: dir,
+      siteUrl: 'https://example.com',
+      basePath: '',
+      warn,
+      scaffold: true,
+      site: { displayName: 'acme' },
+    });
+
+    const scaffolded = readFileSync(join(dir, 'app', 'llms.txt', 'route.js'), 'utf8');
+    expect(scaffolded).toContain('## When to use');
+    expect(scaffolded).toContain('TODO');
+    expect(scaffolded).toContain('placeholder earns no credit');
+  });
+
+  it('falls back to served paths, never a guessed origin, when no siteUrl resolved', () => {
+    mkdirSync(join(dir, 'app'), { recursive: true });
+    writeFileSync(join(dir, 'app', 'page.tsx'), 'export default function P() {}\n', 'utf8');
+
+    detectLlmsTxt({
+      cwd: dir,
+      siteUrl: undefined,
+      basePath: '',
+      warn,
+      scaffold: true,
+      site: { displayName: 'acme' },
+    });
+
+    const scaffolded = readFileSync(join(dir, 'app', 'llms.txt', 'route.js'), 'utf8');
+    expect(scaffolded).toContain('- [/](/)');
+    expect(scaffolded).toContain('(/.well-known/ai-catalog.json)');
+    expect(scaffolded).not.toContain('https://');
+  });
+
+  it('escapes derived values that would otherwise break the template literal', () => {
+    mkdirSync(join(dir, 'app'), { recursive: true });
+
+    detectLlmsTxt({
+      cwd: dir,
+      siteUrl: 'https://example.com',
+      basePath: '',
+      warn,
+      scaffold: true,
+      site: { displayName: 'acme', description: 'Uses `backticks` and ${interpolation}.' },
+    });
+
+    const scaffolded = readFileSync(join(dir, 'app', 'llms.txt', 'route.js'), 'utf8');
+    expect(scaffolded).toContain('\\`backticks\\`');
+    expect(scaffolded).toContain('\\${interpolation}');
+  });
+
   it('warns instead of throwing when app/llms.txt exists as a plain file, not a directory', () => {
     mkdirSync(join(dir, 'app'), { recursive: true });
     writeFileSync(join(dir, 'app', 'llms.txt'), 'not a directory', 'utf8');

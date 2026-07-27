@@ -35,7 +35,7 @@ const AGENT_SIGNPOST_RE = /llms\.txt|ai-catalog|agentGuidance/;
 
 export interface Agent404Options {
   cwd: string;
-  /** `ard.config` `scaffoldAgent404`, resolved. Opt-in — defaults to `false`. */
+  /** `ax.config` `scaffoldAgent404`, resolved. Opt-in — defaults to `false`. */
   scaffold: boolean;
   /** `next.config` `basePath`, or `''` if unset — discovery links are served under it. */
   basePath: string;
@@ -109,7 +109,7 @@ export function manageAgent404(options: Agent404Options): Agent404Result {
       'No app/not-found.tsx found — agents that hit a missing URL get Next.js’s bare default 404, ' +
         'a dead end that makes them give up or guess. Add one that tells agents why the 404 ' +
         'happened and how to continue (links to llms.txt, the ai-catalog, and your real routes), ' +
-        'or set scaffoldAgent404: true in ard.config to have an agent-aware page (plus a ' +
+        'or set scaffoldAgent404: true in ax.config to have an agent-aware page (plus a ' +
         'build-time route manifest) written for you.',
     );
     return { notFoundPresent: false, agentAware: false };

@@ -15,7 +15,7 @@ function writeMcpFixture(dir: string): void {
     'utf8',
   );
   writeFileSync(
-    join(dir, 'ard.config.mjs'),
+    join(dir, 'ax.config.mjs'),
     "export default { siteUrl: 'https://example.com' };\n",
     'utf8',
   );
@@ -26,6 +26,38 @@ function writeMcpFixture(dir: string): void {
     `import { createMcpHandler } from 'mcp-handler';\n` +
       `const handler = createMcpHandler((server) => { server.tool('roll_dice', 'd', {}, async () => ({})); });\n` +
       `export { handler as GET };\n`,
+    'utf8',
+  );
+}
+
+/** An app carrying every artifact the plugin detects — the "nothing left to do" end state. */
+function writeFullyAgentReadyApp(dir: string): void {
+  writeMcpFixture(dir);
+
+  const publicDir = join(dir, 'public');
+  mkdirSync(publicDir, { recursive: true });
+  writeFileSync(join(publicDir, 'llms.txt'), '# demo\n', 'utf8');
+  writeFileSync(join(publicDir, 'robots.txt'), 'User-agent: *\nAllow: /\n', 'utf8');
+  writeFileSync(join(publicDir, 'sitemap.xml'), '<urlset></urlset>\n', 'utf8');
+  writeFileSync(join(publicDir, 'agents.md'), '# When to use\n', 'utf8');
+  writeFileSync(
+    join(publicDir, 'openapi.json'),
+    JSON.stringify({ openapi: '3.1.0', info: { title: 'Demo API' } }),
+    'utf8',
+  );
+
+  writeFileSync(
+    join(dir, 'app', 'layout.tsx'),
+    'export default function Layout() {\n' +
+      '  return <script type="application/ld+json">{}</script>;\n' +
+      '}\n',
+    'utf8',
+  );
+  writeFileSync(
+    join(dir, 'app', 'page.tsx'),
+    'export default function Page() {\n' +
+      '  return <form toolname="subscribe" tooldescription="Subscribe" />;\n' +
+      '}\n',
     'utf8',
   );
 }
@@ -72,9 +104,9 @@ describe('runCli', () => {
     expect(existsSync(join(dir, CATALOG_OUTPUT_PATH))).toBe(true);
   });
 
-  it('accepts a relative --cwd and still loads ard.config from it', async () => {
+  it('accepts a relative --cwd and still loads ax.config from it', async () => {
     writeFileSync(
-      join(dir, 'ard.config.mjs'),
+      join(dir, 'ax.config.mjs'),
       "export default { siteUrl: 'https://example.com' };\n",
       'utf8',
     );
@@ -138,14 +170,31 @@ describe('runCli', () => {
     expect(parsed.entries).toEqual([]);
   });
 
-  it('exits 1 with an actionable message and writes nothing on an invalid ard.config', async () => {
-    writeFileSync(join(dir, 'ard.config.mjs'), 'export default { denylist: 123 };\n', 'utf8');
+  it('exits 1 with an actionable message and writes nothing on an invalid ax.config', async () => {
+    writeFileSync(join(dir, 'ax.config.mjs'), 'export default { denylist: 123 };\n', 'utf8');
 
     const code = await runCli([], { ...io, cwd: dir });
 
     expect(code).toBe(1);
-    expect(stderr.some((l) => l.includes('ard.config'))).toBe(true);
+    expect(stderr.some((l) => l.includes('ax.config'))).toBe(true);
     expect(existsSync(join(dir, CATALOG_OUTPUT_PATH))).toBe(false);
+  });
+
+  // The `ard.config.*` → `ax.config.*` rename is a warn-and-keep-working deprecation, so a build
+  // that hasn't migrated yet must still succeed — and must say so in its output.
+  it('still builds from a legacy ard.config, printing the deprecation warning', async () => {
+    writeFileSync(
+      join(dir, 'ard.config.mjs'),
+      "export default { siteUrl: 'https://example.com' };\n",
+      'utf8',
+    );
+
+    const code = await runCli([], { ...io, cwd: dir });
+
+    expect(code).toBe(0);
+    expect(stdout.some((l) => l.includes('ard.config.* is deprecated'))).toBe(true);
+    const parsed = JSON.parse(readFileSync(join(dir, CATALOG_OUTPUT_PATH), 'utf8'));
+    expect(parsed.host.identifier).toBe('did:web:example.com');
   });
 
   it('warns (but still succeeds) when next.config sets basePath', async () => {
@@ -155,6 +204,23 @@ describe('runCli', () => {
 
     expect(code).toBe(0);
     expect(stdout.some((l) => l.includes('basePath'))).toBe(true);
+  });
+
+  it('pluralizes the entry count', async () => {
+    writeMcpFixture(dir);
+
+    await runCli([], { ...io, cwd: dir });
+    expect(stdout.some((l) => l.includes('1 entry referenced'))).toBe(true);
+    expect(stdout.some((l) => l.includes('1 entries referenced'))).toBe(false);
+
+    stdout = [];
+    writeFileSync(
+      join(dir, 'public', 'openapi.json'),
+      JSON.stringify({ openapi: '3.1.0' }),
+      'utf8',
+    );
+    await runCli([], { ...io, cwd: dir });
+    expect(stdout.some((l) => l.includes('2 entries referenced'))).toBe(true);
   });
 
   it('also writes the well-known MCP server card when a mount is detected', async () => {
@@ -200,7 +266,7 @@ describe('runCli', () => {
     expect(existsSync(reportPath)).toBe(true);
     const report = JSON.parse(readFileSync(reportPath, 'utf8'));
     expect(report).toMatchObject({
-      reportVersion: 1,
+      reportVersion: 2,
       siteUrl: 'https://example.com',
       catalog: {
         path: join(dir, CATALOG_OUTPUT_PATH),
@@ -230,15 +296,15 @@ describe('runCli', () => {
     expect(existsSync(join(dir, 'agent-report.json'))).toBe(true);
   });
 
-  it('ard.config `report: true` enables the report without a CLI flag', async () => {
+  it('ax.config `report: true` enables the report without a CLI flag', async () => {
     // A separate tmp dir (not a rewrite of this test file's shared config): Node's native ESM
-    // cache means the same ard.config.mjs path is only evaluated once per process, and unlike a
+    // cache means the same ax.config.mjs path is only evaluated once per process, and unlike a
     // real CLI run the test suite is one long-lived process.
     const configDir = mkdtempSync(join(tmpdir(), 'ax-cli-report-'));
     try {
       writeFileSync(join(configDir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
       writeFileSync(
-        join(configDir, 'ard.config.mjs'),
+        join(configDir, 'ax.config.mjs'),
         "export default { siteUrl: 'https://example.com', report: true };\n",
         'utf8',
       );
@@ -249,5 +315,53 @@ describe('runCli', () => {
     } finally {
       rmSync(configDir, { recursive: true, force: true });
     }
+  });
+});
+
+// The footer is where the build stops talking to a person and starts talking to the coding agent
+// that will do the remaining work: where the machine-readable report is, where the skill server is,
+// and how to verify the result against the deployed site.
+describe('runCli agent handoff footer', () => {
+  it('points at the written report, the skill server, and the scan endpoint', async () => {
+    writeMcpFixture(dir);
+
+    await runCli(['--report'], { ...io, cwd: dir });
+
+    const output = stdout.join('\n');
+    expect(output).toContain(`Agent handoff: ${join(dir, REPORT_OUTPUT_PATH)}`);
+    expect(output).toContain("Ora's skill server (MCP): https://ora.ai/skill/mcp");
+    expect(output).toContain('POST https://ora.ai/api/scan {"url": "https://example.com"}');
+  });
+
+  it('says how to get the report when this run did not write one', async () => {
+    writeMcpFixture(dir);
+
+    await runCli([], { ...io, cwd: dir });
+
+    const output = stdout.join('\n');
+    expect(output).toContain('Agent handoff:');
+    expect(output).toContain('re-run with --report');
+  });
+
+  it('falls back to a placeholder domain when no site URL resolved', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+
+    await runCli([], { ...io, cwd: dir });
+
+    expect(stdout.join('\n')).toContain('{"url": "https://<your-domain>"}');
+  });
+
+  it('prints nothing for a site that already has every artifact ax knows about', async () => {
+    writeFullyAgentReadyApp(dir);
+
+    const code = await runCli(['--report'], { ...io, cwd: dir });
+
+    expect(code).toBe(0);
+    const report = JSON.parse(readFileSync(join(dir, REPORT_OUTPUT_PATH), 'utf8'));
+    expect(report.ora.checks.filter((c: { status: string }) => c.status === 'actionable')).toEqual(
+      [],
+    );
+    // Nothing left to hand off — a build with no remaining work doesn't get a to-do list.
+    expect(stdout.join('\n')).not.toContain('Agent handoff');
   });
 });

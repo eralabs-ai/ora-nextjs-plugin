@@ -1,10 +1,10 @@
-// Hand-written JSON Schema for `ard.config.*`, validated through the same Ajv instance as the AI
+// Hand-written JSON Schema for `ax.config.*`, validated through the same Ajv instance as the AI
 // Catalog spec itself (see ajv-instance.ts) — one schema-validation library for the whole package.
 // This schema is this package's own contract, not the vendored spec, so it lives here rather than
 // in spec/.
 
 /** One entry the developer declares by hand, merged over/appended to inferred entries. */
-export interface ArdEntryOverride {
+export interface AxEntryOverride {
   /**
    * Must match an inferred entry's `identifier` to override/extend it; any other value appends.
    * ARD requires the `urn:air:<publisher-domain>:<name>` format (inferred entries use
@@ -33,7 +33,7 @@ export interface ArdEntryOverride {
   [key: string]: unknown;
 }
 
-export interface ArdConfig {
+export interface AxConfig {
   /**
    * The site's absolute production URL (e.g. `https://example.com`, no trailing slash). Zero-config
    * detectors (MCP/OpenAPI/llms.txt) need this to build the absolute `url` the spec's
@@ -72,6 +72,25 @@ export interface ArdConfig {
    */
   scaffoldAgent404?: boolean;
   /**
+   * Whether to manage `public/robots.txt`. When on, ax appends the discovery pointers it is
+   * uniquely placed to know — a `Sitemap:` line (only when a sitemap actually exists) and an
+   * `Agentmap:` line for the catalog it just generated — to an existing `public/robots.txt`, in a
+   * clearly marked block and only when they're missing; or, when the project has no robots source
+   * at all, writes one with explicit `Allow` rules for reputable AI crawlers. An existing
+   * `app/robots.ts` route handler is never touched. Which crawlers to *block* stays the site
+   * owner's decision — the scaffold only shows how, commented out. **Opt-in — defaults to
+   * `false`**, same reasoning as `scaffoldLlmsTxt`.
+   */
+  scaffoldRobots?: boolean;
+  /**
+   * Whether to scaffold an `app/organization-json-ld.tsx` server component (schema.org
+   * `Organization`, built from `package.json` and the resolved site URL) when no JSON-LD is
+   * rendered anywhere. Written once, never overwritten, and never wired into your `layout.tsx` by
+   * ax — the CLI prints the exact import and element to add instead. **Opt-in — defaults to
+   * `false`**, same reasoning as `scaffoldLlmsTxt`.
+   */
+  scaffoldJsonLd?: boolean;
+  /**
    * Glob patterns for paths that must never be published, even if some future detector would
    * otherwise infer an entry for them. Default-on: see DEFAULT_DENYLIST.
    */
@@ -87,7 +106,7 @@ export interface ArdConfig {
    */
   report?: boolean | string;
   /** Hand-declared entries that override (by matching `identifier`) or extend the inferred set. */
-  entries?: ArdEntryOverride[];
+  entries?: AxEntryOverride[];
 }
 
 /**
@@ -95,7 +114,16 @@ export interface ArdConfig {
  * `siteUrl` is the one exception: there is no meaningful default for "unknown", so it stays
  * optional even here (undefined means "no absolute site URL could be determined").
  */
-export type ResolvedArdConfig = Required<Omit<ArdConfig, 'siteUrl'>> & Pick<ArdConfig, 'siteUrl'>;
+export type ResolvedAxConfig = Required<Omit<AxConfig, 'siteUrl'>> & Pick<AxConfig, 'siteUrl'>;
+
+/** @deprecated Renamed to {@link AxConfig} along with `ard.config.*` → `ax.config.*`. */
+export type ArdConfig = AxConfig;
+
+/** @deprecated Renamed to {@link AxEntryOverride} along with `ard.config.*` → `ax.config.*`. */
+export type ArdEntryOverride = AxEntryOverride;
+
+/** @deprecated Renamed to {@link ResolvedAxConfig} along with `ard.config.*` → `ax.config.*`. */
+export type ResolvedArdConfig = ResolvedAxConfig;
 
 /**
  * Default-on denylist: auth and webhook routes are never safe to publish
@@ -119,14 +147,14 @@ const entryOverrideSchema = {
     representativeQueries: { type: 'array', minItems: 2, maxItems: 5, items: { type: 'string' } },
     metadata: { type: 'object' },
   },
-  // Open extensibility, matching the spec's own entries — see ArdEntryOverride above.
+  // Open extensibility, matching the spec's own entries — see AxEntryOverride above.
   additionalProperties: true,
 };
 
-export const ardConfigSchema: Record<string, unknown> = {
+export const axConfigSchema: Record<string, unknown> = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $id: 'https://github.com/eralabs-ai/ora-nextjs-plugin/schema/ard.config.schema.json',
-  title: 'ArdConfig',
+  $id: 'https://github.com/eralabs-ai/ora-nextjs-plugin/schema/ax.config.schema.json',
+  title: 'AxConfig',
   type: 'object',
   properties: {
     siteUrl: {
@@ -138,6 +166,8 @@ export const ardConfigSchema: Record<string, unknown> = {
     emit: { type: 'string', enum: ['static', 'route'] },
     scaffoldLlmsTxt: { type: 'boolean' },
     scaffoldAgent404: { type: 'boolean' },
+    scaffoldRobots: { type: 'boolean' },
+    scaffoldJsonLd: { type: 'boolean' },
     denylist: { type: 'array', items: { type: 'string', minLength: 1 } },
     allowlist: { type: 'array', items: { type: 'string', minLength: 1 } },
     report: { anyOf: [{ type: 'boolean' }, { type: 'string', minLength: 1 }] },
@@ -147,3 +177,6 @@ export const ardConfigSchema: Record<string, unknown> = {
   // typo, and this is the "fails loudly" surface this validation exists for.
   additionalProperties: false,
 };
+
+/** @deprecated Renamed to {@link axConfigSchema} along with `ard.config.*` → `ax.config.*`. */
+export const ardConfigSchema: Record<string, unknown> = axConfigSchema;

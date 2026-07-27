@@ -35,27 +35,69 @@ export {
   type EmissionTarget,
 } from './write.js';
 
-export type { BuildReport, ReportArtifact } from './report.js';
+export type { BuildReport, ReportArtifact, ReportScaffolds, OraReport } from './report.js';
+
+export {
+  buildOraChecks,
+  ORA_CHECK_MAP,
+  ORA_SCAN_API,
+  ORA_SKILL_MCP_URL,
+  ORA_SKILL_URL,
+  type OraArtifact,
+  type OraArtifactChecks,
+  type OraArtifactPresence,
+  type OraCheckState,
+  type OraCheckStatus,
+} from './ora-checks.js';
+
+export {
+  scaffoldRobots,
+  type ScaffoldRobotsOptions,
+  type RobotsScaffoldAction,
+  type RobotsScaffoldResult,
+} from './scaffold-robots.js';
+
+export {
+  scaffoldOrganizationJsonLd,
+  JSON_LD_COMPONENT_BASE,
+  type ScaffoldJsonLdOptions,
+  type JsonLdScaffoldAction,
+  type JsonLdScaffoldResult,
+  type JsonLdWiring,
+} from './scaffold-json-ld.js';
 
 export { readSiteMetadata, type SiteMetadata } from './site-metadata.js';
 
 export { runCli, type CliIO } from './cli.js';
 
 export {
-  ardConfigSchema,
+  axConfigSchema,
   DEFAULT_DENYLIST,
+  type AxConfig,
+  type AxEntryOverride,
+  type ResolvedAxConfig,
+  // Deprecated pre-`ax.config` names, kept so existing imports keep resolving.
+  ardConfigSchema,
   type ArdConfig,
   type ArdEntryOverride,
   type ResolvedArdConfig,
 } from './config-schema.js';
 
-export { loadArdConfig, ArdConfigError, type LoadArdConfigResult } from './config.js';
+export {
+  loadAxConfig,
+  AxConfigError,
+  type LoadAxConfigResult,
+  loadArdConfig,
+  ArdConfigError,
+  type LoadArdConfigResult,
+} from './config.js';
 
 export {
-  validateArdConfig,
+  validateAxConfig,
   formatConfigErrors,
   type ConfigValidationResult,
   type ConfigValidationError,
+  validateArdConfig,
 } from './validate-config.js';
 
 export {
@@ -108,6 +150,7 @@ export {
   detectLlmsTxt,
   type DetectLlmsTxtOptions,
   type DetectLlmsTxtResult,
+  type LlmsTxtResources,
 } from './detect-llms-txt.js';
 
 export {

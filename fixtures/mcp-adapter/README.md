@@ -13,6 +13,6 @@ one exception to "route entries are opt-in only." Detection resolves the `[trans
 segment to `/mcp` (`mcp-handler`'s documented default `streamableHttpEndpoint`) and populates
 `capabilities` from the `server.tool(...)` call sites it finds.
 
-Ships an `ard.config.ts` declaring `siteUrl` so the emitted entry's URL is deterministic in CI
+Ships an `ax.config.ts` declaring `siteUrl` so the emitted entry's URL is deterministic in CI
 (without it, this detector still runs, but skips emitting a URL-bearing entry since none of this
 repo's test environments set Vercel's production-domain env var).

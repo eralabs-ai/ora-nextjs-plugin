@@ -1,6 +1,7 @@
 import { readFileSync, statSync } from 'node:fs';
 
 import { findAppDir } from './app-dir.js';
+import { scrubSource } from './scrub-source.js';
 import { buildArtifactUrl, buildUrn, NO_SITE_URL_HINT } from './site-url.js';
 import type { CatalogEntry } from './types.js';
 import { pathSegments, ROUTE_FILE_NAMES, walkFiles } from './walk-files.js';
@@ -8,9 +9,14 @@ import { pathSegments, ROUTE_FILE_NAMES, walkFiles } from './walk-files.js';
 // An existing MCP server is unambiguous intent to publish, so this is the one zero-config
 // detector that runs with no opt-in marker. Detection is deliberately textual, not AST-based: a
 // route file mounts an MCP server the Next.js way when it both imports the package and calls the
-// handler factory it exports; requiring both textual signals cuts down on false positives from a
-// file that merely mentions the package name in a comment or unrelated string, without the cost of
-// a full AST parse.
+// handler factory it exports.
+//
+// Requiring both signals is not by itself enough for precision — a file can import the package for
+// real *and* mention `createMcpHandler(` in a comment, which used to publish an endpoint that
+// doesn't exist. So every regex below runs against `scrubSource(content)` (see scrub-source.ts):
+// comment bodies and template-literal contents are blanked to spaces first, leaving offsets intact.
+// Ordinary string literals are kept, because that is where the import specifier and the tool names
+// actually live. This is a lexer-grade guard, not an AST one — see scrub-source.ts for its limits.
 const MCP_IMPORT_RE =
   /from\s+['"](mcp-handler|@vercel\/mcp-adapter)['"]|require\(\s*['"](mcp-handler|@vercel\/mcp-adapter)['"]\s*\)/;
 const MCP_HANDLER_CALL_RE = /createMcpHandler\s*\(/;
@@ -18,7 +24,8 @@ const MCP_HANDLER_CALL_RE = /createMcpHandler\s*\(/;
 // matching the MCP SDK's `server.tool(name, ...)` convention the mcp-adapter fixture uses. This is
 // intentionally a plain regex, not a schema/AST evaluation — "populate capabilities where
 // statically derivable" — cheaply. A file with no such calls simply gets none; this never invents
-// a tool name that isn't a literal string in the source.
+// a tool name that isn't a literal string in the source, and (running on scrubbed source) never
+// picks up a `.tool('x')` that only appears in a comment or a template literal.
 const TOOL_NAME_RE = /\.tool\(\s*['"`]([^'"`]+)['"`]/g;
 
 export interface DetectMcpMountsOptions {
@@ -59,7 +66,7 @@ export function detectMcpMounts(options: DetectMcpMountsOptions): McpMount[] {
   for (const file of routeFiles) {
     let content: string;
     try {
-      content = readFileSync(file.absolutePath, 'utf8');
+      content = scrubSource(readFileSync(file.absolutePath, 'utf8'));
     } catch {
       continue;
     }
@@ -69,7 +76,7 @@ export function detectMcpMounts(options: DetectMcpMountsOptions): McpMount[] {
     if (pathname === undefined) {
       options.warn(
         `Found an MCP server mount (mcp-handler) at ${file.relativeDir || '.'} but couldn't ` +
-          'resolve a stable URL from its route segments — declare it manually via ard.config ' +
+          'resolve a stable URL from its route segments — declare it manually via ax.config ' +
           '"entries" instead of relying on zero-config detection.',
       );
       continue;

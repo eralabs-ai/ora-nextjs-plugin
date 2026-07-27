@@ -1,10 +1,10 @@
 # fixture: config-overrides
 
-A Next.js app that declares catalog config in `ard.config.ts` — the Phase 2.1 config surface.
+A Next.js app that declares catalog config in `ax.config.ts` — the Phase 2.1 config surface.
 
 **Exercises:**
 
-- **Config loading** — a TypeScript `ard.config.ts` (typed with `ArdConfig` imported from the
+- **Config loading** — a TypeScript `ax.config.ts` (typed with `AxConfig` imported from the
   plugin) is discovered and loaded by the postbuild CLI via `jiti`.
 - **Config-declared entries** — `docs` (`text/html`) and `skills` (`application/ai-skill+md`)
   pointers are emitted into the catalog. (Until Phase 2.2's zero-config detection exists, these are

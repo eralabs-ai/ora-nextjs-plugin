@@ -1,10 +1,10 @@
-import type { ArdConfig } from '@ora-ai/ax';
+import type { AxConfig } from '@ora-ai/ax';
 
 // This is the fixture that documents-and-tests the Phase 2.1 config surface. Until zero-config
 // artifact detection lands (Phase 2.2) there are no *inferred* entries to override, so here every
 // entry is config-declared; the same `identifier`-matching merge will layer these over inferred
 // entries once 2.2 exists.
-const config: ArdConfig = {
+const config: AxConfig = {
   // Re-include one route that the default denylist (`/api/auth/**`) would otherwise exclude —
   // this app deliberately publishes its public auth-status endpoint.
   allowlist: ['/api/auth/status'],

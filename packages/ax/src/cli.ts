@@ -1,8 +1,10 @@
 import { resolve } from 'node:path';
 
-import { ArdConfigError } from './config.js';
+import { AxConfigError } from './config.js';
 import { generateCatalog } from './generate.js';
-import { writeCatalog, writeReport, writeServerCard } from './write.js';
+import { ORA_SCAN_API, ORA_SKILL_MCP_URL } from './ora-checks.js';
+import type { BuildReport } from './report.js';
+import { REPORT_OUTPUT_PATH, writeCatalog, writeReport, writeServerCard } from './write.js';
 
 const HELP_TEXT = `ax — generate a spec-valid ai-catalog.json at build time
 
@@ -16,7 +18,7 @@ Options:
   --report,
   --report=<path>   Also write a machine-readable build report (entries, detected artifacts,
                     WebMCP tools, warnings, recommendations) to .ora/report.json, or to <path>.
-                    Can also be set persistently via ard.config's "report".
+                    Can also be set persistently via ax.config's "report".
   -h, --help        Print this help text.
 
 Writes public/.well-known/ai-catalog.json. Validates the generated catalog against the AI Catalog
@@ -69,7 +71,7 @@ function parseArgs(argv: string[]): ParsedArgs {
 
 /**
  * Runs the CLI end to end and returns a process exit code. Never throws for expected failure
- * modes (bad args, invalid catalog, invalid `ard.config`) — those are reported via `stderr` and a
+ * modes (bad args, invalid catalog, invalid `ax.config`) — those are reported via `stderr` and a
  * non-zero code. Only an unexpected environment failure (e.g. an unwritable disk)
  * propagates as a thrown error, since the bin entry point is better placed to decide how to
  * present that.
@@ -107,7 +109,7 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
       onRecommendation: (message) => recommendations.push(message),
     });
   } catch (err) {
-    if (err instanceof ArdConfigError) {
+    if (err instanceof AxConfigError) {
       stderr(`[ax] ${err.message}`);
       return 1;
     }
@@ -131,7 +133,8 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   }
 
   stdout(`[ax] ✓ wrote ${result.path}`);
-  stdout(`[ax] ✓ ${catalog.entries.length} entries referenced`);
+  const entryCount = catalog.entries.length;
+  stdout(`[ax] ✓ ${entryCount} ${entryCount === 1 ? 'entry' : 'entries'} referenced`);
 
   const { webMcpToolNames } = generated;
   if (webMcpToolNames.length > 0) {
@@ -158,18 +161,47 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     for (const recommendation of recommendations) stdout(`[ax]   → ${recommendation}`);
   }
 
-  // Machine-readable report: CLI flag wins over ard.config's `report`; both default to off. The
+  // Machine-readable report: CLI flag wins over ax.config's `report`; both default to off. The
   // written catalog/server-card paths are patched in first, so the report also records where
   // everything landed.
   const reportTarget =
     args.report ?? (generated.reportTarget === false ? undefined : generated.reportTarget);
+  let reportPath: string | undefined;
   if (reportTarget !== undefined) {
     generated.report.catalog.path = result.path;
     generated.report.catalog.target = result.target;
     if (serverCardPath !== undefined) generated.report.mcp.serverCardPath = serverCardPath;
-    const reportPath = writeReport(cwd, generated.report, reportTarget);
+    reportPath = writeReport(cwd, generated.report, reportTarget);
     stdout(`[ax] ✓ wrote ${reportPath} (machine-readable build report)`);
   }
 
+  printAgentHandoff(generated.report, reportPath, stdout);
   return 0;
+}
+
+/**
+ * The handoff footer. Everything above it is a person reading a build log; this is the pointer for
+ * the coding agent that picks up the remaining work — the report that maps each recommendation to
+ * an Ora check, the skill server that explains how to close them, and the scan that verifies the
+ * result against the deployed site. Printed only when something is still actionable: a build with
+ * nothing left to do doesn't need a to-do list.
+ */
+function printAgentHandoff(
+  report: BuildReport,
+  reportPath: string | undefined,
+  stdout: (line: string) => void,
+): void {
+  if (!report.ora.checks.some((check) => check.status === 'actionable')) return;
+
+  const location =
+    reportPath ?? `${REPORT_OUTPUT_PATH} (not written this run — re-run with --report)`;
+  const domain = report.siteUrl ?? 'https://<your-domain>';
+
+  stdout(
+    `[ax] Agent handoff: ${location} maps every recommendation to Ora's agent-readiness checks.`,
+  );
+  stdout(
+    `[ax]   Point your coding agent at it and connect Ora's skill server (MCP): ${ORA_SKILL_MCP_URL}`,
+  );
+  stdout(`[ax]   Then scan your deployed site: ${ORA_SCAN_API.scan} {"url": "${domain}"}`);
 }

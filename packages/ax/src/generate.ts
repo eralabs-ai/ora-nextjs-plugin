@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { manageAgent404 } from './agent-404.js';
-import { loadArdConfig } from './config.js';
+import { loadAxConfig } from './config.js';
 import { isPathDenied } from './denylist.js';
 import { detectAgentsMd } from './detect-agents-md.js';
 import { detectJsonLd } from './detect-json-ld.js';
@@ -16,7 +16,15 @@ import { buildDiscoveryRecommendations } from './discovery.js';
 import { applyEntryOverrides, entryUrlPath } from './entries.js';
 import { loadProjectEnv } from './load-project-env.js';
 import { loadNextConfig } from './next-config.js';
-import type { BuildReport, ReportArtifact } from './report.js';
+import {
+  buildOraChecks,
+  ORA_SCAN_API,
+  ORA_SKILL_MCP_URL,
+  ORA_SKILL_URL,
+  type OraArtifact,
+} from './ora-checks.js';
+import type { BuildReport, ReportArtifact, ReportScaffolds } from './report.js';
+import type { JsonLdScaffoldResult } from './scaffold-json-ld.js';
 import { SPEC_VERSION } from './schema.js';
 import { buildMcpServerCard, type McpServerCard } from './server-card.js';
 import { readSiteMetadata } from './site-metadata.js';
@@ -25,7 +33,7 @@ import type { AiCatalog, CatalogEntry } from './types.js';
 import type { EmissionTarget } from './write.js';
 
 export interface GenerateCatalogOptions {
-  /** Project root to read `package.json` / `next.config.*` / `ard.config.*` from. Defaults to `process.cwd()`. */
+  /** Project root to read `package.json` / `next.config.*` / `ax.config.*` from. Defaults to `process.cwd()`. */
   cwd?: string;
   /** Called with non-fatal build-time notices (next.config fallback, denylist drops, ...). */
   onWarning?: (message: string) => void;
@@ -39,7 +47,7 @@ export interface GenerateCatalogOptions {
 
 export interface GenerateCatalogResult {
   catalog: AiCatalog;
-  /** Emission target resolved from `ard.config` `emit` — which output `writeCatalog` should write. */
+  /** Emission target resolved from `ax.config` `emit` — which output `writeCatalog` should write. */
   emit: EmissionTarget;
   /**
    * The well-known MCP server card to emit alongside the catalog, or undefined when there's no
@@ -58,7 +66,7 @@ export interface GenerateCatalogResult {
    * writing, so the file also records where everything landed.
    */
   report: BuildReport;
-  /** `ard.config` `report`, resolved: `false` (default), `true` (default path), or a custom path. */
+  /** `ax.config` `report`, resolved: `false` (default), `true` (default path), or a custom path. */
   reportTarget: boolean | string;
 }
 
@@ -74,11 +82,41 @@ function openApiArtifact(cwd: string): ReportArtifact {
 }
 
 /**
+ * Next steps for checks a scaffold has *started* but can't finish. Both cases are still `actionable`
+ * — a starter nobody has filled in and a component nobody imports publish nothing — but "the file
+ * is there, do this one thing" is a very different instruction from "this is missing", and an agent
+ * reading the report should get the specific one.
+ */
+function oraCheckNotes(scaffolds: {
+  llmsTxtScaffolded?: string;
+  jsonLd?: JsonLdScaffoldResult;
+}): Partial<Record<OraArtifact, string>> {
+  const notes: Partial<Record<OraArtifact, string>> = {};
+
+  if (scaffolds.llmsTxtScaffolded !== undefined) {
+    notes['llms.txt'] =
+      `A starter llms.txt was scaffolded at ${scaffolds.llmsTxtScaffolded}. Replace the TODOs in ` +
+      'its "When to use" section with real guidance, then rebuild — this build could not reference ' +
+      '/llms.txt because nothing served it while it ran.';
+  }
+
+  const wiring = scaffolds.jsonLd?.wiring;
+  if (wiring !== undefined && scaffolds.jsonLd?.path !== undefined) {
+    notes['json-ld'] =
+      `An Organization JSON-LD component was scaffolded at ${scaffolds.jsonLd.path} but nothing ` +
+      `renders it yet. Add \`${wiring.importLine}\` and \`${wiring.element}\` to ` +
+      `${wiring.layoutPath}, and fill in the component's "sameAs" array.`;
+  }
+
+  return notes;
+}
+
+/**
  * Builds the catalog: site-level `host` metadata, zero-config artifact detection (MCP servers,
  * `public/openapi.json`, `llms.txt`), plus config-declared entries (overrides/extends), all
  * filtered through the denylist/allowlist.
  *
- * Loading `ard.config.*` can throw `ArdConfigError` (invalid config — fails loudly, by design);
+ * Loading `ax.config.*` can throw `AxConfigError` (invalid config — fails loudly, by design);
  * loading `next.config.*` never throws (warns and falls back instead). Every detector is
  * best-effort and warns rather than throws: a detection miss is never this plugin's reason to fail
  * someone else's build.
@@ -86,7 +124,7 @@ function openApiArtifact(cwd: string): ReportArtifact {
 export async function generateCatalog(
   options: GenerateCatalogOptions = {},
 ): Promise<GenerateCatalogResult> {
-  // Resolve to an absolute path so relative-path lookups inside `loadArdConfig` (which delegates
+  // Resolve to an absolute path so relative-path lookups inside `loadAxConfig` (which delegates
   // to jiti — resolved against this package's location, not the caller's) behave the same as
   // `existsSync`-based checks, which resolve relative paths against `process.cwd()`.
   const cwd = resolve(options.cwd ?? process.cwd());
@@ -106,12 +144,13 @@ export async function generateCatalog(
 
   // Load the project's `.env*` files first: the CLI runs as its own process (a `postbuild` step),
   // so — unlike `next build` — nothing has populated `process.env` from them yet. Both the env-var
-  // siteUrl fallback below and any `ard.config` that reads `process.env` depend on this.
+  // siteUrl fallback below and any `ax.config` that reads `process.env` depend on this.
   loadProjectEnv(cwd);
 
   const site = readSiteMetadata(cwd);
 
-  const { config } = await loadArdConfig(cwd);
+  const { config, warnings: configWarnings } = await loadAxConfig(cwd);
+  for (const warning of configWarnings) warn(warning);
 
   const nextConfig = await loadNextConfig(cwd);
   for (const warning of nextConfig.warnings) warn(warning);
@@ -123,7 +162,7 @@ export async function generateCatalog(
     );
   }
 
-  // Resolve the site origin in precedence order: explicit `ard.config` `siteUrl`, then a
+  // Resolve the site origin in precedence order: explicit `ax.config` `siteUrl`, then a
   // `SITE_URL` / `NEXT_PUBLIC_SITE_URL` env var (present during a local build, so the full catalog
   // can be generated and checked before deploying), then Vercel's build-time production domain.
   // Every detector below skips emitting a URL-bearing entry (warning instead) when this is
@@ -145,6 +184,8 @@ export async function generateCatalog(
   const openApiEntry = detectOpenApi({ cwd, siteUrl, basePath, warn, recommend });
   if (openApiEntry) inferredEntries.push(openApiEntry);
 
+  const openApi = openApiArtifact(cwd);
+
   const llmsTxtResult = detectLlmsTxt({
     cwd,
     siteUrl,
@@ -152,6 +193,10 @@ export async function generateCatalog(
     warn,
     recommend,
     scaffold: config.scaffoldLlmsTxt,
+    site,
+    // Only what this build actually found: the starter's "Machine-readable resources" section is a
+    // list of live artifacts, so a link to something that doesn't exist would be worse than none.
+    resources: { openApi: openApi.found, mcpPathnames: mcpMounts.map((mount) => mount.pathname) },
   });
   if (llmsTxtResult.entry) inferredEntries.push(llmsTxtResult.entry);
 
@@ -182,10 +227,27 @@ export async function generateCatalog(
   // never add catalog entries and never fail a build — they only surface advisory recommendations.
   // The plugin detects; it never reimplements a sitemap or rewrites a robots policy, and never
   // guesses agents.md content (the companion skill authors that).
-  const robots = detectRobots({ cwd, recommend });
+  // Sitemap first: the robots step writes a `Sitemap:` pointer only for a sitemap that actually
+  // exists, so it needs that answer before it runs.
   const sitemap = detectSitemap({ cwd, recommend });
+  const robots = detectRobots({
+    cwd,
+    recommend,
+    warn,
+    scaffold: config.scaffoldRobots,
+    siteUrl,
+    basePath,
+    sitemapFound: sitemap.found,
+  });
   const agentsMd = detectAgentsMd({ cwd, recommend });
-  const jsonLd = detectJsonLd({ cwd, recommend });
+  const jsonLd = detectJsonLd({
+    cwd,
+    recommend,
+    warn,
+    scaffold: config.scaffoldJsonLd,
+    site,
+    ...(siteUrl !== undefined ? { siteUrl } : {}),
+  });
   for (const message of buildDiscoveryRecommendations({ siteUrl, basePath })) recommend(message);
 
   // Agent-aware 404: detect-and-recommend, or (opted in) scaffold a not-found page whose
@@ -219,8 +281,16 @@ export async function generateCatalog(
     entries,
   };
 
+  const scaffolds: ReportScaffolds = {
+    ...(llmsTxtResult.scaffoldedPath !== undefined
+      ? { llmsTxt: { path: llmsTxtResult.scaffoldedPath } }
+      : {}),
+    ...(robots.scaffold !== undefined ? { robotsTxt: robots.scaffold } : {}),
+    ...(jsonLd.scaffold !== undefined ? { jsonLd: jsonLd.scaffold } : {}),
+  };
+
   const report: BuildReport = {
-    reportVersion: 1,
+    reportVersion: 2,
     generatedAt: new Date().toISOString(),
     ...(siteUrl !== undefined ? { siteUrl } : {}),
     basePath,
@@ -251,7 +321,28 @@ export async function generateCatalog(
         found: llmsTxtResult.found,
         ...(llmsTxtResult.source !== undefined ? { source: llmsTxtResult.source } : {}),
       },
-      openapi: openApiArtifact(cwd),
+      openapi: openApi,
+    },
+    scaffolds,
+    ora: {
+      skillMcp: ORA_SKILL_MCP_URL,
+      skillUrl: ORA_SKILL_URL,
+      scanApi: { ...ORA_SCAN_API },
+      checks: buildOraChecks(
+        {
+          // The catalog is the one artifact every run produces, so its checks are always addressed.
+          'ai-catalog.json': true,
+          'llms.txt': llmsTxtResult.found,
+          'robots.txt': robots.found,
+          sitemap: sitemap.found,
+          'agents.md': agentsMd.found,
+          'json-ld': jsonLd.found,
+          'openapi.json': openApi.found,
+          'mcp-server': mcpMounts.length > 0,
+          webmcp: webMcp.toolNames.length > 0,
+        },
+        oraCheckNotes({ llmsTxtScaffolded: llmsTxtResult.scaffoldedPath, jsonLd: jsonLd.scaffold }),
+      ),
     },
     warnings,
     recommendations,

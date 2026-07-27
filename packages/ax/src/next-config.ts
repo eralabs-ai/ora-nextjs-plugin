@@ -25,7 +25,7 @@ const PRODUCTION_BUILD_PHASE = 'phase-production-build';
 
 /**
  * Loads the user's `next.config.{ts,mts,cts,mjs,js,cjs}` and extracts `basePath`, `distDir`, and
- * `output` — so users never repeat these in `ard.config`. Handles both
+ * `output` — so users never repeat these in `ax.config`. Handles both
  * object-form and function-form (`(phase, { defaultConfig }) => config`) configs, sync or async.
  *
  * Never throws: an app's `next.config` is not this plugin's problem to fail a build over. A

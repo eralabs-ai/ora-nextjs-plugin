@@ -17,7 +17,7 @@ const silentLog = { info: (): void => {}, error: (): void => {} };
 /**
  * Loads the project's `.env*` files into `process.env` the way `next build` does, by reusing the
  * app's own `@next/env` (the loader Next itself uses) — so `SITE_URL` / `NEXT_PUBLIC_SITE_URL` (and
- * any variable an `ard.config` reads via `process.env`) resolve during a standalone `postbuild` run,
+ * any variable an `ax.config` reads via `process.env`) resolve during a standalone `postbuild` run,
  * not only when set inline on the command line. The CLI is its own process, separate from the
  * `next build` that loaded these files, so without this they'd be absent.
  *

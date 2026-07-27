@@ -7,9 +7,9 @@ static `public/llms.txt` is the other supported form.)
 **Exercises:** detect-and-reference of a **confirmed-ingested** artifact — Ora's crawler ingests
 `llms.txt` directly. The plugin references `/llms.txt` as a `text/markdown` entry, whether it's
 served from a route or a static file. Scaffolding a starter when absent is in-scope for v1, but
-**opt-in** via `ard.config`'s `scaffoldLlmsTxt: true` — this fixture doesn't need it since it
+**opt-in** via `ax.config`'s `scaffoldLlmsTxt: true` — this fixture doesn't need it since it
 already has one.
 
-Ships an `ard.config.ts` declaring `siteUrl` so the emitted entry's URL is deterministic in CI
+Ships an `ax.config.ts` declaring `siteUrl` so the emitted entry's URL is deterministic in CI
 (without it, this detector still runs, but skips emitting a URL-bearing entry since none of this
 repo's test environments set Vercel's production-domain env var).
