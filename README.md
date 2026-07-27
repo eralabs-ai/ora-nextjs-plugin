@@ -1,22 +1,60 @@
-# ora-nextjs-plugin
+# `@ora-ai/ax` — Agent Experience for Next.js
 
-Generates a spec-valid [`ai-catalog.json`](https://github.com/Agent-Card/ai-catalog) (Agentic
-Resource Discovery / AI Catalog) from a Next.js app at build time, so agents and registries can
-discover the site's capabilities.
+AI agents are becoming every site's newest user segment, and most sites are invisible to them.
+`ax` is one `postbuild` line that makes a Next.js app **discoverable, legible, and usable by
+agents**:
 
-> **Status:** pre-release, under active development. See [`docs-internal/PLAN.md`](./docs-internal/PLAN.md) for the phased
-> roadmap. This repo currently implements Phase 0 groundwork (spec + validator, workspace, fixture
-> corpus), the Phase 1 walking skeleton (CLI that emits a minimal, spec-valid, site-metadata-only
-> catalog as a `postbuild` step), Phase 2.1 (config: `ax.config.*`, `next.config.*` reading,
-> denylist/allowlist, entry overrides), Phase 2.2 (zero-config artifact detection: MCP servers,
-> `public/openapi.json`, `llms.txt`, config-declared docs/skills), and Phase 2.4 (emission targets —
-> static file or an `emit: 'route'` handler; ARD §6.1 discovery-pointer recommendations; and
-> detect-and-recommend for `robots.txt` / `sitemap.xml` / `agents.md`), plus Phase 4 (WebMCP
-> detection), the agent-aware 404 scaffold (`scaffoldAgent404`), the opt-in `robots.txt` /
-> `Organization` JSON-LD scaffolds (`scaffoldRobots` / `scaffoldJsonLd`), and the machine-readable
-> build report (`--report` / `report`), whose `ora` section maps every finding onto Ora's
-> agent-readiness checks. Deploying a fixture to Vercel
-> and running it through Ora's AgentJourney is still pending — see `docs-internal/PLAN.md` Phase 1.
+```sh
+npm install --save-dev @ora-ai/ax
+```
+
+```json
+{
+  "scripts": {
+    "build": "next build",
+    "postbuild": "ax"
+  }
+}
+```
+
+One run — offline, deterministic, about a second — then:
+
+- **Generates** a spec-valid [AI Catalog](https://github.com/Agent-Card/ai-catalog) (Agentic
+  Resource Discovery) at `/.well-known/ai-catalog.json`, validated against the official ARD schema
+  before a byte is written, so agents and registries can discover the site's capabilities.
+- **Detects** the agent surfaces already in your code and references what's unambiguous: MCP
+  servers, W3C WebMCP in-page tools (declarative and imperative), OpenAPI docs, `llms.txt`,
+  `robots.txt` / sitemap / `agents.md` / JSON-LD.
+- **Scaffolds (opt-in)** the mechanical parts a build tool is uniquely placed to write, from data
+  it already has: an `llms.txt` filled with your real routes and artifacts, an agent-aware 404
+  page carrying your real route table, `robots.txt` discovery pointers, an `Organization` JSON-LD
+  component.
+- **Hands off the judgment work**: `.ora/report.json` maps every finding to [Ora](https://ora.ai)'s
+  agent-readiness checks (`addressed` / `actionable`) and points your coding agent at Ora's live
+  skill server — fix, scan, rescan until the site is agent-ready.
+
+```
+[ax] ✓ wrote public/.well-known/ai-catalog.json
+[ax] ⚠ Scaffolded a starter llms.txt at app/llms.txt/route.ts — ax filled in what it can derive…
+[ax] Recommendations to improve agent-readiness:
+[ax]   → No OpenAPI doc found (public/openapi.json) — this is the highest-value artifact for…
+[ax] ✓ wrote .ora/report.json (machine-readable build report)
+[ax] Agent handoff: .ora/report.json maps every recommendation to Ora's agent-readiness checks.
+[ax]   Point your coding agent at it and connect Ora's skill server (MCP): https://ora.ai/skill/mcp
+[ax]   Then scan your deployed site: POST https://ora.ai/api/scan {"url": "https://yourdomain.com"}
+```
+
+No network calls and no AI at build time — every byte is derived from your source tree. Three
+runtime dependencies. Atomic writes, and the CLI exits non-zero rather than emit an invalid
+catalog. 348 tests, including the spec's official conformance tool run over a corpus of real
+fixture apps in CI.
+
+> **Status:** pre-release, under active development. The detect-and-reference core, WebMCP
+> detection, the agent-aware 404, the opt-in scaffolds, and the Ora-mapped build report are
+> implemented and tested. Before the first public npm release: review-before-publish, gated-surface
+> detection (never advertise an auth-walled endpoint as open), and an end-to-end run against Ora's
+> production crawler. Full phased roadmap and every design decision:
+> [`docs-internal/PLAN.md`](./docs-internal/PLAN.md).
 
 ## Design posture
 
@@ -32,42 +70,27 @@ This matrix is a public contract from day one. Anything outside it is out of sco
 | Dimension       | Supported                                           | Out of scope for v1              |
 | --------------- | --------------------------------------------------- | -------------------------------- |
 | Next.js router  | **App Router**                                      | Pages Router                     |
-| Next.js version | 14.x, 15.x (`canary` tracked by a CI canary job)    | < 14                             |
+| Next.js version | 14.x, 15.x (a CI canary job is planned)             | < 14                             |
 | Language        | **JavaScript and TypeScript** apps                  | —                                |
 | Config format   | `next.config.js` / `.mjs` / `.ts`                   | —                                |
 | Node.js         | 18.18+, 20 LTS, 22 LTS                              | < 18.18                          |
 | Bundler         | Webpack **and** Turbopack (CLI is bundler-agnostic) | —                                |
-| Monorepo        | Turborepo: **detect-and-warn** for v1               | Full nested-workspace resolution |
+| Monorepo        | Turborepo: **detect-and-warn** planned for v1       | Full nested-workspace resolution |
 
-> Some matrix rows (Pages Router exclusion, monorepo support level) are pending final confirmation
-> with Ora — see the open-questions table in `docs-internal/PLAN.md`.
+> A few matrix rows (Pages Router exclusion, monorepo support level) are still open decisions — see
+> the open-questions table in `docs-internal/PLAN.md`.
 
 ## Repository layout
 
 ```
-packages/ax            the plugin / CLI (`@ora-ai/ax`) (published to npm; near-zero runtime deps)
+packages/ax            the plugin / CLI (`@ora-ai/ax`) — the npm package (3 runtime deps: ajv, ajv-formats, jiti)
 spec/                  vendored AI Catalog spec + hand-written JSON Schema + validator oracle
 fixtures/*             minimal-but-real Next.js apps — the test suite, docs examples, and eval corpus
 ```
 
-## Usage
+## The catalog
 
-Add `@ora-ai/ax` as a dependency and run it as a `postbuild` step:
-
-```sh
-npm install --save-dev @ora-ai/ax
-```
-
-```json
-{
-  "scripts": {
-    "build": "next build",
-    "postbuild": "ax"
-  }
-}
-```
-
-This writes `public/.well-known/ai-catalog.json` with:
+The `postbuild` run writes `public/.well-known/ai-catalog.json` with:
 
 - **Site-level metadata** — `displayName` / `description` from `package.json`.
 - **Zero-config artifact detection** (Phase 2.2) — detects and references what's already there:
