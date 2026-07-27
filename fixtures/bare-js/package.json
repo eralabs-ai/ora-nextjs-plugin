@@ -1,5 +1,5 @@
 {
-  "name": "@ora-catalog/fixture-bare-js",
+  "name": "@ax-fixtures/bare-js",
   "version": "0.0.0",
   "private": true,
   "scripts": {

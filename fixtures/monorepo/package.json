@@ -1,5 +1,5 @@
 {
-  "name": "@ora-catalog/fixture-monorepo-root",
+  "name": "@ax-fixtures/monorepo-root",
   "version": "0.0.0",
   "private": true,
   "workspaces": [

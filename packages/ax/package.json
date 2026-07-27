@@ -1,0 +1,46 @@
+{
+  "name": "@ora-ai/ax",
+  "version": "0.0.0",
+  "description": "Agent Experience (AX) toolkit for Next.js: generate a spec-valid ai-catalog.json, detect WebMCP tools, scaffold agent-aware 404s, and report agent-readiness at build time.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=18.18"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "ax": "./dist/bin.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsup && node -e \"require('fs').chmodSync('dist/bin.js', 0o755)\"",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "jiti": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.12",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.2"
+  }
+}

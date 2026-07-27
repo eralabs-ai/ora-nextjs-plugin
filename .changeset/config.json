@@ -7,5 +7,5 @@
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": ["@ora-catalog/fixture-*"]
+  "ignore": ["@ax-fixtures/*"]
 }

@@ -5,7 +5,7 @@
 
 **Exercises:**
 
-- **Known gap, now warned-about (Phase 2.1, verified 2026-07-19):** `ora-catalog`'s postbuild step
+- **Known gap, now warned-about (Phase 2.1, verified 2026-07-19):** `ax`'s postbuild step
   still writes `public/.well-known/ai-catalog.json` unconditionally regardless of `basePath` — the
   fix is the route-handler emission target (Phase 2.4). But as of Phase 2.1 the CLI _does_ read
   `next.config` (`loadNextConfig`) and prints a build warning when it sees `basePath` set, since

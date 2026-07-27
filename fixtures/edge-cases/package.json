@@ -1,5 +1,5 @@
 {
-  "name": "@ora-catalog/fixture-edge-cases",
+  "name": "@ax-fixtures/edge-cases",
   "version": "0.0.0",
   "private": true,
   "scripts": {

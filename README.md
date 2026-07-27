@@ -11,7 +11,9 @@ discover the site's capabilities.
 > denylist/allowlist, entry overrides), Phase 2.2 (zero-config artifact detection: MCP servers,
 > `public/openapi.json`, `llms.txt`, config-declared docs/skills), and Phase 2.4 (emission targets —
 > static file or an `emit: 'route'` handler; ARD §6.1 discovery-pointer recommendations; and
-> detect-and-recommend for `robots.txt` / `sitemap.xml` / `agents.md`). Deploying a fixture to Vercel
+> detect-and-recommend for `robots.txt` / `sitemap.xml` / `agents.md`), plus Phase 4 (WebMCP
+> detection), the agent-aware 404 scaffold (`scaffoldAgent404`), and the machine-readable build
+> report (`--report` / `report`). Deploying a fixture to Vercel
 > and running it through Ora's AgentJourney is still pending — see `docs-internal/PLAN.md` Phase 1.
 
 ## Design posture
@@ -41,24 +43,24 @@ This matrix is a public contract from day one. Anything outside it is out of sco
 ## Repository layout
 
 ```
-packages/ora-catalog   the plugin / CLI (published to npm; near-zero runtime deps)
+packages/ax            the plugin / CLI (`@ora-ai/ax`) (published to npm; near-zero runtime deps)
 spec/                  vendored AI Catalog spec + hand-written JSON Schema + validator oracle
 fixtures/*             minimal-but-real Next.js apps — the test suite, docs examples, and eval corpus
 ```
 
 ## Usage
 
-Add `ora-catalog` as a dependency and run it as a `postbuild` step:
+Add `@ora-ai/ax` as a dependency and run it as a `postbuild` step:
 
 ```sh
-npm install --save-dev ora-catalog
+npm install --save-dev @ora-ai/ax
 ```
 
 ```json
 {
   "scripts": {
     "build": "next build",
-    "postbuild": "ora-catalog"
+    "postbuild": "ax"
   }
 }
 ```
@@ -110,7 +112,7 @@ after the Agentic Resource Discovery spec rather than after this package — it'
 so it stays vendor-neutral.)
 
 ```ts
-import type { ArdConfig } from 'ora-catalog';
+import type { ArdConfig } from '@ora-ai/ax';
 
 const config: ArdConfig = {
   // Your production origin — every detected entry's URL is resolved against this. Optional: falls
@@ -126,6 +128,12 @@ const config: ArdConfig = {
   // Scaffold a starter app/llms.txt/route.ts when neither it nor public/llms.txt exists.
   // Opt-in (defaults to false) — it writes into your source tree, not just the catalog file.
   scaffoldLlmsTxt: true,
+  // Scaffold an agent-aware app/not-found.tsx (written once, yours to edit) plus a route-manifest
+  // data module regenerated on every build. Opt-in (defaults to false) — see "Agent-aware 404".
+  scaffoldAgent404: true,
+  // Write .ora/report.json, the machine-readable twin of the CLI output (true, or a custom path).
+  // Opt-in (defaults to false); the CLI flag --report[=path] does the same per run.
+  report: true,
   // Glob patterns that must never be published, even if a detector would otherwise infer an entry
   // for them. `/api/auth/**` and `/api/webhooks/**` are denied by default; list them again here
   // only if you also want an `allowlist` exception below.
@@ -158,6 +166,53 @@ Switching `emit` to `'route'` does **not** change this — an App Router route h
 lives: on a `basePath` build the CLI prints a recommendation to add an HTML
 `<link rel="ai-catalog" href="...">` tag to your root layout and an `Agentmap:` line to your
 `robots.txt`.
+
+## WebMCP detection (Phase 4)
+
+The CLI detects **in-page WebMCP tools** (the W3C Web Machine Learning CG draft that lets a page
+register tools a browser-resident agent can call) in both styles:
+
+- **Declarative** — `<form toolname="..." tooldescription="...">`. Markup survives into
+  server-rendered HTML, so these are also visible to HTML-reading scanners (including Ora's
+  `webmcp` check). Tools on statically-addressable App Router pages become `text/html` catalog
+  entries whose `capabilities` carry the tool names.
+- **Imperative** — `document.modelContext.registerTool()` / `provideContext()` in `'use client'`
+  components, and the `useWebMCP()` hook (`@mcp-b/react-webmcp` / `usewebmcp`). These are
+  runtime-only with no spec-defined manifest, so they are surfaced in the build summary and
+  recommendations — never invented as catalog entries.
+
+The detector also warns on the two mistakes that silently produce zero working tools: registration
+via the **deprecated `navigator.modelContext`** alias (the entry point moved to
+`document.modelContext` in the May 2026 draft; Chrome 150+ deprecates the alias), and registration
+in a **server component** (no `'use client'`), where the API doesn't exist at render time. A
+user-defined function that merely happens to be called `registerTool` is not detected. When an app
+has `<form>` elements but no WebMCP at all, the CLI points out that every form is a latent agent
+tool that two attributes make callable.
+
+## Agent-aware 404 (`scaffoldAgent404`)
+
+An agent that fetches a URL that doesn't exist gets a dead-end 404 and either gives up or
+guesses. Setting `scaffoldAgent404: true` in `ard.config` scaffolds an **agent-aware
+`app/not-found.tsx`** — written once, yours to edit, never overwritten — that tells agents why the
+404 happened (the URL doesn't exist; don't retry) and how to continue: links to the site's
+discovery artifacts (`ai-catalog.json`, `llms.txt`, sitemap — only the ones that actually exist)
+and a list of the app's real routes, as visible HTML plus a schema.org `ItemList` in JSON-LD.
+
+The route list lives in a companion data module (`app/not-found-agent-data.ts`) that **is
+regenerated on every build** from the App Router source tree — the piece only a build-time tool
+can supply, since nothing at runtime knows the route table. Dynamic (`[slug]`) routes are never
+guessed. Without the opt-in, the CLI detects your existing `not-found.*` and recommends adding
+agent signposts if it has none.
+
+## Machine-readable build report (`--report` / `report`)
+
+`ax --report` (or `report: true` in `ard.config`; a string value customizes the path)
+writes **`.ora/report.json`** — the machine-readable twin of the CLI output: catalog entries and
+where they were written, detected MCP mounts and the server card path, WebMCP tool sites, presence
+of every detect-and-recommend artifact (robots.txt / sitemap / agents.md / JSON-LD / llms.txt /
+openapi.json), agent-404 status, and every warning and recommendation verbatim. A coding agent (or
+CI step) reads one JSON file instead of parsing log lines — point your agent at it after a build
+and let it work through the recommendations.
 
 ## Discovery recommendations
 

@@ -242,7 +242,7 @@ Agent-Card example does *not* pass it, so both layers stay pinned):
 
 ### 0.4 Scaffold the repo
 
-- [ ] pnpm workspace: `packages/ora-catalog` (the plugin/CLI), `fixtures/*`, `spec/`.
+- [ ] pnpm workspace: `packages/ax` (the plugin/CLI), `fixtures/*`, `spec/`.
 - [ ] TypeScript strict, tsup (or similar) build, vitest, changesets, CI skeleton (lint + typecheck
       + test on PR).
 - [ ] npm publish config with provenance enabled; `files` allowlist so nothing extra ships.
@@ -284,7 +284,7 @@ CI runs on PR; Ora has signed off on the open questions.
 Goal: the thinnest end-to-end slice — a real catalog, served from a real deployment, crawled by Ora.
 This de-risks the one integration nobody has tested: does Ora's crawler actually pick it up?
 
-- [x] CLI entry point: `npx ora-catalog` runnable as a postbuild step. (`packages/ora-catalog`:
+- [x] CLI entry point: `npx ora-catalog` runnable as a postbuild step. (`packages/ax`:
       `src/bin.ts` is the published `bin`; `src/cli.ts` is the testable orchestration it wraps.)
 - [x] Emit a minimal, mostly-static but **spec-valid** `ai-catalog.json` (site-level metadata only)
       into `public/.well-known/`. (`src/generate.ts` + `src/site-metadata.ts` — `host.displayName`
@@ -631,19 +631,60 @@ a valid catalog at the well-known URL, and Ora scans it. The public `latest` rel
 Goal: detect in-page WebMCP tools and include them in the same catalog. Goes late deliberately —
 WebMCP is a W3C Community Group draft, behind a flag in Chrome, least-stable dependency.
 
-- [ ] Declarative detector first (near-trivial, high-confidence): JSX `<form toolname=...>`.
-- [ ] Imperative detector: `navigator.modelContext.registerTool(...)` call expressions in
-      `'use client'` files — discovery via the same AST pass; tool metadata evaluated via the same
-      subprocess convention where statically ambiguous.
-- [ ] Warn on `registerTool` in a server component.
-- [ ] Negative detection: user-defined `registerTool` functions must not match (fixture exists).
-- [ ] **No WebMCP skill inference, no `defineSkill` invention.** If/when WebMCP standardizes skills,
+**Implemented 2026-07-27** (`src/detect-webmcp.ts`), with three deviations from the plan as
+written, each driven by fresh ground truth:
+
+- **The entry point moved.** The May 2026 draft moved WebMCP from `navigator.modelContext` to
+  `document.modelContext` (Chrome 150+ deprecates the `navigator` alias). The detector recognizes
+  `document`/`navigator`/`window` receivers and **warns on the deprecated `navigator` form**; the
+  `webmcp-imperative` fixture was updated to the current API and `edge-cases` deliberately keeps a
+  `navigator` case to exercise the warning. Also detected: `provideContext()` batch registration
+  and the `useWebMCP()` hook (`@mcp-b/react-webmcp` / `usewebmcp` — import + call, two signals).
+- **Textual detection, not AST** — extending the `detect-mcp.ts` precedent instead of the planned
+  AST pass; the `modelContext` receiver (or hook import+call pair) provides the same
+  false-positive resistance the AST was for, including the user-defined-`registerTool` decoy and
+  `<form toolname>` *mentions* inside string literals.
+- **Emission split by what's real:** declarative `<form toolname>` tools on statically-addressable
+  pages become `text/html` entries with `capabilities` (the page is a real artifact); imperative
+  tools have **no spec-defined manifest** (confirmed: the explainer rejects static manifests;
+  `.well-known/webmcp.json` is vendor convention, not spec), so they surface via the build
+  summary/recommendations — never invented entries.
+
+- [x] Declarative detector first (near-trivial, high-confidence): JSX `<form toolname=...>`.
+- [x] Imperative detector: `modelContext.registerTool(...)` call expressions in `'use client'`
+      files (textual, receiver-anchored — see deviation above).
+- [x] Warn on `registerTool` in a server component (and on the deprecated `navigator` entry point).
+- [x] Negative detection: user-defined `registerTool` functions must not match (fixture exists).
+- [x] **No WebMCP skill inference, no `defineSkill` invention.** If/when WebMCP standardizes skills,
       add a detector then. (Distinct from the `application/ai-skill+md` *agent-skills-repo* detection
       in 2.2 — that's a real artifact Ora indexes, not an invented WebMCP spec point.)
-- [ ] Tests: fixture snapshots for `webmcp-imperative`, `webmcp-declarative`, `edge-cases`.
+- [x] Tests: unit suite (`test/detect-webmcp.test.ts`) + fixture integration for
+      `webmcp-imperative`, `webmcp-declarative`, `edge-cases` (zero false positives asserted).
 
 **Done when:** both WebMCP fixtures emit correct entries; edge-case fixture emits zero false
-positives.
+positives. ✓ (Note for Ora: their `webmcp` check reads only server-rendered homepage HTML, so
+imperative client-side tools score 0 there, and their `webmcp` recommendation text describes a
+remote-MCP transport rather than the browser API — both reported upstream, see 2026-07-27 notes.)
+
+### Phase 4.5 — Agent-aware 404 + machine-readable report (added 2026-07-27)
+
+Two additions shipped alongside Phase 4, both following existing conventions:
+
+- [x] **Agent-aware 404** (`src/agent-404.ts`, `ard.config` `scaffoldAgent404`, default `false`).
+      Detect `app/not-found.*`; recommend agent signposts when absent/bare. Opted in: scaffold an
+      agent-aware `not-found.tsx` **once** (user-owned, never overwritten) importing a data module
+      (`app/not-found-agent-data.*`) **regenerated every build** with the static route list
+      (dynamic segments never guessed) and discovery links (catalog / llms.txt / sitemap — only
+      artifacts that exist). Grounding: Vercel's agent-readability guidance (llms.txt signposting,
+      `Link` headers) and Mintlify's benchmark that one llms.txt link on responses eliminates most
+      agent 404 dead-ends. Middleware-based content negotiation (markdown 404s for
+      `Accept: text/markdown` / `Signature-Agent` requesters) is a documented follow-up — writing
+      into a user's singleton `middleware.ts` is too invasive to scaffold today.
+- [x] **Machine-readable build report** (`src/report.ts`; `--report[=path]` / `ard.config`
+      `report`, default off; default path `.ora/report.json`). The structured twin of the CLI
+      output: entries + written paths, MCP mounts + server card, WebMCP sites, per-artifact
+      presence, agent-404 status, warnings/recommendations verbatim. Turns the plugin's stdout
+      recommendations into something a coding agent consumes directly.
 
 ---
 
@@ -719,7 +760,7 @@ Goal: prove the output is *usable by agents*, not just spec-valid, and lock in c
 | 4 | Schema strategy: evaluate exported schemas vs parse AST? | Evaluate (subprocess) | _pending_ |
 | 5 | Drift diff ships in v1? | Yes, informational-only (it's nearly free) | _pending_ |
 | 6 | Emission default: static file vs route handler? | Static file default, route handler for `basePath` | _pending_ |
-| 7 | Package name / npm scope / who owns publish rights? | — | _pending_ |
+| 7 | Package name / npm scope / who owns publish rights? | — | **Resolved (2026-07-27):** `@ora-ai/ax`, CLI bin `ax` — "AX" (Agent Experience) is the product story; scoped name avoids npm collisions. Publish rights: Ora's npm org (create `@ora-ai` if absent). Repo/fixture scopes renamed accordingly (`@ax-fixtures/*`). |
 | 8 | Real-LLM eval budget + which model/provider? | Nightly + pre-release only | _pending_ |
 | 9 | Timeline expectations per phase? | Skeleton wk 1; Phases 2–3 are the bulk | _pending_ |
 | 10 | Which artifacts should the plugin emit/reference? | **Resolved (2026-07-16):** Ora confirmed the crawler ingests the first-party `/.well-known/ai-catalog.json`, `openapi.json`, `/graphql`, and `llms.txt`. The plugin emits the Next-idiomatic subset — MCP + `public/openapi.json` + config-declared docs/skills now; WebMCP + `llms.txt` generation next; **GraphQL out** (not idiomatic Next). Sitemap = detect + recommend `next-sitemap`, don't reimplement. | **confirmed** |

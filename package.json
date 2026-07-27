@@ -13,7 +13,7 @@
     "test": "pnpm --filter \"./packages/*\" run test",
     "lint": "prettier --check .",
     "format": "prettier --write .",
-    "fixtures:build": "pnpm --filter \"@ora-catalog/fixture-*\" run build",
+    "fixtures:build": "pnpm --filter \"@ax-fixtures/*\" run build",
     "conformance": "bash scripts/conformance.sh",
     "changeset": "changeset",
     "version-packages": "changeset version",

@@ -1,5 +1,5 @@
 {
-  "name": "@ora-catalog/fixture-monorepo-web",
+  "name": "@ax-fixtures/monorepo-web",
   "version": "0.0.0",
   "private": true,
   "scripts": {
