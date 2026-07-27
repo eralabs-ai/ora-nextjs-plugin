@@ -1,4 +1,4 @@
-import type { ArdConfig } from 'ora-catalog';
+import type { ArdConfig } from '@ora-ai/ax';
 
 // This is the fixture that documents-and-tests the Phase 2.1 config surface. Until zero-config
 // artifact detection lands (Phase 2.2) there are no *inferred* entries to override, so here every

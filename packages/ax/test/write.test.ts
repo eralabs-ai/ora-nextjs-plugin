@@ -42,7 +42,7 @@ const serverCard: McpServerCard = {
 };
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'ora-catalog-write-'));
+  dir = mkdtempSync(join(tmpdir(), 'ax-write-'));
 });
 
 afterEach(() => {

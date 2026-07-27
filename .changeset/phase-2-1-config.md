@@ -1,5 +1,5 @@
 ---
-'ora-catalog': minor
+'@ora-ai/ax': minor
 ---
 
 Add Phase 2.1: `ard.config.*` (denylist/allowlist with a default-on

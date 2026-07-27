@@ -41,7 +41,7 @@ export function detectSitemap(options: DetectSitemapOptions): DetectSitemapResul
 
   options.recommend(
     'No sitemap found — add one so agents can discover all public routes. Use the built-in Next.js ' +
-      'path (app/sitemap.ts); ora-catalog never generates a sitemap itself. Then reference it from ' +
+      'path (app/sitemap.ts); ax never generates a sitemap itself. Then reference it from ' +
       'robots.txt with a "Sitemap:" line.',
   );
   return { found: false };

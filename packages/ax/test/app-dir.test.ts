@@ -9,7 +9,7 @@ import { findAppDir } from '../src/app-dir.js';
 let dir: string;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'ora-catalog-app-dir-'));
+  dir = mkdtempSync(join(tmpdir(), 'ax-app-dir-'));
 });
 
 afterEach(() => {

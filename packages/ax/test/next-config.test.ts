@@ -9,7 +9,7 @@ import { loadNextConfig } from '../src/next-config.js';
 let dir: string;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'ora-catalog-next-config-'));
+  dir = mkdtempSync(join(tmpdir(), 'ax-next-config-'));
 });
 
 afterEach(() => {

@@ -2,18 +2,22 @@ import { resolve } from 'node:path';
 
 import { ArdConfigError } from './config.js';
 import { generateCatalog } from './generate.js';
-import { writeCatalog, writeServerCard } from './write.js';
+import { writeCatalog, writeReport, writeServerCard } from './write.js';
 
-const HELP_TEXT = `ora-catalog — generate a spec-valid ai-catalog.json at build time
+const HELP_TEXT = `ax — generate a spec-valid ai-catalog.json at build time
 
 Usage:
-  ora-catalog [options]
+  ax [options]
 
 Options:
   --cwd <dir>,
-  --cwd=<dir>   Project root to run in (defaults to the current working directory).
-                Run this from your Next.js app's root, typically as a "postbuild" script.
-  -h, --help    Print this help text.
+  --cwd=<dir>       Project root to run in (defaults to the current working directory).
+                    Run this from your Next.js app's root, typically as a "postbuild" script.
+  --report,
+  --report=<path>   Also write a machine-readable build report (entries, detected artifacts,
+                    WebMCP tools, warnings, recommendations) to .ora/report.json, or to <path>.
+                    Can also be set persistently via ard.config's "report".
+  -h, --help        Print this help text.
 
 Writes public/.well-known/ai-catalog.json. Validates the generated catalog against the AI Catalog
 spec before writing; refuses to write (and exits non-zero) if it doesn't validate.
@@ -28,6 +32,8 @@ export interface CliIO {
 interface ParsedArgs {
   help: boolean;
   cwd?: string;
+  /** `--report` → `true` (default path); `--report=<path>` → the path; absent → undefined. */
+  report?: true | string;
 }
 
 class CliArgError extends Error {}
@@ -48,6 +54,12 @@ function parseArgs(argv: string[]): ParsedArgs {
       const value = arg.slice('--cwd='.length);
       if (value === '') throw new CliArgError('--cwd requires a directory argument');
       parsed.cwd = value;
+    } else if (arg === '--report') {
+      parsed.report = true;
+    } else if (arg.startsWith('--report=')) {
+      const value = arg.slice('--report='.length);
+      if (value === '') throw new CliArgError('--report= requires a path (or use bare --report)');
+      parsed.report = value;
     } else {
       throw new CliArgError(`Unrecognized argument: ${arg}`);
     }
@@ -70,7 +82,7 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   try {
     args = parseArgs(argv);
   } catch (err) {
-    stderr(`[ora-catalog] ${(err as Error).message}`);
+    stderr(`[ax] ${(err as Error).message}`);
     stderr(HELP_TEXT);
     return 1;
   }
@@ -96,7 +108,7 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     });
   } catch (err) {
     if (err instanceof ArdConfigError) {
-      stderr(`[ora-catalog] ${err.message}`);
+      stderr(`[ax] ${err.message}`);
       return 1;
     }
     throw err;
@@ -104,38 +116,59 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
 
   const { catalog, emit, serverCard } = generated;
 
-  for (const warning of warnings) stdout(`[ora-catalog] ⚠ ${warning}`);
+  for (const warning of warnings) stdout(`[ax] ⚠ ${warning}`);
 
   const result = writeCatalog(cwd, catalog, {
     target: emit,
-    warn: (message) => stdout(`[ora-catalog] ⚠ ${message}`),
+    warn: (message) => stdout(`[ax] ⚠ ${message}`),
   });
 
   if (!result.ok) {
-    stderr('[ora-catalog] Generated catalog failed spec validation — refusing to write it:');
+    stderr('[ax] Generated catalog failed spec validation — refusing to write it:');
     stderr(result.errors);
-    stderr(
-      '[ora-catalog] This is a bug in ora-catalog itself, not your app. Please file an issue.',
-    );
+    stderr('[ax] This is a bug in ax itself, not your app. Please file an issue.');
     return 1;
   }
 
-  stdout(`[ora-catalog] ✓ wrote ${result.path}`);
-  stdout(`[ora-catalog] ✓ ${catalog.entries.length} entries referenced`);
+  stdout(`[ax] ✓ wrote ${result.path}`);
+  stdout(`[ax] ✓ ${catalog.entries.length} entries referenced`);
+
+  const { webMcpToolNames } = generated;
+  if (webMcpToolNames.length > 0) {
+    stdout(
+      `[ax] ✓ ${webMcpToolNames.length} in-page WebMCP tool` +
+        `${webMcpToolNames.length === 1 ? '' : 's'} detected (${webMcpToolNames.join(', ')})`,
+    );
+  }
 
   // Agents discover a live MCP server via the well-known server card, not the ARD catalog entry, so
   // emit it alongside the catalog when a mount was detected.
+  let serverCardPath: string | undefined;
   if (serverCard) {
     const cardResult = writeServerCard(cwd, serverCard, {
       target: emit,
-      warn: (message) => stdout(`[ora-catalog] ⚠ ${message}`),
+      warn: (message) => stdout(`[ax] ⚠ ${message}`),
     });
-    stdout(`[ora-catalog] ✓ wrote ${cardResult.path} (MCP server card)`);
+    serverCardPath = cardResult.path;
+    stdout(`[ax] ✓ wrote ${cardResult.path} (MCP server card)`);
   }
 
   if (recommendations.length > 0) {
-    stdout('[ora-catalog] Recommendations to improve agent-readiness:');
-    for (const recommendation of recommendations) stdout(`[ora-catalog]   → ${recommendation}`);
+    stdout('[ax] Recommendations to improve agent-readiness:');
+    for (const recommendation of recommendations) stdout(`[ax]   → ${recommendation}`);
+  }
+
+  // Machine-readable report: CLI flag wins over ard.config's `report`; both default to off. The
+  // written catalog/server-card paths are patched in first, so the report also records where
+  // everything landed.
+  const reportTarget =
+    args.report ?? (generated.reportTarget === false ? undefined : generated.reportTarget);
+  if (reportTarget !== undefined) {
+    generated.report.catalog.path = result.path;
+    generated.report.catalog.target = result.target;
+    if (serverCardPath !== undefined) generated.report.mcp.serverCardPath = serverCardPath;
+    const reportPath = writeReport(cwd, generated.report, reportTarget);
+    stdout(`[ax] ✓ wrote ${reportPath} (machine-readable build report)`);
   }
 
   return 0;

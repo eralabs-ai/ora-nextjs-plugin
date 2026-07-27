@@ -9,7 +9,7 @@ import { pathSegments, walkFiles } from '../src/walk-files.js';
 let dir: string;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'ora-catalog-walk-files-'));
+  dir = mkdtempSync(join(tmpdir(), 'ax-walk-files-'));
 });
 
 afterEach(() => {

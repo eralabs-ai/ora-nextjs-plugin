@@ -70,7 +70,7 @@ export function buildMcpServerCard(options: BuildMcpServerCardOptions): McpServe
   if (mounts.length > 1) {
     options.recommend(
       `Detected ${mounts.length} MCP server mounts, but a well-known server card lives at a single ` +
-        'path (/.well-known/mcp/server-card.json) — ora-catalog skipped emitting one. Publish a ' +
+        'path (/.well-known/mcp/server-card.json) — ax skipped emitting one. Publish a ' +
         'server card for your primary server by hand so agents can discover it.',
     );
     return undefined;

@@ -13,7 +13,7 @@ const recommend = (message: string): void => {
 };
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'ora-catalog-detect-json-ld-'));
+  dir = mkdtempSync(join(tmpdir(), 'ax-detect-json-ld-'));
   recommendations = [];
 });
 

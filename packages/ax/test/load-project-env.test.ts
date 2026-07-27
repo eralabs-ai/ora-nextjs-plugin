@@ -19,7 +19,7 @@ describe('loadProjectEnv', () => {
   const TEST_VARS = ['ORA_TEST_SITE_URL', 'ORA_TEST_LOAD_ENV'] as const;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'ora-catalog-load-env-'));
+    dir = mkdtempSync(join(tmpdir(), 'ax-load-env-'));
     writeFileSync(join(dir, 'package.json'), '{}', 'utf8');
     for (const v of TEST_VARS) delete process.env[v];
   });

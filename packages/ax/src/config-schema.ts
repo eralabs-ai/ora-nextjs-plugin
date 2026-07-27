@@ -64,12 +64,28 @@ export interface ArdConfig {
    */
   scaffoldLlmsTxt?: boolean;
   /**
+   * Whether to scaffold an agent-aware 404 page (`app/not-found.tsx`) when none exists, plus a
+   * route-manifest data module (`app/not-found-agent-data.*`) that is regenerated on every build.
+   * The page tells agents why the 404 happened and how to continue (discovery links + the app's
+   * real routes); the not-found file itself is scaffolded once and never overwritten. **Opt-in —
+   * defaults to `false`**, same reasoning as `scaffoldLlmsTxt`.
+   */
+  scaffoldAgent404?: boolean;
+  /**
    * Glob patterns for paths that must never be published, even if some future detector would
    * otherwise infer an entry for them. Default-on: see DEFAULT_DENYLIST.
    */
   denylist?: string[];
   /** Glob patterns that re-include a path the denylist would otherwise exclude. */
   allowlist?: string[];
+  /**
+   * Write a machine-readable build report — everything the run detected, referenced, warned about,
+   * and recommended — so a coding agent or CI step can read one JSON file instead of parsing log
+   * lines. `true` writes `.ora/report.json` (project-root-relative, not `public/` — it's build
+   * output, never a published artifact); a string writes to that path instead. **Opt-in — defaults
+   * to `false`.** The CLI's `--report[=path]` flag overrides this per run.
+   */
+  report?: boolean | string;
   /** Hand-declared entries that override (by matching `identifier`) or extend the inferred set. */
   entries?: ArdEntryOverride[];
 }
@@ -121,8 +137,10 @@ export const ardConfigSchema: Record<string, unknown> = {
     },
     emit: { type: 'string', enum: ['static', 'route'] },
     scaffoldLlmsTxt: { type: 'boolean' },
+    scaffoldAgent404: { type: 'boolean' },
     denylist: { type: 'array', items: { type: 'string', minLength: 1 } },
     allowlist: { type: 'array', items: { type: 'string', minLength: 1 } },
+    report: { anyOf: [{ type: 'boolean' }, { type: 'string', minLength: 1 }] },
     entries: { type: 'array', items: entryOverrideSchema },
   },
   // Unlike entries, the top-level config shape is closed — an unrecognized key is almost always a

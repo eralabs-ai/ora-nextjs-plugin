@@ -41,7 +41,7 @@ neither.
 
 Same as the base spec: bumps are explicit PRs with a changelog entry, never silent updates. When
 upstream moves, bump the pinned commit above, re-vendor all three files, and reconcile
-`packages/ora-catalog` (the schema is inlined into the published bundle at build time).
+`packages/ax` (the schema is inlined into the published bundle at build time).
 
 ## Running the conformance tool locally
 

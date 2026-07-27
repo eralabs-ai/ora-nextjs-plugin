@@ -35,7 +35,7 @@ export function detectAgentsMd(options: DetectAgentsMdOptions): DetectAgentsMdRe
 
   options.recommend(
     'No agents.md found — consider adding one (public/agents.md) with when-to-use / when-NOT-to-use ' +
-      "guidance for agents. ora-catalog won't write its content for you; the " +
+      "guidance for agents. ax won't write its content for you; the " +
       'companion skill can help author it from your repo.',
   );
   return { found: false };

@@ -1,6 +1,7 @@
 // DECOY: a user-defined function that happens to be named `registerTool`, unrelated to WebMCP.
 // The detector must NOT treat this as a WebMCP tool — it keys on
-// `navigator.modelContext.registerTool(...)`, not on the bare identifier `registerTool`.
+// `document.modelContext.registerTool(...)` (or the deprecated `navigator.` alias), not on the
+// bare identifier `registerTool`.
 
 interface InternalTool {
   id: string;

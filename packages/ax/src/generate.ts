@@ -1,5 +1,7 @@
-import { resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 
+import { manageAgent404 } from './agent-404.js';
 import { loadArdConfig } from './config.js';
 import { isPathDenied } from './denylist.js';
 import { detectAgentsMd } from './detect-agents-md.js';
@@ -9,10 +11,12 @@ import { buildMcpEntries, detectMcpMounts } from './detect-mcp.js';
 import { detectOpenApi } from './detect-openapi.js';
 import { detectRobots } from './detect-robots.js';
 import { detectSitemap } from './detect-sitemap.js';
+import { detectWebMcp } from './detect-webmcp.js';
 import { buildDiscoveryRecommendations } from './discovery.js';
 import { applyEntryOverrides, entryUrlPath } from './entries.js';
 import { loadProjectEnv } from './load-project-env.js';
 import { loadNextConfig } from './next-config.js';
+import type { BuildReport, ReportArtifact } from './report.js';
 import { SPEC_VERSION } from './schema.js';
 import { buildMcpServerCard, type McpServerCard } from './server-card.js';
 import { readSiteMetadata } from './site-metadata.js';
@@ -43,6 +47,30 @@ export interface GenerateCatalogResult {
    * ARD catalog entry, so it's written to `/.well-known/mcp/server-card.json` by the CLI.
    */
   serverCard?: McpServerCard;
+  /**
+   * Distinct in-page WebMCP tool names detected (declarative + browser-reachable imperative) — for
+   * the CLI's build summary. Empty when the app registers no WebMCP tools.
+   */
+  webMcpToolNames: string[];
+  /**
+   * The machine-readable build report — always assembled; whether (and where) the CLI *writes* it
+   * is governed by `reportTarget`. The CLI patches in the written catalog/server-card paths before
+   * writing, so the file also records where everything landed.
+   */
+  report: BuildReport;
+  /** `ard.config` `report`, resolved: `false` (default), `true` (default path), or a custom path. */
+  reportTarget: boolean | string;
+}
+
+/** Presence-shape shared by the detect-and-recommend detectors (`{found, source?}`). */
+function artifact(result: { found: boolean; source?: string }): ReportArtifact {
+  return { found: result.found, ...(result.source !== undefined ? { source: result.source } : {}) };
+}
+
+/** Presence of a committed `public/openapi.json` — the one artifact whose detector returns only an entry. */
+function openApiArtifact(cwd: string): ReportArtifact {
+  const source = join('public', 'openapi.json');
+  return existsSync(join(cwd, source)) ? { found: true, source } : { found: false };
 }
 
 /**
@@ -62,8 +90,19 @@ export async function generateCatalog(
   // to jiti — resolved against this package's location, not the caller's) behave the same as
   // `existsSync`-based checks, which resolve relative paths against `process.cwd()`.
   const cwd = resolve(options.cwd ?? process.cwd());
-  const warn = options.onWarning ?? (() => {});
-  const recommend = options.onRecommendation ?? (() => {});
+
+  // Tee every warning/recommendation into the build report as well as the caller's callbacks, so
+  // the report is a faithful machine-readable twin of the CLI output.
+  const warnings: string[] = [];
+  const recommendations: string[] = [];
+  const warn = (message: string): void => {
+    warnings.push(message);
+    options.onWarning?.(message);
+  };
+  const recommend = (message: string): void => {
+    recommendations.push(message);
+    options.onRecommendation?.(message);
+  };
 
   // Load the project's `.env*` files first: the CLI runs as its own process (a `postbuild` step),
   // so — unlike `next build` — nothing has populated `process.env` from them yet. Both the env-var
@@ -116,6 +155,13 @@ export async function generateCatalog(
   });
   if (llmsTxtResult.entry) inferredEntries.push(llmsTxtResult.entry);
 
+  // In-page WebMCP tools (W3C draft). Declarative `<form toolname>` pages become `text/html`
+  // entries (the page is a real, addressable artifact); imperative registrations are runtime-only
+  // with no spec-defined manifest, so they surface as warnings/recommendations, never invented
+  // entries.
+  const webMcp = detectWebMcp({ cwd, siteUrl, basePath, warn, recommend });
+  inferredEntries.push(...webMcp.entries);
+
   // Declaring entries in config is expected, not noteworthy — the per-entry notes
   // (`applyEntryOverrides().notes`) are meant for a build summary rather than surfaced as warnings
   // here. A denylist *exclusion*, below, is worth warning about: an inferred or config-declared
@@ -136,11 +182,24 @@ export async function generateCatalog(
   // never add catalog entries and never fail a build — they only surface advisory recommendations.
   // The plugin detects; it never reimplements a sitemap or rewrites a robots policy, and never
   // guesses agents.md content (the companion skill authors that).
-  detectRobots({ cwd, recommend });
-  detectSitemap({ cwd, recommend });
-  detectAgentsMd({ cwd, recommend });
-  detectJsonLd({ cwd, recommend });
+  const robots = detectRobots({ cwd, recommend });
+  const sitemap = detectSitemap({ cwd, recommend });
+  const agentsMd = detectAgentsMd({ cwd, recommend });
+  const jsonLd = detectJsonLd({ cwd, recommend });
   for (const message of buildDiscoveryRecommendations({ siteUrl, basePath })) recommend(message);
+
+  // Agent-aware 404: detect-and-recommend, or (opted in) scaffold a not-found page whose
+  // route-manifest data module is regenerated every build. Runs after the artifact detectors so
+  // its discovery links only reference what actually exists.
+  const agent404 = manageAgent404({
+    cwd,
+    scaffold: config.scaffoldAgent404,
+    basePath,
+    llmsTxtFound: llmsTxtResult.found,
+    sitemapFound: sitemap.found,
+    warn,
+    recommend,
+  });
 
   // Derive the `did:web:` host from the resolved origin so it's consistent whatever the origin's
   // source (config, env var, or Vercel domain), not just when `siteUrl` was set in config.
@@ -160,5 +219,50 @@ export async function generateCatalog(
     entries,
   };
 
-  return { catalog, emit: config.emit, ...(serverCard ? { serverCard } : {}) };
+  const report: BuildReport = {
+    reportVersion: 1,
+    generatedAt: new Date().toISOString(),
+    ...(siteUrl !== undefined ? { siteUrl } : {}),
+    basePath,
+    catalog: {
+      entryCount: entries.length,
+      entries: entries.map((entry) => ({
+        identifier: entry.identifier,
+        type: entry.type,
+        ...(typeof entry.url === 'string' ? { url: entry.url } : {}),
+        ...(typeof entry.displayName === 'string' ? { displayName: entry.displayName } : {}),
+      })),
+    },
+    mcp: {
+      mounts: mcpMounts.map((mount) => ({ pathname: mount.pathname, tools: mount.capabilities })),
+    },
+    webmcp: { toolNames: webMcp.toolNames, sites: webMcp.sites },
+    agent404: {
+      notFoundPresent: agent404.notFoundPresent,
+      agentAware: agent404.agentAware,
+      ...(agent404.source !== undefined ? { source: agent404.source } : {}),
+    },
+    artifacts: {
+      robotsTxt: artifact(robots),
+      sitemap: artifact(sitemap),
+      agentsMd: artifact(agentsMd),
+      jsonLd: artifact(jsonLd),
+      llmsTxt: {
+        found: llmsTxtResult.found,
+        ...(llmsTxtResult.source !== undefined ? { source: llmsTxtResult.source } : {}),
+      },
+      openapi: openApiArtifact(cwd),
+    },
+    warnings,
+    recommendations,
+  };
+
+  return {
+    catalog,
+    emit: config.emit,
+    webMcpToolNames: webMcp.toolNames,
+    report,
+    reportTarget: config.report,
+    ...(serverCard ? { serverCard } : {}),
+  };
 }

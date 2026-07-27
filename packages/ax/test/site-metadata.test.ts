@@ -10,7 +10,7 @@ let dir: string;
 const originalEnv = { ...process.env };
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'ora-catalog-site-metadata-'));
+  dir = mkdtempSync(join(tmpdir(), 'ax-site-metadata-'));
 });
 
 afterEach(() => {

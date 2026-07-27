@@ -43,7 +43,7 @@ export function applyEntryOverrides(
 export function entryUrlPath(entry: Pick<CatalogEntry, 'url'>): string | undefined {
   if (typeof entry.url !== 'string' || entry.url === '') return undefined;
   try {
-    return new URL(entry.url, 'http://ora-catalog.invalid').pathname;
+    return new URL(entry.url, 'http://ax.invalid').pathname;
   } catch {
     return undefined;
   }

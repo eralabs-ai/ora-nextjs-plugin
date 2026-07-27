@@ -13,7 +13,7 @@ const recommend = (message: string): void => {
 };
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'ora-catalog-detect-robots-'));
+  dir = mkdtempSync(join(tmpdir(), 'ax-detect-robots-'));
   recommendations = [];
 });
 

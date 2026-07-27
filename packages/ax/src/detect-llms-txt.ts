@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 
 import { findAppDir } from './app-dir.js';
 import { buildArtifactUrl, buildUrn, NO_SITE_URL_HINT } from './site-url.js';
@@ -37,13 +37,17 @@ const LLMS_TXT_ABSENT_RECOMMENDATION =
 
 export interface DetectLlmsTxtResult {
   entry?: CatalogEntry;
+  /** Whether an llms.txt source exists at all — true even when no entry could be built (no siteUrl). */
+  found: boolean;
+  /** The detected source path relative to the project root, if any. */
+  source?: string;
   /** Path of a starter route handler scaffolded on *this* run, if any. */
   scaffoldedPath?: string;
 }
 
-const STARTER_ROUTE_TS = `// Starter llms.txt, scaffolded by ora-catalog because no llms.txt was found.
+const STARTER_ROUTE_TS = `// Starter llms.txt, scaffolded by ax because no llms.txt was found.
 // Fill in the sections below — especially "When to use" (this is what tells an agent whether your
-// site is relevant to its task) — then commit this file. ora-catalog references
+// site is relevant to its task) — then commit this file. ax references
 // /llms.txt on your next build (this run's catalog can't: nothing served it during the build that
 // just ran).
 export const dynamic = 'force-static';
@@ -72,9 +76,9 @@ export function GET(): Response {
 }
 `;
 
-const STARTER_ROUTE_JS = `// Starter llms.txt, scaffolded by ora-catalog because no llms.txt was found.
+const STARTER_ROUTE_JS = `// Starter llms.txt, scaffolded by ax because no llms.txt was found.
 // Fill in the sections below — especially "When to use" (this is what tells an agent whether your
-// site is relevant to its task) — then commit this file. ora-catalog references
+// site is relevant to its task) — then commit this file. ax references
 // /llms.txt on your next build (this run's catalog can't: nothing served it during the build that
 // just ran).
 export const dynamic = 'force-static';
@@ -119,11 +123,14 @@ export function detectLlmsTxt(options: DetectLlmsTxtOptions): DetectLlmsTxtResul
   const sourceFile = routeFile ?? (existsSync(staticFile) ? staticFile : undefined);
 
   if (sourceFile) {
+    const source = relative(options.cwd, sourceFile);
     if (!options.siteUrl) {
       options.warn(`Found an existing llms.txt but no site URL is known — ${NO_SITE_URL_HINT}`);
-      return {};
+      return { found: true, source };
     }
     return {
+      found: true,
+      source,
       entry: {
         identifier: buildUrn(options.siteUrl, 'llms-txt'),
         type: 'text/markdown',
@@ -136,16 +143,16 @@ export function detectLlmsTxt(options: DetectLlmsTxtOptions): DetectLlmsTxtResul
 
   if (!options.scaffold) {
     options.recommend?.(LLMS_TXT_ABSENT_RECOMMENDATION);
-    return {};
+    return { found: false };
   }
 
   const scaffoldedPath = scaffoldLlmsTxtRoute(options.cwd, appDir, options.warn);
-  if (scaffoldedPath) return { scaffoldedPath };
+  if (scaffoldedPath) return { found: false, scaffoldedPath };
 
   // Opted into scaffolding but nothing was written (no app/ dir, or a write error already warned
   // about) — still surface the absent nudge so the signal isn't silently dropped.
   options.recommend?.(LLMS_TXT_ABSENT_RECOMMENDATION);
-  return {};
+  return { found: false };
 }
 
 /** Finds a `route.*` file directly inside `<appDir>/llms.txt/`, if any. */
@@ -194,7 +201,7 @@ function scaffoldLlmsTxtRoute(
   warn(
     `Scaffolded a starter llms.txt at ${routeFile} — fill in its content (especially the "When to ` +
       'use" section, since that\'s what tells an agent whether your site is relevant to its task) ' +
-      'and commit it; ora-catalog will reference /llms.txt starting with your next build. Pair it ' +
+      'and commit it; ax will reference /llms.txt starting with your next build. Pair it ' +
       'with JSON-LD structured data (Organization + sameAs): llms.txt says what your site is for, ' +
       'JSON-LD identifies it as an entity registries can rank — add both, not one alone.',
   );

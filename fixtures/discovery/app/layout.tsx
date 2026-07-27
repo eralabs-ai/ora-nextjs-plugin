@@ -6,7 +6,7 @@ export const metadata = {
 };
 
 // An Organization JSON-LD block with a `sameAs` array — the structured-data shape Ora scores
-// (json-ld / org-schema-completeness / json-ld-entity-linking). ora-catalog only detects-and-
+// (json-ld / org-schema-completeness / json-ld-entity-linking). ax only detects-and-
 // recommends this; the content here is authored by the app, never guessed by the plugin.
 const organizationJsonLd = {
   '@context': 'https://schema.org',

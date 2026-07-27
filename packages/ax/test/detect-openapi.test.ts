@@ -13,7 +13,7 @@ const warn = (message: string): void => {
 };
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'ora-catalog-detect-openapi-'));
+  dir = mkdtempSync(join(tmpdir(), 'ax-detect-openapi-'));
   warnings = [];
   mkdirSync(join(dir, 'public'), { recursive: true });
 });

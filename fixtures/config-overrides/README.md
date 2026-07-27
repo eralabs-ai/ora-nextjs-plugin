@@ -17,4 +17,4 @@ A Next.js app that declares catalog config in `ard.config.ts` — the Phase 2.1 
 
 So the emitted catalog contains exactly three entries: `urn:example:docs`, `urn:example:skills`,
 and `urn:example:auth-status` — asserted in
-`packages/ora-catalog/test/fixtures-integration.test.ts`.
+`packages/ax/test/fixtures-integration.test.ts`.

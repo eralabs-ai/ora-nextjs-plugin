@@ -66,8 +66,10 @@ function withDefaults(config: ArdConfig): ResolvedArdConfig {
     siteUrl: config.siteUrl,
     emit: config.emit ?? 'static',
     scaffoldLlmsTxt: config.scaffoldLlmsTxt ?? false,
+    scaffoldAgent404: config.scaffoldAgent404 ?? false,
     denylist: config.denylist ?? [...DEFAULT_DENYLIST],
     allowlist: config.allowlist ?? [],
+    report: config.report ?? false,
     entries: config.entries ?? [],
   };
 }

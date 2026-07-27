@@ -1,6 +1,6 @@
 import type { MetadataRoute } from 'next';
 
-// The idiomatic Next.js way to emit sitemap.xml. ora-catalog detects this file and recommends
+// The idiomatic Next.js way to emit sitemap.xml. ax detects this file and recommends
 // referencing it from robots.txt — it never generates a sitemap itself.
 export default function sitemap(): MetadataRoute.Sitemap {
   return [

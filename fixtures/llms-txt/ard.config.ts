@@ -1,4 +1,4 @@
-import type { ArdConfig } from 'ora-catalog';
+import type { ArdConfig } from '@ora-ai/ax';
 
 // `siteUrl` makes the fixture deterministic regardless of where it's built (CI, a laptop, ...) —
 // without it, zero-config llms.txt detection (Phase 2.2) would still run but skip emitting a

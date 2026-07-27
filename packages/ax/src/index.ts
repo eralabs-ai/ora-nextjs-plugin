@@ -25,13 +25,17 @@ export {
 export {
   writeCatalog,
   writeServerCard,
+  writeReport,
   CATALOG_OUTPUT_PATH,
   SERVER_CARD_OUTPUT_PATH,
+  REPORT_OUTPUT_PATH,
   type WriteCatalogResult,
   type WriteServerCardResult,
   type WriteCatalogOptions,
   type EmissionTarget,
 } from './write.js';
+
+export type { BuildReport, ReportArtifact } from './report.js';
 
 export { readSiteMetadata, type SiteMetadata } from './site-metadata.js';
 
@@ -129,3 +133,14 @@ export {
   buildDiscoveryRecommendations,
   type DiscoveryRecommendationOptions,
 } from './discovery.js';
+
+export {
+  detectWebMcp,
+  type DetectWebMcpOptions,
+  type DetectWebMcpResult,
+  type WebMcpToolSite,
+} from './detect-webmcp.js';
+
+export { manageAgent404, type Agent404Options, type Agent404Result } from './agent-404.js';
+
+export { listStaticPageRoutes, resolvePagePathname } from './app-dir.js';

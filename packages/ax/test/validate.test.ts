@@ -176,10 +176,10 @@ describe('validateCatalogArd (official ARD schema)', () => {
     expect(validateCatalog(officialArdExample).valid).toBe(true);
   });
 
-  it('rejects a non-urn:air identifier (the pre-alignment urn:ora-catalog shape)', () => {
+  it('rejects a non-urn:air identifier (the pre-alignment urn:ax shape)', () => {
     const catalog = {
       specVersion: '1.0',
-      entries: [{ ...validEntry, identifier: 'urn:ora-catalog:openapi' }],
+      entries: [{ ...validEntry, identifier: 'urn:ax:openapi' }],
     };
     expect(validateCatalogArd(catalog).valid).toBe(false);
   });

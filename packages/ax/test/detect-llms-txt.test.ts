@@ -17,7 +17,7 @@ const recommend = (message: string): void => {
 };
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'ora-catalog-detect-llms-txt-'));
+  dir = mkdtempSync(join(tmpdir(), 'ax-detect-llms-txt-'));
   warnings = [];
   recommendations = [];
 });
@@ -166,7 +166,7 @@ describe('detectLlmsTxt — scaffolding', () => {
       scaffold: false,
     });
 
-    expect(result).toEqual({});
+    expect(result).toEqual({ found: false });
     expect(existsSync(join(dir, 'app', 'llms.txt'))).toBe(false);
     const message = recommendations.join('\n');
     expect(message).toContain('No llms.txt found');
@@ -182,7 +182,7 @@ describe('detectLlmsTxt — scaffolding', () => {
       warn,
       scaffold: true,
     });
-    expect(result).toEqual({});
+    expect(result).toEqual({ found: false });
   });
 
   it('never overwrites an existing route file (idempotent across runs)', () => {

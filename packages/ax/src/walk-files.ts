@@ -13,7 +13,7 @@ export interface WalkedFile {
 // contain a real Next.js route or component the plugin should detect, and node_modules in
 // particular can be enormous — skipping it by name (not by pattern) keeps this walk cheap and
 // bounded regardless of an app's size.
-const DEFAULT_IGNORED_DIRS = new Set([
+export const DEFAULT_IGNORED_DIRS: ReadonlySet<string> = new Set([
   'node_modules',
   '.next',
   '.git',

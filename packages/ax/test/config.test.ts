@@ -11,7 +11,7 @@ let dir: string;
 const originalEnv = { ...process.env };
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'ora-catalog-config-'));
+  dir = mkdtempSync(join(tmpdir(), 'ax-config-'));
 });
 
 afterEach(() => {
@@ -27,6 +27,8 @@ describe('loadArdConfig', () => {
       siteUrl: undefined,
       emit: 'static',
       scaffoldLlmsTxt: false,
+      scaffoldAgent404: false,
+      report: false,
       denylist: [...DEFAULT_DENYLIST],
       allowlist: [],
       entries: [],

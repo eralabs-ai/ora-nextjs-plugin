@@ -5,7 +5,7 @@ import { join, relative } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { runCli } from '../src/cli.js';
-import { CATALOG_OUTPUT_PATH, SERVER_CARD_OUTPUT_PATH } from '../src/write.js';
+import { CATALOG_OUTPUT_PATH, REPORT_OUTPUT_PATH, SERVER_CARD_OUTPUT_PATH } from '../src/write.js';
 
 /** Writes a minimal app with a single mcp-handler mount and a configured siteUrl. */
 function writeMcpFixture(dir: string): void {
@@ -39,7 +39,7 @@ const io = {
 };
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'ora-catalog-cli-'));
+  dir = mkdtempSync(join(tmpdir(), 'ax-cli-'));
   stdout = [];
   stderr = [];
 });
@@ -179,5 +179,75 @@ describe('runCli', () => {
 
     expect(code).toBe(0);
     expect(existsSync(join(dir, SERVER_CARD_OUTPUT_PATH))).toBe(false);
+  });
+
+  it('writes no build report by default (opt-in only)', async () => {
+    writeMcpFixture(dir);
+
+    const code = await runCli([], { ...io, cwd: dir });
+
+    expect(code).toBe(0);
+    expect(existsSync(join(dir, REPORT_OUTPUT_PATH))).toBe(false);
+  });
+
+  it('--report writes the machine-readable build report to .ora/report.json', async () => {
+    writeMcpFixture(dir);
+
+    const code = await runCli(['--report'], { ...io, cwd: dir });
+
+    expect(code).toBe(0);
+    const reportPath = join(dir, REPORT_OUTPUT_PATH);
+    expect(existsSync(reportPath)).toBe(true);
+    const report = JSON.parse(readFileSync(reportPath, 'utf8'));
+    expect(report).toMatchObject({
+      reportVersion: 1,
+      siteUrl: 'https://example.com',
+      catalog: {
+        path: join(dir, CATALOG_OUTPUT_PATH),
+        target: 'static',
+        entryCount: 1,
+      },
+      mcp: {
+        mounts: [{ pathname: '/mcp', tools: ['roll_dice'] }],
+        serverCardPath: join(dir, SERVER_CARD_OUTPUT_PATH),
+      },
+      webmcp: { toolNames: [], sites: [] },
+    });
+    // Every detect-and-recommend artifact reports presence; this fixture has none of them.
+    expect(report.artifacts.robotsTxt).toEqual({ found: false });
+    expect(report.artifacts.llmsTxt).toEqual({ found: false });
+    // The report mirrors the printed channels verbatim.
+    expect(Array.isArray(report.warnings)).toBe(true);
+    expect(report.recommendations.length).toBeGreaterThan(0);
+    expect(stdout.some((l) => l.includes('machine-readable build report'))).toBe(true);
+  });
+
+  it('--report=<path> writes to a custom path', async () => {
+    writeMcpFixture(dir);
+
+    const code = await runCli(['--report=agent-report.json'], { ...io, cwd: dir });
+    expect(code).toBe(0);
+    expect(existsSync(join(dir, 'agent-report.json'))).toBe(true);
+  });
+
+  it('ard.config `report: true` enables the report without a CLI flag', async () => {
+    // A separate tmp dir (not a rewrite of this test file's shared config): Node's native ESM
+    // cache means the same ard.config.mjs path is only evaluated once per process, and unlike a
+    // real CLI run the test suite is one long-lived process.
+    const configDir = mkdtempSync(join(tmpdir(), 'ax-cli-report-'));
+    try {
+      writeFileSync(join(configDir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+      writeFileSync(
+        join(configDir, 'ard.config.mjs'),
+        "export default { siteUrl: 'https://example.com', report: true };\n",
+        'utf8',
+      );
+
+      const code = await runCli([], { ...io, cwd: configDir });
+      expect(code).toBe(0);
+      expect(existsSync(join(configDir, REPORT_OUTPUT_PATH))).toBe(true);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
   });
 });

@@ -74,7 +74,7 @@ describe('generateCatalog zero-config detection against the fixture corpus', () 
   it('builds a well-known MCP server card from the mcp-adapter fixture mount', async () => {
     const { serverCard } = await generateCatalog({ cwd: `${fixturesDir}mcp-adapter` });
     expect(serverCard).toMatchObject({
-      name: 'com.example.mcp-adapter-fixture/fixture-mcp-adapter',
+      name: 'com.example.mcp-adapter-fixture/mcp-adapter',
       serverUrl: 'https://mcp-adapter-fixture.example.com/mcp',
       remotes: [{ type: 'streamable-http', url: 'https://mcp-adapter-fixture.example.com/mcp' }],
       tools: [{ name: 'roll_dice' }],
@@ -137,6 +137,56 @@ describe('generateCatalog JSON-LD detection against the fixture corpus', () => {
       onRecommendation: (m) => recommendations.push(m),
     });
     expect(recommendations.some((r) => r.includes('No JSON-LD structured data found'))).toBe(true);
+  });
+});
+
+// Phase 4: WebMCP detection against the real fixture corpus — declarative tools become a
+// `text/html` page entry; imperative tools surface via recommendations, never invented entries;
+// the edge-cases fixture must warn (server component, deprecated navigator alias) and must not
+// detect the user-defined `registerTool` decoy.
+describe('generateCatalog WebMCP detection against the fixture corpus', () => {
+  it('emits a page entry with tool capabilities for the webmcp-declarative fixture', async () => {
+    const { catalog, webMcpToolNames } = await generateCatalog({
+      cwd: `${fixturesDir}webmcp-declarative`,
+    });
+    expect(validateCatalogArd(catalog).valid).toBe(true);
+    expect(webMcpToolNames).toEqual(['subscribe_newsletter']);
+
+    const entry = catalog.entries.find(
+      (e) => e.identifier === 'urn:air:webmcp-declarative-fixture.example.com:webmcp',
+    );
+    expect(entry).toMatchObject({
+      type: 'text/html',
+      url: 'https://webmcp-declarative-fixture.example.com/',
+      capabilities: ['subscribe_newsletter'],
+    });
+  });
+
+  it('detects imperative tools in the webmcp-imperative fixture without inventing entries', async () => {
+    const recommendations: string[] = [];
+    const { catalog, webMcpToolNames } = await generateCatalog({
+      cwd: `${fixturesDir}webmcp-imperative`,
+      onRecommendation: (m) => recommendations.push(m),
+    });
+    expect(webMcpToolNames).toEqual(['add_to_cart']);
+    expect(catalog.entries).toEqual([]);
+    expect(recommendations.some((r) => r.includes('invisible in server-rendered HTML'))).toBe(true);
+  });
+
+  it('warns on the edge-cases fixture and ignores the registerTool decoy', async () => {
+    const warnings: string[] = [];
+    const { webMcpToolNames } = await generateCatalog({
+      cwd: `${fixturesDir}edge-cases`,
+      onWarning: (m) => warnings.push(m),
+    });
+    // conditional-tools registers via the deprecated navigator alias in a client component: the
+    // tool counts, but the deprecation warning fires. server-register has no 'use client', so its
+    // tool must NOT count. The decoy must not be detected at all.
+    expect(webMcpToolNames).toEqual(['join_newsletter']);
+    expect(warnings.some((w) => w.includes('deprecated'))).toBe(true);
+    expect(warnings.some((w) => w.includes("'use client'"))).toBe(true);
+    expect(webMcpToolNames).not.toContain('internal-metrics');
+    expect(webMcpToolNames).not.toContain('server_side_tool');
   });
 });
 

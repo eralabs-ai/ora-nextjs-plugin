@@ -13,7 +13,7 @@ let dir: string;
 const originalEnv = { ...process.env };
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'ora-catalog-generate-'));
+  dir = mkdtempSync(join(tmpdir(), 'ax-generate-'));
   delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
   delete process.env.VERCEL_URL;
 });

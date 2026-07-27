@@ -40,7 +40,7 @@ interface OpenApiDocShape {
 const OPENAPI_ABSENT_RECOMMENDATION =
   'No OpenAPI doc found (public/openapi.json) — this is the highest-value artifact for agent ' +
   'discovery, since it lets agents understand and call your API without guessing at routes or ' +
-  'schemas. ora-catalog never generates one; produce it however your API is defined (many ' +
+  'schemas. ax never generates one; produce it however your API is defined (many ' +
   'schema/validation libraries can emit OpenAPI from your existing route definitions) and commit ' +
   'the result to public/openapi.json.';
 

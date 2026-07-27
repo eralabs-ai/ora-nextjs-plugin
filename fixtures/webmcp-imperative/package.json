@@ -1,5 +1,5 @@
 {
-  "name": "@ora-catalog/fixture-webmcp-imperative",
+  "name": "@ax-fixtures/webmcp-imperative",
   "version": "0.0.0",
   "private": true,
   "scripts": {

@@ -43,7 +43,7 @@ const ABSENT_RECOMMENDATION =
   'schema.org @type beyond Organization — SoftwareApplication or Product for an app/API, or a ' +
   'FAQPage — since covering more types helps registries understand your site more fully. ' +
   'JSON-LD pairs with an llms.txt: llms.txt tells agents what your site is for, JSON-LD identifies ' +
-  'it as an entity registries can rank — add both, not one alone. ora-catalog won’t author the ' +
+  'it as an entity registries can rank — add both, not one alone. ax won’t author the ' +
   'block (the fields are judgment content); the companion skill can help draft it from your repo.';
 
 /**

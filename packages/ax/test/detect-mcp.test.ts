@@ -13,7 +13,7 @@ const warn = (message: string): void => {
 };
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'ora-catalog-detect-mcp-'));
+  dir = mkdtempSync(join(tmpdir(), 'ax-detect-mcp-'));
   warnings = [];
 });
 
