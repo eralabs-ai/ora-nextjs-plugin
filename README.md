@@ -12,17 +12,21 @@ npm install --save-dev @ora-ai/ax
 {
   "scripts": {
     "build": "next build",
-    "postbuild": "ax --yes"
+    "postbuild": "ax"
   }
 }
 ```
 
-The first time `ax` publishes a catalog it prints the surface it's about to expose and asks for
-confirmation. `--yes` skips that prompt **everywhere, including locally**, and is **required** in
-CI / non-interactive shells (there it refuses and exits non-zero without it) — so an unattended
-`postbuild` includes it. If you'd rather keep the local review prompt and only auto-confirm in CI,
-drop `--yes` from the script and pass it from your CI command instead (e.g. `ax ${CI:+--yes}` on
-posix shells). Run `ax --dry-run` any time to print the summary and write nothing.
+The **first** time `ax` publishes a catalog it prints the surface it's about to expose and asks for
+confirmation (a y/N prompt). The catalog is written to `public/.well-known/ai-catalog.json` — a
+committed directory in a normal Next.js app — so the recommended flow is: build once locally,
+review the prompt, and **commit the generated catalog**. Every build after that (local _and_ CI)
+sees the file already there and runs unattended, no flag needed.
+
+Two flags for the rest: **`--yes`** skips the prompt (and is **required** in CI / non-interactive
+shells, where `ax` otherwise refuses and exits non-zero) — reach for it only if you deliberately
+_don't_ commit the catalog and regenerate it fresh in CI instead. **`--dry-run`** prints the
+exposure summary and writes nothing.
 
 One run — offline, deterministic, about a second — then:
 

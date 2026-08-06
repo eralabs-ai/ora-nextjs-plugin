@@ -1,15 +1,22 @@
-import { defaultIsGated, type AxConfig } from '@ora-ai/ax';
+import type { AxConfig } from '@ora-ai/ax';
 
 // This is the fixture that documents-and-tests the config surface. Until zero-config artifact
 // detection lands there are no *inferred* entries to override, so here every entry is
 // config-declared; the same `identifier`-matching merge layers these over inferred entries.
 const config: AxConfig = {
   // `isGated` supersedes the old denylist/allowlist pair. Supplying it replaces the built-in floor
-  // wholesale, so this restates the floor (defaultIsGated gates `/api/auth/**` and
+  // wholesale, so this restates the floor (the built-in `defaultIsGated` gates `/api/auth/**` and
   // `/api/webhooks/**`) and then re-includes this app's one public auth endpoint by returning
   // false for it — the job the old allowlist did. A gated entry ax can't describe (a plain
   // text/html pointer has no derivable auth descriptor) is dropped rather than published.
-  isGated: (target) => defaultIsGated(target) && target.path !== '/api/auth/status',
+  //
+  // The floor is inlined here rather than composed from the exported `defaultIsGated`: this file is
+  // evaluated for real (via jiti) by the test suite, which runs against src without building the
+  // package's dist, so importing a *runtime* value from `@ora-ai/ax` would fail to resolve. The
+  // README shows the `defaultIsGated`-composition form for consumers of the published package.
+  isGated: ({ path }) =>
+    (path.startsWith('/api/auth/') || path.startsWith('/api/webhooks/')) &&
+    path !== '/api/auth/status',
   entries: [
     // Ordinary docs/skills pointers — absolute URLs, so they're spec-valid on their own (the
     // catalog schema requires `url` to be an absolute URI). Identifiers follow the ARD URN format
