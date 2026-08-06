@@ -15,3 +15,8 @@ spec/ard/conformance/
 
 # Next.js generated files
 **/next-env.d.ts
+
+# Machine-generated report-snapshot goldens (written by scripts/verify-report-snapshots.mjs via
+# JSON.stringify on each `reports:regen`) — reformatting them would drift from what that script
+# writes and break the next regen's diff.
+fixtures/**/report.golden.json

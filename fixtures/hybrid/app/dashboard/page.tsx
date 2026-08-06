@@ -2,7 +2,7 @@ export default function Dashboard() {
   return (
     <main>
       <h1>Dashboard (App Router)</h1>
-      <p>`/dashboard` is defined by BOTH routers — the App Router version wins the dedupe.</p>
+      <p>`/dashboard` is served by the App Router; `/about` comes from the Pages Router.</p>
     </main>
   );
 }

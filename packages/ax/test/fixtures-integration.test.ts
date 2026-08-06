@@ -284,12 +284,14 @@ describe('generateCatalog against the Pages Router fixtures', () => {
     });
   });
 
-  it('scans both routers for the hybrid fixture and unions their routes (App Router wins collisions)', async () => {
+  it('scans both routers for the hybrid fixture and unions their routes', async () => {
     const { catalog, report } = await generateCatalog({ cwd: `${fixturesDir}hybrid` });
     expect(validateCatalogArd(catalog).valid).toBe(true);
     expect(report.routers).toEqual(['app', 'pages']);
 
-    // `/dashboard` is defined by both routers — it appears exactly once.
+    // `/` and `/dashboard` come from app/, `/about` from pages/ — the union of both routers. The
+    // App-Router-wins-collision dedupe can't live in a buildable fixture (Next.js hard-errors on a
+    // route defined in both routers), so that case is covered synthetically in router-model.test.ts.
     const routes = buildRouterModel(`${fixturesDir}hybrid`).listPageRoutes();
     expect(routes).toEqual(['/', '/about', '/dashboard']);
   });
