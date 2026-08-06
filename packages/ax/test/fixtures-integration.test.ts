@@ -289,9 +289,9 @@ describe('generateCatalog against the Pages Router fixtures', () => {
     expect(validateCatalogArd(catalog).valid).toBe(true);
     expect(report.routers).toEqual(['app', 'pages']);
 
-    // `/` and `/dashboard` come from app/, `/about` from pages/ — the union of both routers. The
-    // App-Router-wins-collision dedupe can't live in a buildable fixture (Next.js hard-errors on a
-    // route defined in both routers), so that case is covered synthetically in router-model.test.ts.
+    // `/` and `/dashboard` come from app/, `/about` from pages/ — the union of both routers. A real
+    // hybrid app defines each route in only one router (Next.js hard-errors if the same route is in
+    // both), so there is no collision to resolve; the plugin just lists each route once.
     const routes = buildRouterModel(`${fixturesDir}hybrid`).listPageRoutes();
     expect(routes).toEqual(['/', '/about', '/dashboard']);
   });

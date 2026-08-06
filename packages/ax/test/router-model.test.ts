@@ -59,11 +59,12 @@ describe('buildRouterModel — router detection', () => {
 });
 
 describe('buildRouterModel — listPageRoutes', () => {
-  it('unions both routers and dedupes a route defined by both (App Router wins)', () => {
-    write('app/page.tsx'); // /
-    write('app/dashboard/page.tsx'); // /dashboard
-    write('pages/about.tsx'); // /about
-    write('pages/dashboard.tsx'); // /dashboard — collides, deduped to one
+  it('unions the routes from both routers (a real hybrid defines each route in only one)', () => {
+    // A buildable hybrid app never defines the same route in both routers — Next.js hard-errors on
+    // that — so there is no collision to resolve; the model just lists each route once across both.
+    write('app/page.tsx'); // /            (App Router)
+    write('app/dashboard/page.tsx'); // /dashboard   (App Router)
+    write('pages/about.tsx'); // /about       (Pages Router)
 
     expect(buildRouterModel(dir).listPageRoutes()).toEqual(['/', '/about', '/dashboard']);
   });

@@ -36,7 +36,7 @@ export interface ApiEndpoint {
 
 export interface RouterModel {
   cwd: string;
-  /** Routers present in the project, in precedence order (`app` before `pages`). Empty for neither. */
+  /** Routers present in the project (`app` listed before `pages`); empty for neither. Which one opt-in scaffolds target is `primary`, below. */
   routers: RouterKind[];
   /** Where opt-in scaffolds write their router-specific source: App Router when present, else Pages. */
   primary?: RouterKind;
@@ -58,10 +58,12 @@ export interface RouterModel {
 
 /**
  * Builds the project's `RouterModel` once, composing the App and/or Pages adapters based on which
- * router directories exist. On a route defined by both routers, the App Router's URL wins the dedupe
- * (matching Next.js's runtime precedence), though for a plain URL set that only means it appears
- * once. A project with neither router yields empty results from every method — the same silent,
- * never-throwing degradation the individual `findAppDir`-based detectors had.
+ * router directories exist. `listPageRoutes` unions both routers' routes and lists each URL once —
+ * there is no precedence to apply, because Next.js refuses to build an app that defines the same
+ * route in both routers ("Conflicting app and page file"), so a buildable app never has a genuine
+ * collision; the dedupe is purely defensive. A project with neither router yields empty results from
+ * every method — the same silent, never-throwing degradation the individual `findAppDir`-based
+ * detectors had.
  */
 export function buildRouterModel(cwd: string): RouterModel {
   const appDir = findAppDir(cwd);
