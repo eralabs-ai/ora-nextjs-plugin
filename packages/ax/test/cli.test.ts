@@ -65,9 +65,13 @@ function writeFullyAgentReadyApp(dir: string): void {
 let dir: string;
 let stdout: string[];
 let stderr: string[];
+// The shared IO auto-confirms the publish gate: `confirm` present marks the run as interactive
+// (no TTY needed) and returns yes, so the many "it writes …" tests keep exercising a real write.
+// The gate's refuse/decline paths get their own dedicated tests below that override `confirm`.
 const io = {
   stdout: (line: string) => stdout.push(line),
   stderr: (line: string) => stderr.push(line),
+  confirm: async () => true,
 };
 
 beforeEach(() => {
@@ -171,12 +175,22 @@ describe('runCli', () => {
   });
 
   it('exits 1 with an actionable message and writes nothing on an invalid ax.config', async () => {
-    writeFileSync(join(dir, 'ax.config.mjs'), 'export default { denylist: 123 };\n', 'utf8');
+    writeFileSync(join(dir, 'ax.config.mjs'), 'export default { emit: 123 };\n', 'utf8');
 
     const code = await runCli([], { ...io, cwd: dir });
 
     expect(code).toBe(1);
     expect(stderr.some((l) => l.includes('ax.config'))).toBe(true);
+    expect(existsSync(join(dir, CATALOG_OUTPUT_PATH))).toBe(false);
+  });
+
+  it('exits 1 with an actionable message when ax.config isGated is not a function', async () => {
+    writeFileSync(join(dir, 'ax.config.mjs'), 'export default { isGated: 123 };\n', 'utf8');
+
+    const code = await runCli([], { ...io, cwd: dir });
+
+    expect(code).toBe(1);
+    expect(stderr.some((l) => l.includes('isGated'))).toBe(true);
     expect(existsSync(join(dir, CATALOG_OUTPUT_PATH))).toBe(false);
   });
 
@@ -315,6 +329,86 @@ describe('runCli', () => {
     } finally {
       rmSync(configDir, { recursive: true, force: true });
     }
+  });
+});
+
+// Review-before-publish (Phase 2.3): the first publish of a catalog is gated behind confirmation,
+// and the run always prints the surface it is about to expose first. This is the backstop the
+// auth/gating work leans on — the last chance to catch a surface that shouldn't be public.
+describe('runCli review-before-publish gate', () => {
+  const noConfirmIo = {
+    stdout: (line: string) => stdout.push(line),
+    stderr: (line: string) => stderr.push(line),
+    // No `confirm` and no TTY in the test process → a non-interactive run.
+  };
+
+  it('refuses to write a first-time catalog in a non-interactive run without --yes', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+
+    const code = await runCli([], { ...noConfirmIo, cwd: dir });
+
+    expect(code).toBe(1);
+    expect(existsSync(join(dir, CATALOG_OUTPUT_PATH))).toBe(false);
+    expect(stderr.some((l) => l.includes('Re-run with --yes'))).toBe(true);
+  });
+
+  it('writes a first-time catalog non-interactively when --yes is passed', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+
+    const code = await runCli(['--yes'], { ...noConfirmIo, cwd: dir });
+
+    expect(code).toBe(0);
+    expect(existsSync(join(dir, CATALOG_OUTPUT_PATH))).toBe(true);
+  });
+
+  it('does not gate a re-run once a catalog already exists at the target path', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    // First publish with --yes, then a plain re-run (no --yes, non-interactive) must still succeed.
+    expect(await runCli(['--yes'], { ...noConfirmIo, cwd: dir })).toBe(0);
+
+    stdout = [];
+    stderr = [];
+    const code = await runCli([], { ...noConfirmIo, cwd: dir });
+
+    expect(code).toBe(0);
+    expect(stderr).toEqual([]);
+  });
+
+  it('aborts without writing when the interactive confirm is declined', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+
+    const code = await runCli([], {
+      ...noConfirmIo,
+      cwd: dir,
+      confirm: async () => false,
+    });
+
+    expect(code).toBe(1);
+    expect(existsSync(join(dir, CATALOG_OUTPUT_PATH))).toBe(false);
+    expect(stdout.some((l) => l.includes('Aborted'))).toBe(true);
+  });
+
+  it('--dry-run prints the exposure summary and writes nothing', async () => {
+    writeMcpFixture(dir);
+
+    const code = await runCli(['--dry-run'], { ...io, cwd: dir });
+
+    expect(code).toBe(0);
+    expect(existsSync(join(dir, CATALOG_OUTPUT_PATH))).toBe(false);
+    expect(existsSync(join(dir, SERVER_CARD_OUTPUT_PATH))).toBe(false);
+    expect(stdout.some((l) => l.includes('About to expose'))).toBe(true);
+    expect(stdout.some((l) => l.includes('nothing written'))).toBe(true);
+  });
+
+  it('prints the surface (entries + server card) it is about to expose before writing', async () => {
+    writeMcpFixture(dir);
+
+    await runCli(['--yes'], { ...io, cwd: dir });
+
+    const output = stdout.join('\n');
+    expect(output).toContain('About to expose');
+    expect(output).toContain('urn:air:example.com:mcp-server');
+    expect(output).toContain('MCP server card → https://example.com/mcp');
   });
 });
 

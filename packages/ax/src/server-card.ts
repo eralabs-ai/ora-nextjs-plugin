@@ -15,11 +15,23 @@ import { buildArtifactUrl } from './site-url.js';
 //      there instead of the top-level `serverUrl`.
 // Emitting both shapes satisfies readers expecting either convention without guessing — every value
 // is derived from the detected mount, package.json, and resolved site origin. Still no
-// `$schema`/`protocolVersion` guessed (unknowable statically) and no `authentication` block asserted
-// (auth declaration isn't derivable statically).
+// `$schema`/`protocolVersion` guessed (unknowable statically). An `authentication` block appears
+// only when the mount is detectably gated (a `withMcpAuth`/`verifyToken` wrapper): it asserts that
+// the server requires auth and, when `withMcpAuth`'s `resourceMetadataPath` is a literal,
+// cross-links the RFC 9728 metadata — never guesses the OAuth endpoints, and never asserts "open".
 
 export interface McpServerCardTool {
   name: string;
+}
+
+/**
+ * Auth block on the card — present only for a detectably-gated mount. `required: true` states the
+ * server needs auth; `resourceMetadata` (RFC 9728) is included only when `withMcpAuth` declared a
+ * `resourceMetadataPath` literal ax could resolve to an absolute URL.
+ */
+export interface McpServerCardAuthentication {
+  required: true;
+  resourceMetadata?: string;
 }
 
 export interface McpServerCardRemote {
@@ -40,6 +52,8 @@ export interface McpServerCard {
   serverInfo: { name: string; version: string };
   transport: { type: 'streamable-http'; endpoint: string };
   capabilities: { tools: Record<string, unknown> };
+  /** Present only for a detectably-gated mount — never asserts "open" (see module comment). */
+  authentication?: McpServerCardAuthentication;
 }
 
 export interface BuildMcpServerCardOptions {
@@ -83,6 +97,15 @@ export function buildMcpServerCard(options: BuildMcpServerCardOptions): McpServe
 
   const version = site.version ?? '0.0.0';
 
+  const authentication: McpServerCardAuthentication | undefined = mount.auth
+    ? {
+        required: true,
+        ...(mount.resourceMetadataPath !== undefined
+          ? { resourceMetadata: buildArtifactUrl(siteUrl, basePath, mount.resourceMetadataPath) }
+          : {}),
+      }
+    : undefined;
+
   return {
     name: buildServerName(siteUrl, site.displayName),
     description: site.description ?? `${site.displayName} MCP server`,
@@ -93,6 +116,7 @@ export function buildMcpServerCard(options: BuildMcpServerCardOptions): McpServe
     serverInfo: { name: site.displayName, version },
     transport: { type: 'streamable-http', endpoint: serverUrl },
     capabilities: { tools: {} },
+    ...(authentication !== undefined ? { authentication } : {}),
   };
 }
 

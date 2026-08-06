@@ -8,6 +8,37 @@ export type CatalogMetadata = Record<string, unknown>;
 /** Verifiable identity/trust metadata. Out of scope for v1 emission; typed loosely. */
 export type TrustManifest = Record<string, unknown>;
 
+/**
+ * The auth posture of an entry's surface. Deliberately the exact shape Ora's registry projects and
+ * re-validates (`EntryAuthStatus` in ora's `src/lib/ard/`): a value outside these four is dropped
+ * on crawl, so ax emits only these.
+ */
+export type EntryAuthStatus = 'oauth2' | 'api_key' | 'none' | 'unknown';
+
+/** Concrete OAuth 2 facts for an entry, populated from a declared/detected auth surface. */
+export interface EntryAuthOAuth {
+  authorizationEndpoint?: string;
+  tokenEndpoint?: string;
+  /** RFC 7591 Dynamic Client Registration endpoint, when advertised. */
+  registrationEndpoint?: string;
+  scopesSupported?: string[];
+  grantTypesSupported?: string[];
+  /** True when a dynamic client registration endpoint was found. */
+  dcr?: boolean;
+}
+
+/**
+ * A secret-free auth descriptor on a catalog entry. A genuine ARD *extension* field (entries allow
+ * unknown keys; the manifest root/host do not), mirroring the shape registries read — only
+ * structural facts (status, endpoint URLs, scope keys) ever appear here, never secrets or prose.
+ */
+export interface EntryAuth {
+  status: EntryAuthStatus;
+  oauth?: EntryAuthOAuth;
+  /** Human-readable auth documentation URL, when one is known. Must be http(s). */
+  docsUrl?: string;
+}
+
 export interface CatalogHost {
   displayName: string;
   identifier?: string;
@@ -38,6 +69,8 @@ interface CatalogEntryBase {
   trustManifest?: TrustManifest;
   /** ISO 8601 last-modification timestamp. */
   updatedAt?: string;
+  /** Secret-free auth descriptor for a gated surface (ARD extension field). */
+  auth?: EntryAuth;
   metadata?: CatalogMetadata;
   [key: string]: unknown;
 }

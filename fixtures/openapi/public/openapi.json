@@ -6,6 +6,24 @@
     "description": "A minimal OpenAPI 3.1 description served statically at /openapi.json."
   },
   "servers": [{ "url": "https://example.com" }],
+  "components": {
+    "securitySchemes": {
+      "oauth2": {
+        "type": "oauth2",
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "https://example.com/oauth/authorize",
+            "tokenUrl": "https://example.com/oauth/token",
+            "scopes": {
+              "read:echo": "Read access",
+              "write:echo": "Write access"
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [{ "oauth2": ["read:echo"] }],
   "paths": {
     "/api/echo": {
       "post": {

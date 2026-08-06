@@ -1,10 +1,18 @@
-import { resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 
 import { AxConfigError } from './config.js';
-import { generateCatalog } from './generate.js';
+import { generateCatalog, type GenerateCatalogResult } from './generate.js';
 import { ORA_SCAN_API, ORA_SKILL_MCP_URL } from './ora-checks.js';
 import type { BuildReport } from './report.js';
-import { REPORT_OUTPUT_PATH, writeCatalog, writeReport, writeServerCard } from './write.js';
+import type { AiCatalog } from './types.js';
+import {
+  CATALOG_OUTPUT_PATH,
+  REPORT_OUTPUT_PATH,
+  writeCatalog,
+  writeReport,
+  writeServerCard,
+} from './write.js';
 
 const HELP_TEXT = `ax — generate a spec-valid ai-catalog.json at build time
 
@@ -19,6 +27,9 @@ Options:
   --report=<path>   Also write a machine-readable build report (entries, detected artifacts,
                     WebMCP tools, warnings, recommendations) to .ora/report.json, or to <path>.
                     Can also be set persistently via ax.config's "report".
+  --yes, -y         Skip the confirmation prompt before publishing a new catalog. Required to
+                    write in CI / non-interactive shells (see the exposure summary below).
+  --dry-run         Print the exposure summary and exit without writing anything.
   -h, --help        Print this help text.
 
 Writes public/.well-known/ai-catalog.json. Validates the generated catalog against the AI Catalog
@@ -29,6 +40,12 @@ export interface CliIO {
   cwd?: string;
   stdout?: (line: string) => void;
   stderr?: (line: string) => void;
+  /**
+   * How to ask for interactive confirmation before publishing a new catalog. Injected so the gate
+   * is testable; in real use it's a readline y/N prompt (see `defaultConfirm`). Its presence also
+   * marks the run as interactive, so a test can exercise the confirm/decline paths without a TTY.
+   */
+  confirm?: (question: string) => Promise<boolean>;
 }
 
 interface ParsedArgs {
@@ -36,17 +53,25 @@ interface ParsedArgs {
   cwd?: string;
   /** `--report` → `true` (default path); `--report=<path>` → the path; absent → undefined. */
   report?: true | string;
+  /** `--yes`/`-y`: skip the publish confirmation (required in CI). */
+  yes: boolean;
+  /** `--dry-run`: print the exposure summary and write nothing. */
+  dryRun: boolean;
 }
 
 class CliArgError extends Error {}
 
 function parseArgs(argv: string[]): ParsedArgs {
-  const parsed: ParsedArgs = { help: false };
+  const parsed: ParsedArgs = { help: false, yes: false, dryRun: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === undefined) continue;
     if (arg === '-h' || arg === '--help') {
       parsed.help = true;
+    } else if (arg === '--yes' || arg === '-y') {
+      parsed.yes = true;
+    } else if (arg === '--dry-run') {
+      parsed.dryRun = true;
     } else if (arg === '--cwd') {
       const value = argv[i + 1];
       if (value === undefined) throw new CliArgError('--cwd requires a directory argument');
@@ -120,6 +145,36 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
 
   for (const warning of warnings) stdout(`[ax] ⚠ ${warning}`);
 
+  // Review before publish: show the full surface this run would expose, then gate the first
+  // publish. A catalog already committed at the target path means this isn't a first run, so
+  // re-runs stay unattended; a fresh publish must be confirmed — interactively, or with --yes
+  // (required, and the norm, in CI). This is the backstop the auth/gating work relies on: the last
+  // chance to catch a surface that shouldn't be public before it's written.
+  printExposureSummary(catalog, generated, stdout);
+
+  if (args.dryRun) {
+    stdout('[ax] --dry-run: nothing written.');
+    return 0;
+  }
+
+  const firstPublish = !existsSync(join(cwd, CATALOG_OUTPUT_PATH));
+  if (firstPublish && !args.yes) {
+    const interactive =
+      io.confirm !== undefined || (process.stdout.isTTY === true && !process.env.CI);
+    if (!interactive) {
+      stderr(
+        '[ax] This run would publish a new ai-catalog.json exposing the surface above. Re-run ' +
+          'with --yes to confirm (required in CI / non-interactive shells).',
+      );
+      return 1;
+    }
+    const confirm = io.confirm ?? defaultConfirm;
+    if (!(await confirm('Publish this catalog?'))) {
+      stdout('[ax] Aborted — nothing written.');
+      return 1;
+    }
+  }
+
   const result = writeCatalog(cwd, catalog, {
     target: emit,
     warn: (message) => stdout(`[ax] ⚠ ${message}`),
@@ -134,7 +189,11 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
 
   stdout(`[ax] ✓ wrote ${result.path}`);
   const entryCount = catalog.entries.length;
-  stdout(`[ax] ✓ ${entryCount} ${entryCount === 1 ? 'entry' : 'entries'} referenced`);
+  const warningSuffix =
+    warnings.length > 0 ? `, ${warnings.length} warning${warnings.length === 1 ? '' : 's'}` : '';
+  stdout(
+    `[ax] ✓ ${entryCount} ${entryCount === 1 ? 'entry' : 'entries'} referenced${warningSuffix}`,
+  );
 
   const { webMcpToolNames } = generated;
   if (webMcpToolNames.length > 0) {
@@ -204,4 +263,47 @@ function printAgentHandoff(
     `[ax]   Point your coding agent at it and connect Ora's skill server (MCP): ${ORA_SKILL_MCP_URL}`,
   );
   stdout(`[ax]   Then scan your deployed site: ${ORA_SCAN_API.scan} {"url": "${domain}"}`);
+}
+
+/**
+ * The "about to expose" summary: every artifact this run would publish, so the surface is visible
+ * before it's written (and before the confirmation gate). Each entry shows its identifier, type,
+ * where it points, and — the point of the auth work — whether it carries an auth descriptor, so a
+ * gated surface reads as gated rather than silently open. Purely informational; it never decides
+ * anything.
+ */
+function printExposureSummary(
+  catalog: AiCatalog,
+  generated: GenerateCatalogResult,
+  stdout: (line: string) => void,
+): void {
+  const { entries } = catalog;
+  stdout(
+    `[ax] About to expose ${entries.length} catalog ${entries.length === 1 ? 'entry' : 'entries'}:`,
+  );
+  for (const entry of entries) {
+    const where = typeof entry.url === 'string' ? entry.url : '(inline data)';
+    const auth = entry.auth ? ` [auth: ${entry.auth.status}]` : '';
+    stdout(`[ax]   • ${entry.identifier} (${entry.type}) → ${where}${auth}`);
+  }
+  if (generated.serverCard) {
+    const gated = generated.serverCard.authentication ? ' (gated)' : '';
+    stdout(`[ax]   • MCP server card → ${generated.serverCard.serverUrl}${gated}`);
+  }
+}
+
+/**
+ * The real interactive confirmation: a readline y/N prompt on the current TTY. Loaded lazily and
+ * only reached on a genuinely interactive run (tests inject `io.confirm` instead), so the readline
+ * import never runs in CI. Anything other than an explicit yes is treated as "no".
+ */
+async function defaultConfirm(question: string): Promise<boolean> {
+  const { createInterface } = await import('node:readline/promises');
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = (await rl.question(`${question} [y/N] `)).trim().toLowerCase();
+    return answer === 'y' || answer === 'yes';
+  } finally {
+    rl.close();
+  }
 }

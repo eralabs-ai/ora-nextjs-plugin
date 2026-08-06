@@ -1,37 +1,34 @@
 {
   "reportVersion": 2,
   "generatedAt": "<generatedAt>",
+  "siteUrl": "https://mcp-gated-fixture.example.com",
   "basePath": "",
   "routers": [
     "app"
   ],
   "catalog": {
-    "entryCount": 3,
+    "entryCount": 1,
     "entries": [
       {
-        "identifier": "urn:air:example.com:docs",
-        "type": "text/html",
-        "url": "https://example.com/docs",
-        "displayName": "API documentation"
-      },
-      {
-        "identifier": "urn:air:example.com:skills",
-        "type": "application/ai-skill+md",
-        "url": "https://github.com/example/agent-skills",
-        "displayName": "Agent skills"
-      },
-      {
-        "identifier": "urn:air:example.com:auth-status",
-        "type": "text/html",
-        "url": "https://example.com/api/auth/status",
-        "displayName": "Auth status endpoint"
+        "identifier": "urn:air:mcp-gated-fixture.example.com:mcp-server",
+        "type": "application/mcp-server-card+json",
+        "url": "https://mcp-gated-fixture.example.com/mcp",
+        "displayName": "MCP server"
       }
     ],
     "path": "public/.well-known/ai-catalog.json",
     "target": "static"
   },
   "mcp": {
-    "mounts": []
+    "mounts": [
+      {
+        "pathname": "/mcp",
+        "tools": [
+          "roll_dice"
+        ]
+      }
+    ],
+    "serverCardPath": "public/.well-known/mcp/server-card.json"
   },
   "webmcp": {
     "toolNames": [],
@@ -123,12 +120,12 @@
       {
         "id": "mcp-server",
         "artifact": "mcp-server",
-        "status": "actionable"
+        "status": "addressed"
       },
       {
         "id": "mcp-server-card",
         "artifact": "mcp-server",
-        "status": "actionable"
+        "status": "addressed"
       },
       {
         "id": "webmcp",
@@ -137,9 +134,7 @@
       }
     ]
   },
-  "warnings": [
-    "isGated excluded entry \"urn:air:example.com:auth-internal\" (/api/auth/internal) — it is gated but ax can't derive an auth descriptor for it, so it is not published as an open surface. Declare it in ax.config \"entries\" with an \"auth\" descriptor to list it as gated instead."
-  ],
+  "warnings": [],
   "recommendations": [
     "No OpenAPI doc found (public/openapi.json) — this is the highest-value artifact for agent discovery, since it lets agents understand and call your API without guessing at routes or schemas. ax never generates one; produce it however your API is defined (many schema/validation libraries can emit OpenAPI from your existing route definitions) and commit the result to public/openapi.json.",
     "No llms.txt found — a short natural-language guide agents read to decide whether your site fits their task, and to find your key pages. Add one at app/llms.txt/route.ts (or public/llms.txt), or set scaffoldLlmsTxt: true in ax.config to have a starter written for you. Pair it with JSON-LD structured data (an Organization block with a sameAs array): llms.txt says what your site is for, JSON-LD identifies it as an entity registries can rank — the two reinforce each other, so add both rather than one alone.",

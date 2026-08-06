@@ -17,6 +17,16 @@ npm install --save-dev @ora-ai/ax
 }
 ```
 
+**Try it locally first.** Run your build once on your machine and `ax` shows you what agents can
+already do with your site, what it generated for you, and a short, ranked list of quick wins to make
+your site more agent-ready — each with the exact next step to take. Like what you see? Commit the
+generated catalog (it lives in `public/`, right where Next.js serves it) and every build after that
+just works.
+
+> On the first publish, `ax` shows the surface it's about to expose and asks a quick y/N — so nothing
+> goes public by surprise. Automating in CI? Add `--yes` to run unattended, or `--dry-run` to preview
+> anytime without writing.
+
 One run — offline, deterministic, about a second — then:
 
 - **Generates** a spec-valid [AI Catalog](https://github.com/Agent-Card/ai-catalog) (Agentic
@@ -50,10 +60,10 @@ catalog. 348 tests, including the spec's official conformance tool run over a co
 fixture apps in CI.
 
 > **Status:** pre-release, under active development. The detect-and-reference core, WebMCP
-> detection, the agent-aware 404, the opt-in scaffolds, and the Ora-mapped build report are
-> implemented and tested. Before the first public npm release: review-before-publish, gated-surface
-> detection (never advertise an auth-walled endpoint as open), and an end-to-end run against Ora's
-> production crawler. Full phased roadmap and every design decision:
+> detection, the agent-aware 404, the opt-in scaffolds, the Ora-mapped build report,
+> review-before-publish, and gated-surface detection (never advertise an auth-walled endpoint as
+> open) are implemented and tested. Before the first public npm release: an end-to-end run against
+> Ora's production crawler. Full phased roadmap and every design decision:
 > [`docs-internal/PLAN.md`](./docs-internal/PLAN.md).
 
 ## Design posture
@@ -141,7 +151,7 @@ tool that reads it, so the file you commit says plainly which tool it configures
 > deprecated. Rename the file — the fallback is a migration aid, not a supported second name.
 
 ```ts
-import type { AxConfig } from '@ora-ai/ax';
+import { defaultIsGated, type AxConfig } from '@ora-ai/ax';
 
 const config: AxConfig = {
   // Your production origin — every detected entry's URL is resolved against this. Optional: falls
@@ -170,12 +180,14 @@ const config: AxConfig = {
   // Write .ora/report.json, the machine-readable twin of the CLI output (true, or a custom path).
   // Opt-in (defaults to false); the CLI flag --report[=path] does the same per run.
   report: true,
-  // Glob patterns that must never be published, even if a detector would otherwise infer an entry
-  // for them. `/api/auth/**` and `/api/webhooks/**` are denied by default; list them again here
-  // only if you also want an `allowlist` exception below.
-  denylist: ['/internal/**'],
-  // Re-include a path the denylist would otherwise exclude.
-  allowlist: ['/api/auth/status'],
+  // Mark an artifact (MCP server, OpenAPI/REST surface, or a declared entry) as gated behind auth,
+  // so it is never advertised as an open surface. Replaces the old denylist/allowlist pair — a
+  // single matcher subsumes both: return `false` to re-include a path the floor would gate. A
+  // gated artifact ax can describe (a detected withMcpAuth / OpenAPI securitySchemes) is emitted
+  // with a secret-free `auth` descriptor; one it can't describe is dropped, not published. With no
+  // isGated, a built-in floor gates `/api/auth/**` and `/api/webhooks/**`; supplying isGated
+  // replaces that floor wholesale, so compose `defaultIsGated` to keep it:
+  isGated: (target) => defaultIsGated(target) && target.path !== '/api/auth/status',
   // Hand-declared entries — e.g. docs/skills pointers zero-config detection can't guess at. An
   // `identifier` matching a detected entry overrides/extends it field-by-field (never replaces it
   // outright); anything else is appended as a new entry.

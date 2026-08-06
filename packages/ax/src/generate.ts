@@ -3,7 +3,6 @@ import { join, resolve } from 'node:path';
 
 import { manageAgent404 } from './agent-404.js';
 import { loadAxConfig } from './config.js';
-import { isPathDenied } from './denylist.js';
 import { detectAgentsMd } from './detect-agents-md.js';
 import { detectJsonLd } from './detect-json-ld.js';
 import { detectLlmsTxt } from './detect-llms-txt.js';
@@ -14,6 +13,7 @@ import { detectSitemap } from './detect-sitemap.js';
 import { detectWebMcp } from './detect-webmcp.js';
 import { buildDiscoveryRecommendations } from './discovery.js';
 import { applyEntryOverrides, entryUrlPath } from './entries.js';
+import { resolveGating, type GateTarget } from './gating.js';
 import { loadProjectEnv } from './load-project-env.js';
 import { loadNextConfig } from './next-config.js';
 import {
@@ -30,13 +30,13 @@ import { SPEC_VERSION } from './schema.js';
 import { buildMcpServerCard, type McpServerCard } from './server-card.js';
 import { readSiteMetadata } from './site-metadata.js';
 import { hostnameFromUrl, readSiteUrlFromEnv, resolveSiteUrl } from './site-url.js';
-import type { AiCatalog, CatalogEntry } from './types.js';
+import type { AiCatalog, CatalogEntry, EntryAuth } from './types.js';
 import type { EmissionTarget } from './write.js';
 
 export interface GenerateCatalogOptions {
   /** Project root to read `package.json` / `next.config.*` / `ax.config.*` from. Defaults to `process.cwd()`. */
   cwd?: string;
-  /** Called with non-fatal build-time notices (next.config fallback, denylist drops, ...). */
+  /** Called with non-fatal build-time notices (next.config fallback, gated-surface drops, ...). */
   onWarning?: (message: string) => void;
   /**
    * Called with advisory agent-readiness recommendations (detect-and-recommend:
@@ -82,6 +82,80 @@ function openApiArtifact(cwd: string): ReportArtifact {
   return existsSync(join(cwd, source)) ? { found: true, source } : { found: false };
 }
 
+/** The `isGated` target kind for an entry, inferred from its media type. */
+function gateKindForEntry(entry: CatalogEntry): GateTarget['kind'] {
+  if (entry.type === 'application/mcp-server-card+json') return 'mcp';
+  if (typeof entry.type === 'string' && entry.type.startsWith('application/vnd.oai.openapi+json')) {
+    return 'openapi';
+  }
+  return 'entry';
+}
+
+/**
+ * Applies the resolved `isGated` policy to the entry set. Precision over recall, applied to gating:
+ *   - An entry ax can describe (a detector attached an `auth` descriptor, or the developer declared
+ *     one) is *published with that descriptor* — more discoverable than dropping it. If `isGated`
+ *     contradicts a `none` descriptor (the surface declares itself open but config says gated), the
+ *     explicit config wins: the descriptor is downgraded to `unknown` and the disagreement warned.
+ *   - An entry ax *can't* describe (no descriptor) that `isGated` marks gated is dropped — never
+ *     advertised as an open surface. This is the safety net the default floor (`/api/auth/**`,
+ *     `/api/webhooks/**`) relies on.
+ *   - Everything else is published unchanged. `isGated` is never consulted to assert "open": an
+ *     entry it returns `false` for just keeps whatever descriptor it already had (usually none).
+ * Entries with no URL path (spec allows `data`-only) have nothing to match, so they pass through.
+ */
+function applyGating(
+  entries: readonly CatalogEntry[],
+  isGated: (target: GateTarget) => boolean,
+  warn: (message: string) => void,
+): CatalogEntry[] {
+  const kept: CatalogEntry[] = [];
+
+  for (const entry of entries) {
+    const path = entryUrlPath(entry);
+    const derived: EntryAuth | undefined = entry.auth;
+
+    if (path === undefined) {
+      kept.push(entry);
+      continue;
+    }
+
+    const target: GateTarget = {
+      kind: gateKindForEntry(entry),
+      path,
+      ...(Array.isArray(entry.capabilities) ? { tools: entry.capabilities as string[] } : {}),
+    };
+    const gated = isGated(target);
+
+    if (derived !== undefined) {
+      if (gated && derived.status === 'none') {
+        warn(
+          `isGated marks "${entry.identifier}" (${path}) as gated, but its own declaration shows ` +
+            'no auth — emitting auth.status "unknown". Declare the scheme (OpenAPI ' +
+            'components.securitySchemes) so agents know how to authenticate.',
+        );
+        kept.push({ ...entry, auth: { status: 'unknown' } });
+      } else {
+        kept.push(entry);
+      }
+      continue;
+    }
+
+    if (gated) {
+      warn(
+        `isGated excluded entry "${entry.identifier}" (${path}) — it is gated but ax can't derive ` +
+          'an auth descriptor for it, so it is not published as an open surface. Declare it in ' +
+          'ax.config "entries" with an "auth" descriptor to list it as gated instead.',
+      );
+      continue;
+    }
+
+    kept.push(entry);
+  }
+
+  return kept;
+}
+
 /**
  * Next steps for checks a scaffold has *started* but can't finish. Both cases are still `actionable`
  * — a starter nobody has filled in and a component nobody imports publish nothing — but "the file
@@ -114,8 +188,8 @@ function oraCheckNotes(scaffolds: {
 
 /**
  * Builds the catalog: site-level `host` metadata, zero-config artifact detection (MCP servers,
- * `public/openapi.json`, `llms.txt`), plus config-declared entries (overrides/extends), all
- * filtered through the denylist/allowlist.
+ * `public/openapi.json`, `llms.txt`), plus config-declared entries (overrides/extends), all run
+ * through the `isGated` policy (auth descriptor or drop — see `applyGating`).
  *
  * Loading `ax.config.*` can throw `AxConfigError` (invalid config — fails loudly, by design);
  * loading `next.config.*` never throws (warns and falls back instead). Every detector is
@@ -215,19 +289,10 @@ export async function generateCatalog(
 
   // Declaring entries in config is expected, not noteworthy — the per-entry notes
   // (`applyEntryOverrides().notes`) are meant for a build summary rather than surfaced as warnings
-  // here. A denylist *exclusion*, below, is worth warning about: an inferred or config-declared
-  // entry that then got dropped.
+  // here. A gating decision, below, is worth warning about: a gated surface either carries an auth
+  // descriptor or is dropped, and both are worth recording in the build output/report.
   const { entries: overridden } = applyEntryOverrides(inferredEntries, config.entries);
-
-  const entries = overridden.filter((entry) => {
-    const path = entryUrlPath(entry);
-    if (path === undefined) return true;
-    if (isPathDenied(path, config.denylist, config.allowlist)) {
-      warn(`denylist excluded entry "${entry.identifier}" (${path})`);
-      return false;
-    }
-    return true;
-  });
+  const entries = applyGating(overridden, resolveGating(config.isGated), warn);
 
   // Detect-and-recommend for the discovery/access artifacts that affect agent-readiness. These
   // never add catalog entries and never fail a build — they only surface advisory recommendations.

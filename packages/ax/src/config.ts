@@ -2,7 +2,7 @@ import { basename } from 'node:path';
 
 import { createJiti } from 'jiti';
 
-import { DEFAULT_DENYLIST, type AxConfig, type ResolvedAxConfig } from './config-schema.js';
+import type { AxConfig, ResolvedAxConfig } from './config-schema.js';
 import { findConfigFile } from './find-config-file.js';
 import { formatConfigErrors, validateAxConfig } from './validate-config.js';
 
@@ -114,8 +114,9 @@ function withDefaults(config: AxConfig): ResolvedAxConfig {
     scaffoldAgent404: config.scaffoldAgent404 ?? false,
     scaffoldRobots: config.scaffoldRobots ?? false,
     scaffoldJsonLd: config.scaffoldJsonLd ?? false,
-    denylist: config.denylist ?? [...DEFAULT_DENYLIST],
-    allowlist: config.allowlist ?? [],
+    // `isGated` stays a possibly-undefined function (resolveGating supplies the built-in floor when
+    // it's absent) — there is no data default to fill in here, unlike the other fields.
+    ...(config.isGated !== undefined ? { isGated: config.isGated } : {}),
     report: config.report ?? false,
     entries: config.entries ?? [],
   };

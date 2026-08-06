@@ -1,13 +1,22 @@
 import type { AxConfig } from '@ora-ai/ax';
 
-// This is the fixture that documents-and-tests the Phase 2.1 config surface. Until zero-config
-// artifact detection lands (Phase 2.2) there are no *inferred* entries to override, so here every
-// entry is config-declared; the same `identifier`-matching merge will layer these over inferred
-// entries once 2.2 exists.
+// This is the fixture that documents-and-tests the config surface. Until zero-config artifact
+// detection lands there are no *inferred* entries to override, so here every entry is
+// config-declared; the same `identifier`-matching merge layers these over inferred entries.
 const config: AxConfig = {
-  // Re-include one route that the default denylist (`/api/auth/**`) would otherwise exclude —
-  // this app deliberately publishes its public auth-status endpoint.
-  allowlist: ['/api/auth/status'],
+  // `isGated` supersedes the old denylist/allowlist pair. Supplying it replaces the built-in floor
+  // wholesale, so this restates the floor (the built-in `defaultIsGated` gates `/api/auth/**` and
+  // `/api/webhooks/**`) and then re-includes this app's one public auth endpoint by returning
+  // false for it — the job the old allowlist did. A gated entry ax can't describe (a plain
+  // text/html pointer has no derivable auth descriptor) is dropped rather than published.
+  //
+  // The floor is inlined here rather than composed from the exported `defaultIsGated`: this file is
+  // evaluated for real (via jiti) by the test suite, which runs against src without building the
+  // package's dist, so importing a *runtime* value from `@ora-ai/ax` would fail to resolve. The
+  // README shows the `defaultIsGated`-composition form for consumers of the published package.
+  isGated: ({ path }) =>
+    (path.startsWith('/api/auth/') || path.startsWith('/api/webhooks/')) &&
+    path !== '/api/auth/status',
   entries: [
     // Ordinary docs/skills pointers — absolute URLs, so they're spec-valid on their own (the
     // catalog schema requires `url` to be an absolute URI). Identifiers follow the ARD URN format
@@ -25,16 +34,17 @@ const config: AxConfig = {
       displayName: 'Agent skills',
       url: 'https://github.com/example/agent-skills',
     },
-    // Under the default denylist (`/api/auth/**`) but re-included by the `allowlist` above, so it
-    // survives into the catalog.
+    // Gated by the default floor but re-included by the `isGated` matcher above, so it survives
+    // into the catalog.
     {
       identifier: 'urn:air:example.com:auth-status',
       type: 'text/html',
       displayName: 'Auth status endpoint',
       url: 'https://example.com/api/auth/status',
     },
-    // Under the default denylist and NOT allowlisted — the safety net drops it from the catalog,
-    // even though it's declared here. Demonstrates "precision over recall".
+    // Gated by the default floor and NOT re-included — ax can't describe its auth, so the safety
+    // net drops it from the catalog even though it's declared here. Demonstrates "precision over
+    // recall".
     {
       identifier: 'urn:air:example.com:auth-internal',
       type: 'text/html',
