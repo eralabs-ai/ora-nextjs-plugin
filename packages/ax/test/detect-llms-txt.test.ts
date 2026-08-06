@@ -329,8 +329,14 @@ describe('detectLlmsTxt — scaffolding', () => {
 describe('detectLlmsTxt — Pages Router', () => {
   it('scaffolds a static public/llms.txt (not an app route) for a Pages Router app', () => {
     mkdirSync(join(dir, 'pages'), { recursive: true });
-    writeFileSync(join(dir, 'pages', 'index.tsx'), 'export default function H() { return null; }\n');
-    writeFileSync(join(dir, 'pages', 'about.tsx'), 'export default function A() { return null; }\n');
+    writeFileSync(
+      join(dir, 'pages', 'index.tsx'),
+      'export default function H() { return null; }\n',
+    );
+    writeFileSync(
+      join(dir, 'pages', 'about.tsx'),
+      'export default function A() { return null; }\n',
+    );
 
     const result = detectLlmsTxt({
       cwd: dir,
@@ -355,7 +361,10 @@ describe('detectLlmsTxt — Pages Router', () => {
 
   it('references an existing static public/llms.txt on a Pages Router app without scaffolding', () => {
     mkdirSync(join(dir, 'pages'), { recursive: true });
-    writeFileSync(join(dir, 'pages', 'index.tsx'), 'export default function H() { return null; }\n');
+    writeFileSync(
+      join(dir, 'pages', 'index.tsx'),
+      'export default function H() { return null; }\n',
+    );
     mkdirSync(join(dir, 'public'), { recursive: true });
     writeFileSync(join(dir, 'public', 'llms.txt'), '# hello\n', 'utf8');
 

@@ -122,7 +122,12 @@ describe('scaffoldOrganizationJsonLd', () => {
   it('writes a .jsx component when the project has no tsconfig.json', () => {
     rmSync(join(dir, 'tsconfig.json'));
 
-    const result = scaffoldOrganizationJsonLd({ cwd: dir, router: buildRouterModel(dir), site, warn });
+    const result = scaffoldOrganizationJsonLd({
+      cwd: dir,
+      router: buildRouterModel(dir),
+      site,
+      warn,
+    });
 
     expect(result.path).toBe(componentPath('jsx'));
     expect(existsSync(componentPath())).toBe(false);
@@ -150,7 +155,12 @@ describe('scaffoldOrganizationJsonLd', () => {
 
   it('skips (rather than throws) when there is no router directory', () => {
     rmSync(join(dir, 'app'), { recursive: true, force: true });
-    const result = scaffoldOrganizationJsonLd({ cwd: dir, router: buildRouterModel(dir), site, warn });
+    const result = scaffoldOrganizationJsonLd({
+      cwd: dir,
+      router: buildRouterModel(dir),
+      site,
+      warn,
+    });
     expect(result).toMatchObject({ action: 'skipped' });
     expect(result.reason).toContain('Router');
   });

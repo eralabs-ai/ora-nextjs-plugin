@@ -91,10 +91,7 @@ export interface PagesApiEndpoint {
  * mount. Any other dynamic (`[id]`) or private (`_`) segment makes the URL ambiguous, so this returns
  * undefined rather than guess. `pages/api/mcp.ts` → `/api/mcp`; `pages/api/[transport].ts` → `/api/mcp`.
  */
-function resolvePagesApiPathname(
-  absolutePath: string,
-  pagesDir: string,
-): string | undefined {
+function resolvePagesApiPathname(absolutePath: string, pagesDir: string): string | undefined {
   const rel = relative(pagesDir, absolutePath);
   const resolved: string[] = [];
   for (const segment of routeSegments(rel)) {

@@ -22,7 +22,10 @@ afterEach(() => {
 });
 
 /** Writes a file (creating parent dirs) under the temp project and returns its absolute path. */
-function write(relPath: string, contents = 'export default function P() { return null; }\n'): string {
+function write(
+  relPath: string,
+  contents = 'export default function P() { return null; }\n',
+): string {
   const abs = join(dir, relPath);
   mkdirSync(join(abs, '..'), { recursive: true });
   writeFileSync(abs, contents, 'utf8');

@@ -16,7 +16,10 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-function write(relPath: string, contents = 'export default function C() { return null; }\n'): string {
+function write(
+  relPath: string,
+  contents = 'export default function C() { return null; }\n',
+): string {
   const abs = join(dir, relPath);
   mkdirSync(join(abs, '..'), { recursive: true });
   writeFileSync(abs, contents, 'utf8');
@@ -88,9 +91,9 @@ describe('buildRouterModel — listApiEndpoints', () => {
     write('pages/api/[transport].ts');
 
     const endpoints = buildRouterModel(dir).listApiEndpoints();
-    const summary = endpoints.map((e) => ({ url: e.url, router: e.router })).sort((a, b) =>
-      (a.url ?? '').localeCompare(b.url ?? ''),
-    );
+    const summary = endpoints
+      .map((e) => ({ url: e.url, router: e.router }))
+      .sort((a, b) => (a.url ?? '').localeCompare(b.url ?? ''));
     expect(summary).toEqual([
       { url: '/api/mcp', router: 'pages' },
       { url: '/mcp', router: 'app' },

@@ -147,9 +147,7 @@ function findRenderedJsonLd(cwd: string, router: RouterModel): string | undefine
   // App Router `layout`/`page` files, plus any Pages Router source file (`_app`/`_document`/pages) —
   // either can carry the block or import the scaffolded component.
   const files = [
-    ...(router.appDir
-      ? walkFiles(router.appDir, (name) => LAYOUT_PAGE_FILE_NAMES.has(name))
-      : []),
+    ...(router.appDir ? walkFiles(router.appDir, (name) => LAYOUT_PAGE_FILE_NAMES.has(name)) : []),
     ...(router.pagesDir
       ? walkFiles(router.pagesDir, (name) => PAGES_SOURCE_FILE_RE.test(name))
       : []),
