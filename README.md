@@ -17,16 +17,15 @@ npm install --save-dev @ora-ai/ax
 }
 ```
 
-The **first** time `ax` publishes a catalog it prints the surface it's about to expose and asks for
-confirmation (a y/N prompt). The catalog is written to `public/.well-known/ai-catalog.json` — a
-committed directory in a normal Next.js app — so the recommended flow is: build once locally,
-review the prompt, and **commit the generated catalog**. Every build after that (local _and_ CI)
-sees the file already there and runs unattended, no flag needed.
+**Try it locally first.** Run your build once on your machine and `ax` shows you what agents can
+already do with your site, what it generated for you, and a short, ranked list of quick wins to make
+your site more agent-ready — each with the exact next step to take. Like what you see? Commit the
+generated catalog (it lives in `public/`, right where Next.js serves it) and every build after that
+just works.
 
-Two flags for the rest: **`--yes`** skips the prompt (and is **required** in CI / non-interactive
-shells, where `ax` otherwise refuses and exits non-zero) — reach for it only if you deliberately
-_don't_ commit the catalog and regenerate it fresh in CI instead. **`--dry-run`** prints the
-exposure summary and writes nothing.
+> On the first publish, `ax` shows the surface it's about to expose and asks a quick y/N — so nothing
+> goes public by surprise. Automating in CI? Add `--yes` to run unattended, or `--dry-run` to preview
+> anytime without writing.
 
 One run — offline, deterministic, about a second — then:
 
