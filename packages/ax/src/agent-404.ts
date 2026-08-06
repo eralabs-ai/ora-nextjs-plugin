@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
-import { findAppDir, listStaticPageRoutes } from './app-dir.js';
 import { catalogServedPath } from './discovery.js';
+import { buildRouterModel, type RouterModel } from './router-model.js';
 
 // Agent-aware 404. When an AI agent fetches a URL that doesn't exist, a default 404 page is a
 // dead end: the agent either gives up or hallucinates a next step. Mintlify's crawl benchmark
@@ -21,6 +21,10 @@ import { catalogServedPath } from './discovery.js';
 // The scaffolded page explains to agents why the 404 happened (the URL doesn't exist — don't
 // retry), and how to continue (the site's discovery artifacts + real routes), both as visible
 // text an agent reading HTML will parse and as a schema.org ItemList in JSON-LD.
+//
+// The 404 convention differs by router: the App Router's is `app/not-found.*`, the Pages Router's
+// is `pages/404.*`. The component and its regenerated data module are otherwise identical, so only
+// the target directory and file name change — resolved once from the primary router.
 
 /** Cap on routes embedded in the data module — a navigation aid, not a sitemap replacement. */
 const MAX_ROUTES = 50;
@@ -28,10 +32,40 @@ const MAX_ROUTES = 50;
 /** Base name (sans extension) of the regenerated data module the scaffolded page imports. */
 const DATA_MODULE_BASE = 'not-found-agent-data';
 
-const NOT_FOUND_FILE_NAMES = ['not-found.tsx', 'not-found.jsx', 'not-found.js'];
-
 /** Signals that an existing not-found page already points agents somewhere useful. */
 const AGENT_SIGNPOST_RE = /llms\.txt|ai-catalog|agentGuidance/;
+
+/** Where the 404 page lives and what it's named, per router convention. */
+interface NotFoundTarget {
+  /** The router directory the 404 page and its data module live in. */
+  dir: string;
+  /** Existing 404-page file names to detect, across the extensions that render one. */
+  detectNames: string[];
+  /** Base name (sans extension) of the page ax scaffolds. */
+  scaffoldBase: string;
+}
+
+/**
+ * The 404 target for the primary router: `app/not-found.*` for an App Router app, `pages/404.*` for
+ * a Pages Router app. Undefined when the project has neither router.
+ */
+function notFoundTarget(router: RouterModel): NotFoundTarget | undefined {
+  if (router.primary === 'app' && router.appDir) {
+    return {
+      dir: router.appDir,
+      detectNames: ['not-found.tsx', 'not-found.jsx', 'not-found.js'],
+      scaffoldBase: 'not-found',
+    };
+  }
+  if (router.primary === 'pages' && router.pagesDir) {
+    return {
+      dir: router.pagesDir,
+      detectNames: ['404.tsx', '404.jsx', '404.js'],
+      scaffoldBase: '404',
+    };
+  }
+  return undefined;
+}
 
 export interface Agent404Options {
   cwd: string;
@@ -45,6 +79,8 @@ export interface Agent404Options {
   sitemapFound: boolean;
   warn: (message: string) => void;
   recommend: (message: string) => void;
+  /** The shared router model. Built from `cwd` when omitted, so the detector runs standalone. */
+  router?: RouterModel;
 }
 
 export interface Agent404Result {
@@ -68,12 +104,13 @@ export interface Agent404Result {
  */
 export function manageAgent404(options: Agent404Options): Agent404Result {
   const { cwd, warn, recommend } = options;
-  const appDir = findAppDir(cwd);
-  if (!appDir) return { notFoundPresent: false, agentAware: false };
+  const router = options.router ?? buildRouterModel(cwd);
+  const target = notFoundTarget(router);
+  if (!target) return { notFoundPresent: false, agentAware: false };
 
-  const notFoundFile = NOT_FOUND_FILE_NAMES.map((name) => join(appDir, name)).find((path) =>
-    existsSync(path),
-  );
+  const notFoundFile = target.detectNames
+    .map((name) => join(target.dir, name))
+    .find((path) => existsSync(path));
 
   if (notFoundFile) {
     const source = relative(cwd, notFoundFile);
@@ -84,7 +121,7 @@ export function manageAgent404(options: Agent404Options): Agent404Result {
       // when it imports our data module and scaffolding is (still) opted in.
       const dataModulePath =
         options.scaffold && fileImportsDataModule(notFoundFile)
-          ? writeDataModule(appDir, options)
+          ? writeDataModule(target.dir, options, router)
           : undefined;
       return {
         notFoundPresent: true,
@@ -105,8 +142,9 @@ export function manageAgent404(options: Agent404Options): Agent404Result {
   }
 
   if (!options.scaffold) {
+    const conventionPath = `${relative(cwd, target.dir)}/${target.scaffoldBase}.tsx`;
     recommend(
-      'No app/not-found.tsx found — agents that hit a missing URL get Next.js’s bare default 404, ' +
+      `No ${conventionPath} found — agents that hit a missing URL get Next.js’s bare default 404, ` +
         'a dead end that makes them give up or guess. Add one that tells agents why the 404 ' +
         'happened and how to continue (links to llms.txt, the ai-catalog, and your real routes), ' +
         'or set scaffoldAgent404: true in ax.config to have an agent-aware page (plus a ' +
@@ -115,10 +153,10 @@ export function manageAgent404(options: Agent404Options): Agent404Result {
     return { notFoundPresent: false, agentAware: false };
   }
 
-  const scaffolded = scaffoldNotFound(cwd, appDir, options);
+  const scaffolded = scaffoldNotFound(cwd, target, options);
   if (!scaffolded) return { notFoundPresent: false, agentAware: false };
 
-  const dataModulePath = writeDataModule(appDir, options);
+  const dataModulePath = writeDataModule(target.dir, options, router);
   warn(
     `Scaffolded an agent-aware 404 page at ${relative(cwd, scaffolded)} — edit it freely (it's ` +
       `yours; ax never overwrites it). Its imported ${DATA_MODULE_BASE} module is ` +
@@ -171,15 +209,19 @@ function discoveryLinks(options: Agent404Options): Array<{ url: string; purpose:
 }
 
 /**
- * Regenerates the data module (`app/not-found-agent-data.{ts,js}`) with the current static route
- * list and discovery links. Generated output, clearly marked, rewritten every run — the same
- * contract as the `emit: 'route'` handlers.
+ * Regenerates the data module (`not-found-agent-data.{ts,js}`, beside the 404 page) with the current
+ * static route list and discovery links. Generated output, clearly marked, rewritten every run — the
+ * same contract as the `emit: 'route'` handlers. Routes span both routers (`router.listPageRoutes`).
  */
-function writeDataModule(appDir: string, options: Agent404Options): string | undefined {
+function writeDataModule(
+  dir: string,
+  options: Agent404Options,
+  router: RouterModel,
+): string | undefined {
   const useTypeScript = existsSync(join(options.cwd, 'tsconfig.json'));
-  const filePath = join(appDir, `${DATA_MODULE_BASE}.${useTypeScript ? 'ts' : 'js'}`);
+  const filePath = join(dir, `${DATA_MODULE_BASE}.${useTypeScript ? 'ts' : 'js'}`);
 
-  const routes = listStaticPageRoutes(appDir).slice(0, MAX_ROUTES);
+  const routes = router.listPageRoutes().slice(0, MAX_ROUTES);
   const payload = { discovery: discoveryLinks(options), routes };
 
   const source =
@@ -198,18 +240,22 @@ function writeDataModule(appDir: string, options: Agent404Options): string | und
   return filePath;
 }
 
-/** Scaffolds `app/not-found.{tsx,jsx}` once. Never overwrites; warns instead of throwing. */
+/**
+ * Scaffolds the 404 page once into the primary router (`app/not-found.{tsx,jsx}` or
+ * `pages/404.{tsx,jsx}`). Never overwrites; warns instead of throwing. The component source is
+ * identical across routers — both default-export a React component that imports the data module.
+ */
 function scaffoldNotFound(
   cwd: string,
-  appDir: string,
+  target: NotFoundTarget,
   options: Agent404Options,
 ): string | undefined {
   const useTypeScript = existsSync(join(cwd, 'tsconfig.json'));
-  const filePath = join(appDir, useTypeScript ? 'not-found.tsx' : 'not-found.jsx');
+  const filePath = join(target.dir, `${target.scaffoldBase}.${useTypeScript ? 'tsx' : 'jsx'}`);
 
   try {
     if (existsSync(filePath)) return undefined;
-    mkdirSync(appDir, { recursive: true });
+    mkdirSync(target.dir, { recursive: true });
     writeFileSync(filePath, notFoundSource(), 'utf8');
   } catch (err) {
     options.warn(

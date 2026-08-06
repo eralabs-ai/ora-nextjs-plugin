@@ -40,7 +40,7 @@ by this plugin, and Ora's registry successfully crawls and indexes them.
   bundler-agnostic, keeps heavy work (subprocess evaluation, AST scans) out of the dev server,
   and gives CI/dry-run/review flows a natural entry point. The CLI reads the user's
   `next.config.*` itself for the values it needs (`basePath`, `distDir`, `output`), so nothing is
-  duplicated in `ard.config.ts` (the `next-sitemap` model).
+  duplicated in `ax.config.ts` (the `next-sitemap` model).
 
 ---
 
@@ -54,7 +54,7 @@ way — become discoverable to agents, generating an ai-catalog from what the ap
 - MCP servers configured the Next.js way (`mcp-handler`) → `application/mcp-server-card+json`.
 - A static `public/openapi.json` → `application/vnd.oai.openapi+json`.
 - A configurable way for the developer to declare where their **docs** and **skills** live (URLs in
-  `ard.config`) → `text/html` / `application/ai-skill+md` entries.
+  `ax.config`) → `text/html` / `application/ai-skill+md` entries.
 - **`llms.txt`** served the Next.js way — reference an existing one (a route handler at
   `app/llms.txt/route.ts`, or a static `public/llms.txt`), and scaffold a starter route handler when
   absent → `text/markdown`. (Idiomatic Next.js pattern; cheap.)
@@ -114,7 +114,7 @@ permissive schema):
 `representativeQueries`, and `trustManifest` are standard optional fields, not extensions.
 `representativeQueries` in particular is *the* semantic-search signal — registries build vector
 embeddings from it, and the schema enforces 2–5 items — so letting developers declare it per entry
-(supported via `ard.config` `entries`) directly improves discoverability, not just Ora's score.
+(supported via `ax.config` `entries`) directly improves discoverability, not just Ora's score.
 Only `auth` and entry-level `provenance` are genuine extensions (legal: entries allow unknown
 keys; the manifest root and `host` do **not** — the ARD schema closes them). The plugin populates
 the self-declarable ones (`capabilities` for MCP zero-config; `representativeQueries`/`auth` via
@@ -235,7 +235,9 @@ Agent-Card example does *not* pass it, so both layers stay pinned):
 
 ### 0.3 Decide the supported matrix
 
-- [ ] Next.js: App Router only for v1 (Pages Router explicitly out of scope — confirm with Ora).
+- [x] Next.js: App Router **and** Pages Router (and both at once). Detection and scaffolding run
+      through a single `RouterModel` port (`router-model.ts`) composing an App adapter (`app-dir.ts`)
+      and a Pages adapter (`pages-dir.ts`); output artifacts stay router-agnostic under `public/`.
 - [ ] Pin supported Next.js minors (e.g. 14.x, 15.x, canary-as-canary) and Node LTS versions.
 - [ ] Decide monorepo (Turborepo) support level for v1: detect-and-warn vs full support.
 - [ ] Write the matrix into README so it's a public contract from day one.
@@ -270,7 +272,7 @@ CommonJS `.js` config), `deploy-variants` (`.ts` config) — so the CLI's config
       `application/vnd.oai.openapi+json` entry (the Telnyx shape).
 - [x] `llms-txt` — app serving `/llms.txt` via a route handler (`app/llms.txt/route.ts`,
       `force-static`); detect-and-reference for a `text/markdown` entry.
-- [x] `config-overrides` — app with an `ard.config.ts` declaring entries plus denylist/allowlist
+- [x] `config-overrides` — app with an `ax.config.ts` declaring entries plus denylist/allowlist
       (added Phase 2.1); exercises config loading, config-declared entries, and the
       denylist-with-allowlist-re-inclusion safety net end to end.
 
@@ -325,8 +327,8 @@ Goal: the `next-sitemap`-style production core. Stable regardless of spec churn.
 
 ### 2.1 Config
 
-> **Renamed `ard.config` → `ax.config` (2026-07-27, per Ora's decision).** The bullets below keep
-> their original wording; what shipped is `ax.config.{ts,mts,cts,mjs,js,cjs}`, typed with `AxConfig`
+> **Renamed `ard.config` → `ax.config` (2026-07-27, per Ora's decision).** The bullets below now
+> refer to `ax.config` throughout; what shipped is `ax.config.{ts,mts,cts,mjs,js,cjs}`, typed with `AxConfig`
 > and failing loudly via `AxConfigError`. This supersedes the vendor-neutrality rationale recorded
 > below — the file is now named after the `ax` tool that reads it, so a file committed into a
 > consumer's repo says which tool it configures. A legacy `ard.config.*` still loads, with a
@@ -335,10 +337,12 @@ Goal: the `next-sitemap`-style production core. Stable regardless of spec churn.
 > `loadArdConfig` / `validateArdConfig` / `ardConfigSchema` remain exported as deprecated aliases,
 > so existing imports keep resolving.
 
-- [x] `ard.config.{ts,mts,cts,mjs,js,cjs}` — typed config, validated via JSON Schema through the
-      existing Ajv instance (not Zod — see *decision* below), loaded via the CLI. Named `ard.config`
-      (Agentic Resource Discovery), not after this package or Ora — it's a file committed into the
-      consumer's repo, so it stays vendor-neutral (endgame: upstreaming into Next.js).
+- [x] `ax.config.{ts,mts,cts,mjs,js,cjs}` — typed config, validated via JSON Schema through the
+      existing Ajv instance (not Zod — see *decision* below), loaded via the CLI. (Originally named
+      `ard.config` — "Agentic Resource Discovery", vendor-neutral for eventual upstreaming into
+      Next.js; renamed 2026-07-27 to `ax.config` after the tool that reads it, so a file committed
+      into a consumer's repo names which tool it configures. See the 2.1 rename note above; the
+      legacy `ard.config.*` still loads with a deprecation warning.)
 - [x] Load the user's `next.config.*` (js/mjs/ts) and extract `basePath`, `distDir`, and `output`
       so users never repeat Next settings in plugin config. Handle both object and function-form
       configs; on load failure, warn and fall back to defaults (never crash over their config).
@@ -347,7 +351,7 @@ Goal: the `next-sitemap`-style production core. Stable regardless of spec churn.
 - [x] Test next-config loading against the `deploy-variants` and `monorepo` fixtures.
       (`test/fixtures-integration.test.ts`.)
 - [x] Build-time validation fails loudly with actionable messages on invalid config.
-      (`ArdConfigError`, caught in `cli.ts` and reported without a stack trace.)
+      (`AxConfigError`, caught in `cli.ts` and reported without a stack trace.)
 - [x] Config **overrides/extends** inferred entries; it never silently replaces them.
       (`src/entries.ts` `applyEntryOverrides` — merges by `identifier`, appends otherwise.)
 - [x] Denylist support, with a default-on denylist (`/api/auth/**`, `/api/webhooks/**`); allowlist
@@ -360,7 +364,7 @@ Detect-and-reference is the cheapest, highest-value work — it mirrors exactly 
 already rewards. Zero-config, in rough priority order:
 
 - [x] Emit site-level metadata (name + domain from package.json / config). Domain can
-      now also come from `ard.config`'s new **`siteUrl`** (see below), not just Vercel's env var.
+      now also come from `ax.config`'s new **`siteUrl`** (see below), not just Vercel's env var.
       (**Changed 2026-07-19:** package.json's description is no longer emitted as
       `host.description` — the official ARD schema closes the host object, so that key fails
       conformance. See Phase 0.2.)
@@ -373,7 +377,7 @@ already rewards. Zero-config, in rough priority order:
 - [x] Detect a static **`public/openapi.json`** and reference its URL →
       `application/vnd.oai.openapi+json`. Details in Phase 3. (`src/detect-openapi.ts`.)
 - [x] Emit **docs** and **skills** entries (`text/html` / `application/ai-skill+md`) from URLs the
-      developer **declares in `ard.config`**. Config-driven, not guessed — the developer knows
+      developer **declares in `ax.config`**. Config-driven, not guessed — the developer knows
       where their docs and skills live; the plugin doesn't spider for them. (Already covered by the
       generic `entries` override mechanism from 2.1 — see the `config-overrides` fixture, which
       already declares exactly this shape. No new config surface needed.)
@@ -381,17 +385,28 @@ already rewards. Zero-config, in rough priority order:
       `app/llms.txt/route.ts` (often `dynamic = 'force-static'`) or a static `public/llms.txt` →
       `text/markdown`. Scaffold a starter route handler when absent (v1; cheap, idiomatic).
       (`src/detect-llms-txt.ts`. **Deviation from the plan as written:** scaffolding is **opt-in**
-      via `ard.config`'s `scaffoldLlmsTxt: true`, defaulting to `false` — writing a *second* file
+      via `ax.config`'s `scaffoldLlmsTxt: true`, defaulting to `false` — writing a *second* file
       into a consumer's `app/` directory is a bigger, unsolicited source-tree mutation than the one
       catalog file this plugin exists to produce, and an opt-out default is too easy to miss for a
       build tool meant to run unattended across many sites. This was found empirically: with an
       opt-out default, this repo's own test suite silently scaffolded files into four unrelated
-      fixtures the first time it ran.)
+      fixtures the first time it ran. **Update (2026-07-27):** the scaffold no longer writes a
+      placeholder — it derives real starter content (site name, description, the app's static
+      routes, and the artifacts this build generated), so the file is useful the moment it lands.)
 - [x] Do **not** synthesize an OpenAPI doc from bare route handlers; reference only a doc the app
       actually produces. Most route handlers are internal BFF endpoints and must not be exposed.
 - [x] Do **not** emit GraphQL entries — out of scope (see *Scope*).
+- [x] **Detector-precision prepass (`src/scrub-source.ts`, added 2026-07-27).** The textual
+      detectors (`detect-mcp`, `detect-webmcp`) match API call patterns with regexes, which can't
+      tell a real call from a *mention* in a comment or a template-literal body — those mentions
+      were reaching the output as phantom tools/endpoints (a precision loss). `scrubSource` blanks
+      `//` and `/* */` comments and template-literal contents while preserving offsets and line
+      numbers (so match indices are unchanged) and deliberately leaves ordinary `'…'`/`"…"` strings
+      intact (detectors legitimately read tool names / JSX attribute values from them, guarded
+      per-line). `registerTool`/`provideContext` now also require a non-empty argument list.
+      Regression-tested against the cases that previously misfired.
 
-**New config surface added to support the above:** `ard.config`'s `siteUrl` — an explicit absolute
+**New config surface added to support the above:** `ax.config`'s `siteUrl` — an explicit absolute
 origin (e.g. `https://example.com`). The catalog schema's `url` fields require an absolute URI
 (`format: uri`), so every detector above needs a known site origin to build one; without `siteUrl`
 (and without Vercel's build-time `VERCEL_PROJECT_PRODUCTION_URL`), a detector still runs but skips
@@ -409,7 +424,7 @@ Precision over recall, applied to the plugin's own output, not just to what it d
 
 - [x] Static file into `public/.well-known/` (default). (`src/write.ts` — the Phase 1 target.)
 - [x] Alternative: generate a route handler (`app/.well-known/ai-catalog.json/route.{ts,js}`) for
-      `basePath`/proxy setups — also the future path to dynamic catalogs. Opt in via `ard.config`'s
+      `basePath`/proxy setups — also the future path to dynamic catalogs. Opt in via `ax.config`'s
       new **`emit: 'route'`** (default `'static'`); the validated catalog is embedded as a
       `force-static` response. (`src/write.ts` `writeRouteHandler`.) **Finding:** a route handler is
       *also* subject to `basePath`, so it is not itself the `basePath` fix — the §6.1 discovery
@@ -426,11 +441,18 @@ Precision over recall, applied to the plugin's own output, not just to what it d
       existing `public/robots.txt` or `app/robots.ts`; recommend Allow rules scoped to specific
       user-agents, **never `User-agent: *`**, plus the `Sitemap:` / `Agentmap:` pointers; when absent,
       recommend adding one. Never unblocks scrapers on the owner's behalf. (`src/detect-robots.ts`.)
-      **Deviation:** recommend-only for now — no auto-write. The exact `Allow` token depends on Ora's
-      crawler user-agent (open question #17, still pending), so writing a *guessed* policy would
-      violate precision-over-recall; the opt-in auto-write is deferred until #17 resolves. Also noted:
+      Also noted:
       `MetadataRoute.Robots` (`app/robots.ts`) has no field for the `Agentmap:` pointer, so that line
       is recommended for a static `public/robots.txt`.
+      **Update (2026-07-27): opt-in auto-write now ships (`scaffoldRobots: true`, default `false`),
+      `src/scaffold-robots.ts`.** It is deliberately narrow: it only writes the two machine-readable
+      pointers ax is uniquely placed to know — `Sitemap:` for a sitemap it actually detected and
+      `Agentmap:` for the catalog it just generated — plus `Allow` blocks for reputable AI crawlers.
+      An existing `public/robots.txt` is *appended to* (a marked block, only the missing lines,
+      idempotent on re-run), never rewritten; an `app/robots.ts` route handler is never touched (it
+      owns the policy in code). It never *blocks* a crawler on the owner's behalf — that policy call
+      is shown commented-out. The still-pending crawler user-agent (open question #17) only affects
+      which specific agents to name in the `Allow` block, not the safe pointers-and-allow shape.
 - [x] **sitemap.xml — detect + recommend (scored by Ora: `sitemap`).** Detect `app/sitemap.ts` /
       `public/sitemap.xml`; when absent, recommend `next-sitemap` (or `app/sitemap.ts`) and reference
       it from robots.txt. **Never reimplements** — a solved, idiomatic Next.js concern.
@@ -491,9 +513,14 @@ authors judgment content. **This is the immediate work.**
       recommend adding an `Organization` block with `sameAs` when absent. **Detect-and-recommend only:**
       JSON-LD lives in rendered HTML (`<script type="application/ld+json">` in the layout), not a file
       the plugin emits, and the scoring fields (`sameAs`, address, logo, extra types) are
-      external/judgment → the companion skill authors them (Phase 6). An opt-in scaffold of a minimal
-      `Organization` component (name/url/description from `package.json`/`siteUrl`, empty `sameAs` +
-      TODO) is possible but low-priority — the weakest fit, since the valuable fields aren't derivable.
+      external/judgment → the companion skill authors them (Phase 6).
+      **Update (2026-07-27): the opt-in scaffold now ships (`scaffoldJsonLd: true`, default `false`),
+      `src/scaffold-json-ld.ts`.** It writes an `Organization` component **once** (name/url/description
+      from `package.json`/`siteUrl`, `sameAs` left empty with a TODO — those links live outside the
+      repo, so nothing at build time can derive them). ax deliberately does **not** wire the component
+      into `app/layout.tsx` — editing the file every page renders through, behind the owner's back, is
+      not a postbuild step's call — so the CLI (and the build report) print the exact import + element
+      to add instead.
 - [x] **MCP — generate `/.well-known/mcp/server-card.json`.** Empirical finding (2026-07-22 Ora scan of
       a deployed `mcp-handler` server): a working MCP server moved the score **0 points** because Ora
       discovers MCP via the well-known **server card**, not the ARD catalog entry — `mcp-server-card`
@@ -552,7 +579,7 @@ and how Clerk actually gates routes.
       "open" from the absence of a signal** (auth may sit in middleware, a reverse proxy, a WAF, or
       Vercel Deployment Protection — none statically visible).
 - [ ] **Escape hatch:** optional `isGated?: (target: { kind: 'mcp' | 'openapi' | 'entry'; path: string;
-      tools?: string[] }) => boolean` in `ard.config` for infra auth the plugin can't detect. Boolean,
+      tools?: string[] }) => boolean` in `ax.config` for infra auth the plugin can't detect. Boolean,
       whole-artifact for v1. **Not** built on reusing Clerk's `createRouteMatcher` — that API is
       deprecated and has a bypass CVE (GHSA-vqx2-fgx2-5wq9), and Clerk differentiates MCP-vs-API by auth
       *mechanism* (OAuth bearer vs session cookie), not by a shared path matcher.
@@ -680,7 +707,7 @@ remote-MCP transport rather than the browser API — both reported upstream, see
 
 Two additions shipped alongside Phase 4, both following existing conventions:
 
-- [x] **Agent-aware 404** (`src/agent-404.ts`, `ard.config` `scaffoldAgent404`, default `false`).
+- [x] **Agent-aware 404** (`src/agent-404.ts`, `ax.config` `scaffoldAgent404`, default `false`).
       Detect `app/not-found.*`; recommend agent signposts when absent/bare. Opted in: scaffold an
       agent-aware `not-found.tsx` **once** (user-owned, never overwritten) importing a data module
       (`app/not-found-agent-data.*`) **regenerated every build** with the static route list
@@ -690,11 +717,86 @@ Two additions shipped alongside Phase 4, both following existing conventions:
       agent 404 dead-ends. Middleware-based content negotiation (markdown 404s for
       `Accept: text/markdown` / `Signature-Agent` requesters) is a documented follow-up — writing
       into a user's singleton `middleware.ts` is too invasive to scaffold today.
-- [x] **Machine-readable build report** (`src/report.ts`; `--report[=path]` / `ard.config`
+- [x] **Machine-readable build report** (`src/report.ts`; `--report[=path]` / `ax.config`
       `report`, default off; default path `.ora/report.json`). The structured twin of the CLI
       output: entries + written paths, MCP mounts + server card, WebMCP sites, per-artifact
       presence, agent-404 status, warnings/recommendations verbatim. Turns the plugin's stdout
       recommendations into something a coding agent consumes directly.
+      **Update (2026-07-27): report v2 makes it a handoff, not just a log (`src/ora-checks.ts`).**
+      A new `ora` section maps every artifact this build found or generated onto Ora's named
+      agent-readiness checks (each `addressed` or `actionable`, with a `note` when a scaffold landed
+      but nothing imports it yet), and carries static pointers to Ora's skill (MCP + document URL)
+      and scan/score API. A `scaffolds` section records what each opt-in scaffold did this run. The
+      mapping (`ORA_CHECK_MAP`) is intentionally conservative — an artifact is listed against a
+      check only when the check keys on the artifact's *presence*; content-judgment and
+      no-signal checks are absent rather than guessed. The CLI prints a matching handoff footer.
+      **No network calls at build time** — every Ora reference is a static string, so the loop
+      (read report → work the `actionable` checks → re-scan the deployed site) stays deterministic
+      and offline.
+
+---
+
+## The scaffold-and-handoff shift (added 2026-07-27 — reframes the plugin's role)
+
+Three commits on 2026-07-27 (`@ora-ai/ax` rename + WebMCP/404/report, then the config rename +
+scaffolds + Ora handoff) moved ax past its original "detect existing artifacts and emit one catalog"
+charter into a **generate → detect → scaffold → hand off** tool. None of it loosens *precision over
+recall* — the discipline is instead applied to a wider surface. This section is the connective tissue
+for the per-phase bullets above (2.2 llms.txt + detector prepass, 2.4 robots, 2.7 JSON-LD, 4.5 report).
+
+**1. Detector precision hardened at the source (`src/scrub-source.ts`).** The textual detectors trade
+an AST for cheap, predictable regexes, but a regex can't distinguish a real `createMcpHandler(` /
+`.tool('x')` / `document.modelContext.registerTool(...)` call from a *mention* of the same text inside
+a `//` comment, a JSDoc block, or an HTML string built with backticks. Those mentions were reaching
+the output as **phantom tools and endpoints** — a precision loss, exactly the failure mode the project
+exists to prevent. `scrubSource` runs as an offset-preserving prepass that blanks comment bodies (both
+delimiter styles) and template-literal *contents* (backticks and `${…}` interpolations kept, so a real
+call inside an interpolation is still seen), leaving ordinary `'…'`/`"…"` strings intact because the
+detectors legitimately read tool names and JSX `toolname` values out of those (guarded per-line by the
+callers' own quote check). Because indices and line numbers survive scrubbing, every downstream match
+position is unchanged. Complementary tightening: `registerTool`/`provideContext` now require a
+non-empty argument list before they count. It is a lexer-shaped heuristic, not a parser (documented
+limits: deeply nested unbalanced template/interpolation and misjudged regex literals can desync until
+end-of-line) — an accepted trade for staying AST-free.
+
+**2. From recommend-only to opt-in scaffolding.** ax already *recommended* the missing discovery
+artifacts; it now also *writes the mechanical parts* of them, behind explicit opt-in flags. Four
+scaffolds share one safety contract — **default `false`** (an unattended build never mutates a
+consumer's source tree unasked), **write-once or append-only** (never overwrite, never reorder), and
+**derive only what's mechanical, leave judgment to a human/skill**:
+
+  - **`scaffoldLlmsTxt`** — now derives *real* starter content (site name, description, the app's
+    static routes, and the artifacts this build generated) instead of a placeholder, so the file is
+    useful the moment it lands.
+  - **`scaffoldRobots`** (`src/scaffold-robots.ts`) — writes only the two machine-readable pointers ax
+    is uniquely placed to know (`Sitemap:` for a sitemap it actually detected, `Agentmap:` for the
+    catalog it just generated) plus `Allow` blocks for reputable AI crawlers. An existing
+    `public/robots.txt` is *appended to* in a marked, idempotent block; `app/robots.ts` (policy in
+    code) is never touched; *blocking* a crawler is only ever shown commented-out. The pending crawler
+    user-agent (open question #17) affects only *which* agents to name, not the safe shape.
+  - **`scaffoldJsonLd`** (`src/scaffold-json-ld.ts`) — writes an `Organization` component once, with
+    the derivable skeleton (name/url/description); `sameAs` (the external profiles that do the actual
+    entity disambiguation) is left empty with a TODO because nothing at build time can derive them. ax
+    deliberately does **not** wire the component into `app/layout.tsx` (editing the file every page
+    renders through, behind the owner's back, is not a postbuild step's call) — it prints the exact
+    import + element instead.
+  - **`scaffoldAgent404`** (Phase 4.5) — the same pattern: a user-owned `not-found.tsx` written once,
+    backed by a data module regenerated every build from the real route tree.
+
+**3. The report became a handoff, not a log (`src/report.ts` v2 + `src/ora-checks.ts`).** The plugin's
+half of the loop is deterministic detection/emission/scaffolding; the other half — authoring content,
+choosing `sameAs` links, wiring components in — is judgment ax refuses to guess. Report v2 makes that
+division *actionable* by a coding agent: `ORA_CHECK_MAP` translates each artifact this build found or
+generated into Ora's named agent-readiness checks, each marked `addressed` or `actionable` (with a
+`note` when a scaffold landed but nothing imports it yet — e.g. the un-wired JSON-LD component). It
+carries static pointers to Ora's `agent-ready-website` skill (both MCP and document URL) and to Ora's
+scan/score API, so an agent can close the loop: read the report → work the `actionable` checks →
+re-scan the deployed site. The mapping is intentionally conservative (an artifact is listed against a
+check only when the check keys on the artifact's *presence*; content-judgment and no-signal checks are
+omitted, not guessed), and **every Ora reference is a static string — no network calls at build time**,
+keeping the build deterministic and offline. This is the concrete substrate for the Phase 6 companion
+skill (it owns exactly the `actionable`/judgment half this report hands off) and directly answers open
+question #13's "report per-artifact coverage in the build summary."
 
 ---
 
@@ -764,7 +866,7 @@ Goal: prove the output is *usable by agents*, not just spec-valid, and lock in c
 
 | # | Question | Recommendation | Decision |
 |---|----------|----------------|----------|
-| 1 | Pages Router in v1? | No — App Router only | _pending_ |
+| 1 | Pages Router in v1? | ~~No — App Router only~~ **Yes** — App Router and Pages Router (and both at once), via a single `RouterModel` port. | **resolved** |
 | 2 | How does the plugin handle a Next app's REST API? | **Resolved:** reference a static `public/openapi.json` if present — the plugin invents no schema convention and synthesizes nothing from route handlers. Serving the doc from a route is a later add. Per-route "tool" entries dropped. | **resolved** |
 | 3 | Default denylist + review-before-publish on by default? | Yes — registry quality depends on it | _pending_ |
 | 4 | Schema strategy: evaluate exported schemas vs parse AST? | Evaluate (subprocess) | _pending_ |
@@ -777,7 +879,7 @@ Goal: prove the output is *usable by agents*, not just spec-valid, and lock in c
 | 11 | API access to AgentJourney (journey.ora.ai) for automated evals? | Yes — use it as the nightly real-LLM eval harness | _pending_ |
 | 12 | Does Ora's crawler/scorer use an internal ai-catalog schema or validator? | **Resolved (2026-07-19):** the ARD spec now publishes an official JSON Schema + conformance CLI (ards-project/ard-spec) — vendored in `spec/ard/` as the strict emission oracle and run in CI. Remaining sub-question for Ora: do they validate with the official tool too, or something stricter? | **resolved** |
 | 13 | Is the agent-readiness score essentially a **checklist of artifact types** (OpenAPI / MCP / GraphQL / llms.txt / docs / skills)? Top-site data suggests breadth drives the grade. | If yes, target the checklist directly and report per-artifact coverage in the build summary. | _pending_ |
-| 14 | Which entry fields should a first-party catalog self-declare? (`auth`, `capabilities`, `representativeQueries`, `provenance`, `trustManifest.attestations`) | **Partly resolved by the spec (2026-07-19):** `capabilities` / `representativeQueries` / `trustManifest` are first-class ARD fields, not Ora extensions — `representativeQueries` (2–5 items) drives registry search embeddings, so it's plainly worth self-declaring; supported via `ard.config` `entries`. `capabilities` emitted zero-config for MCP. Only `auth` / entry-level `provenance` are true extensions — confirm with Ora how they weigh those. | _mostly resolved_ |
+| 14 | Which entry fields should a first-party catalog self-declare? (`auth`, `capabilities`, `representativeQueries`, `provenance`, `trustManifest.attestations`) | **Partly resolved by the spec (2026-07-19):** `capabilities` / `representativeQueries` / `trustManifest` are first-class ARD fields, not Ora extensions — `representativeQueries` (2–5 items) drives registry search embeddings, so it's plainly worth self-declaring; supported via `ax.config` `entries`. `capabilities` emitted zero-config for MCP. Only `auth` / entry-level `provenance` are true extensions — confirm with Ora how they weigh those. | _mostly resolved_ |
 | 15 | Agent **skills** (`application/ai-skill+md`): does Ora expect skills in a published GitHub repo, and should the plugin help scaffold/reference one? | Detect-and-reference a skills repo if present; do not invent skills. Scaffolding = later. | _pending_ |
 | 16 | Once the skill's `api-catalog`→`ai-catalog` bug is fixed, do the **registry crawler and the score scanner** both key on ARD `/.well-known/ai-catalog.json`? | Confirm they agree — the plugin's headline output depends on it | _pending (Ora aware of the skill bug 2026-07-22, fix expected)_ |
 | 17 | What `User-agent` token does **Ora's crawler** send? | Needed to detect a blocking robots.txt and to author the scoped `Allow` recommendation | _pending_ |

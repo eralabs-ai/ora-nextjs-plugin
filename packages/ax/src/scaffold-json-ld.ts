@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
+import type { RouterModel } from './router-model.js';
 import type { SiteMetadata } from './site-metadata.js';
 
 // The write side of JSON-LD structured data (`scaffoldJsonLd: true`). Structured data is how
@@ -23,6 +24,27 @@ export const JSON_LD_COMPONENT_BASE = 'organization-json-ld';
 
 /** Exported component name — used in the wiring instructions, so it has to match the source. */
 const COMPONENT_NAME = 'OrganizationJsonLd';
+
+/** Where the component is written and which file its wiring instructions point at, per router. */
+interface ScaffoldTarget {
+  dir: string;
+  /** Base name (sans extension) of the file the developer adds the import/element to. */
+  wiringFileBase: string;
+}
+
+/**
+ * The scaffold target for the primary router: the App Router root wired via `layout`, or the Pages
+ * Router root wired via `_app`. Undefined when the project has neither router.
+ */
+function scaffoldTarget(router: RouterModel): ScaffoldTarget | undefined {
+  if (router.primary === 'app' && router.appDir) {
+    return { dir: router.appDir, wiringFileBase: 'layout' };
+  }
+  if (router.primary === 'pages' && router.pagesDir) {
+    return { dir: router.pagesDir, wiringFileBase: '_app' };
+  }
+  return undefined;
+}
 
 export type JsonLdScaffoldAction = 'created' | 'exists' | 'skipped';
 
@@ -48,8 +70,8 @@ export interface JsonLdScaffoldResult {
 
 export interface ScaffoldJsonLdOptions {
   cwd: string;
-  /** The App Router root, or undefined when the project has none (nothing to scaffold into). */
-  appDir: string | undefined;
+  /** The shared router model — the primary router decides where the component and its wiring go. */
+  router: RouterModel;
   /** Resolved site origin. Absent means the `url` field is left as a TODO rather than guessed. */
   siteUrl?: string;
   /** `package.json` facts — the `name`/`description` the Organization block is built from. */
@@ -58,32 +80,35 @@ export interface ScaffoldJsonLdOptions {
 }
 
 /**
- * Writes `app/organization-json-ld.{tsx,jsx}` once, and reports how to wire it up. Never
- * overwrites (a second run returns `exists` with the same wiring instructions, since an unimported
- * component still isn't published), and never fails the build — a filesystem error warns and
- * returns `skipped`.
+ * Writes an `organization-json-ld.{tsx,jsx}` component once into the primary router's directory, and
+ * reports how to wire it up — into `app/layout.*` for an App Router app, or `pages/_app.*` for a
+ * Pages Router app. Never overwrites (a second run returns `exists` with the same wiring
+ * instructions, since an unimported component still isn't published), and never fails the build — a
+ * filesystem error warns and returns `skipped`.
  */
 export function scaffoldOrganizationJsonLd(options: ScaffoldJsonLdOptions): JsonLdScaffoldResult {
-  const { appDir, cwd } = options;
-  if (!appDir) {
+  const { router, cwd } = options;
+  const target = scaffoldTarget(router);
+  if (!target) {
     return {
       action: 'skipped',
-      reason: 'no App Router directory (app/ or src/app/) to scaffold a component into',
+      reason: 'no App Router or Pages Router directory to scaffold a component into',
     };
   }
 
   const useTypeScript = existsSync(join(cwd, 'tsconfig.json'));
-  const filePath = join(appDir, `${JSON_LD_COMPONENT_BASE}.${useTypeScript ? 'tsx' : 'jsx'}`);
+  const ext = useTypeScript ? 'tsx' : 'jsx';
+  const filePath = join(target.dir, `${JSON_LD_COMPONENT_BASE}.${ext}`);
   const wiring: JsonLdWiring = {
     importLine: `import { ${COMPONENT_NAME} } from './${JSON_LD_COMPONENT_BASE}';`,
     element: `<${COMPONENT_NAME} />`,
-    layoutPath: relative(cwd, join(appDir, `layout.${useTypeScript ? 'tsx' : 'jsx'}`)),
+    layoutPath: relative(cwd, join(target.dir, `${target.wiringFileBase}.${ext}`)),
   };
 
   if (existsSync(filePath)) return { action: 'exists', path: filePath, wiring };
 
   try {
-    mkdirSync(appDir, { recursive: true });
+    mkdirSync(target.dir, { recursive: true });
     writeFileSync(filePath, componentSource(options), 'utf8');
   } catch (err) {
     options.warn(

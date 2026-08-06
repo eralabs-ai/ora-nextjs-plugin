@@ -325,3 +325,58 @@ describe('detectLlmsTxt — scaffolding', () => {
     expect(warnings.some((w) => w.includes("couldn't"))).toBe(true);
   });
 });
+
+describe('detectLlmsTxt — Pages Router', () => {
+  it('scaffolds a static public/llms.txt (not an app route) for a Pages Router app', () => {
+    mkdirSync(join(dir, 'pages'), { recursive: true });
+    writeFileSync(
+      join(dir, 'pages', 'index.tsx'),
+      'export default function H() { return null; }\n',
+    );
+    writeFileSync(
+      join(dir, 'pages', 'about.tsx'),
+      'export default function A() { return null; }\n',
+    );
+
+    const result = detectLlmsTxt({
+      cwd: dir,
+      siteUrl: 'https://example.com',
+      basePath: '',
+      warn,
+      scaffold: true,
+      site: { displayName: 'acme' },
+    });
+
+    // A Pages Router app can't serve /llms.txt from pages/api at the right URL, so ax writes the
+    // static file — served identically by either router — rather than a route handler.
+    const staticPath = join(dir, 'public', 'llms.txt');
+    expect(result.scaffoldedPath).toBe(staticPath);
+    expect(existsSync(join(dir, 'app'))).toBe(false);
+
+    const body = readFileSync(staticPath, 'utf8');
+    expect(body).toContain('# acme');
+    // Key pages come from the Pages Router route table.
+    expect(body).toContain('/about');
+  });
+
+  it('references an existing static public/llms.txt on a Pages Router app without scaffolding', () => {
+    mkdirSync(join(dir, 'pages'), { recursive: true });
+    writeFileSync(
+      join(dir, 'pages', 'index.tsx'),
+      'export default function H() { return null; }\n',
+    );
+    mkdirSync(join(dir, 'public'), { recursive: true });
+    writeFileSync(join(dir, 'public', 'llms.txt'), '# hello\n', 'utf8');
+
+    const result = detectLlmsTxt({
+      cwd: dir,
+      siteUrl: 'https://example.com',
+      basePath: '',
+      warn,
+      scaffold: true,
+    });
+
+    expect(result).toMatchObject({ found: true, source: join('public', 'llms.txt') });
+    expect(result.scaffoldedPath).toBeUndefined();
+  });
+});

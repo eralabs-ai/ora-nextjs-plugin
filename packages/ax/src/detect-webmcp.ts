@@ -1,7 +1,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
-import { findAppDir, resolvePagePathname } from './app-dir.js';
+import { buildRouterModel, type RouterModel } from './router-model.js';
 import { scrubSource } from './scrub-source.js';
 import { buildArtifactUrl, buildUrn, NO_SITE_URL_HINT } from './site-url.js';
 import type { CatalogEntry } from './types.js';
@@ -98,7 +98,7 @@ export interface WebMcpToolSite {
   receiver?: 'document' | 'navigator' | 'window';
   /** Imperative/hook in a file with no 'use client' directive — likely never runs in the browser. */
   missingUseClient?: boolean;
-  /** Declarative only: the page URL path, when the file is an App Router page with static segments. */
+  /** Declarative only: the page URL path, when the file is a statically-addressable page. */
   pagePathname?: string;
 }
 
@@ -112,6 +112,8 @@ export interface DetectWebMcpOptions {
   warn: (message: string) => void;
   /** Advisory recommendation channel (not a warning — nothing is broken). */
   recommend: (message: string) => void;
+  /** The shared router model. Built from `cwd` when omitted, so the detector runs standalone. */
+  router?: RouterModel;
 }
 
 export interface DetectWebMcpResult {
@@ -133,13 +135,13 @@ export interface DetectWebMcpResult {
  */
 export function detectWebMcp(options: DetectWebMcpOptions): DetectWebMcpResult {
   const { cwd, warn, recommend } = options;
+  const router = options.router ?? buildRouterModel(cwd);
 
   // `public/` is excluded on top of the default ignores: bundled/vendored assets there aren't the
   // app's own source, and minified bundles are exactly where textual matching would false-positive.
   const ignoredDirs = new Set([...DEFAULT_IGNORED_DIRS, 'public']);
   const files = walkFiles(cwd, (name) => SOURCE_FILE_RE.test(name), ignoredDirs);
 
-  const appDir = findAppDir(cwd);
   const sites: WebMcpToolSite[] = [];
   let sawAnyForm = false;
 
@@ -158,7 +160,7 @@ export function detectWebMcp(options: DetectWebMcpOptions): DetectWebMcpResult {
     const source = relative(cwd, file.absolutePath);
     if (ANY_FORM_RE.test(content)) sawAnyForm = true;
 
-    const declarative = scanDeclarative(content, file.absolutePath, appDir);
+    const declarative = scanDeclarative(content, file.absolutePath, router);
     if (declarative) {
       sites.push({ ...declarative.site, source });
       if (declarative.missingDescription.length > 0) {
@@ -221,7 +223,7 @@ interface DeclarativeScan {
 function scanDeclarative(
   content: string,
   absolutePath: string,
-  appDir: string | undefined,
+  router: RouterModel,
 ): DeclarativeScan | undefined {
   const names: string[] = [];
   const missingDescription: string[] = [];
@@ -241,7 +243,7 @@ function scanDeclarative(
   if (names.length === 0) return undefined;
 
   return {
-    site: { kind: 'declarative', names, pagePathname: resolvePagePathname(absolutePath, appDir) },
+    site: { kind: 'declarative', names, pagePathname: router.resolveUrlForFile(absolutePath) },
     missingDescription,
   };
 }

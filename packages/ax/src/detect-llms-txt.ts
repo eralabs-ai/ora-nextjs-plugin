@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
-import { findAppDir, listStaticPageRoutes } from './app-dir.js';
 import { catalogServedPath } from './discovery.js';
+import { buildRouterModel, type RouterModel } from './router-model.js';
 import { readSiteMetadata, type SiteMetadata } from './site-metadata.js';
 import { buildArtifactUrl, buildUrn, NO_SITE_URL_HINT } from './site-url.js';
 import type { CatalogEntry } from './types.js';
@@ -33,6 +33,8 @@ export interface DetectLlmsTxtOptions {
   site?: SiteMetadata;
   /** Artifacts the scaffold links to. Only what this build actually found is ever listed. */
   resources?: LlmsTxtResources;
+  /** The shared router model. Built from `cwd` when omitted, so the detector runs standalone. */
+  router?: RouterModel;
 }
 
 // llms.txt and JSON-LD structured data are complementary discovery signals, so each detector points
@@ -63,17 +65,20 @@ export interface DetectLlmsTxtResult {
 const MAX_KEY_PAGES = 25;
 
 /**
- * Detect-and-reference for `llms.txt`, served either as a route handler at
+ * Detect-and-reference for `llms.txt`, served either as an App Router route handler at
  * `app/llms.txt/route.*` or as a static `public/llms.txt`. When neither exists and the caller
- * opted in via `scaffoldLlmsTxt: true`, scaffolds a starter route handler so a *future* build
- * serves one — this run's catalog never references a path nothing served during the build that
- * just ran. Scaffolding is opt-in (default `false`): unlike every other detector here, it writes a
- * *second* file into the consumer's own source tree, which is a bigger, more visible action than
- * just producing the one catalog file this plugin exists to produce.
+ * opted in via `scaffoldLlmsTxt: true`, scaffolds a starter so a *future* build serves one — an App
+ * Router route handler when the project has an `app/` dir (the idiomatic App Router way), otherwise
+ * a static `public/llms.txt` (a Pages Router app can't serve `/llms.txt` from `pages/api` at the
+ * right path, so the static file — served identically by either router — is the honest target).
+ * This run's catalog never references a path nothing served during the build that just ran.
+ * Scaffolding is opt-in (default `false`): unlike every other detector here, it writes a *second*
+ * file into the consumer's own source tree, which is a bigger, more visible action than just
+ * producing the one catalog file this plugin exists to produce.
  */
 export function detectLlmsTxt(options: DetectLlmsTxtOptions): DetectLlmsTxtResult {
-  const appDir = findAppDir(options.cwd);
-  const routeFile = appDir ? findLlmsTxtRoute(appDir) : undefined;
+  const router = options.router ?? buildRouterModel(options.cwd);
+  const routeFile = router.appDir ? findLlmsTxtRoute(router.appDir) : undefined;
   const staticFile = join(options.cwd, 'public', 'llms.txt');
   const sourceFile = routeFile ?? (existsSync(staticFile) ? staticFile : undefined);
 
@@ -101,7 +106,7 @@ export function detectLlmsTxt(options: DetectLlmsTxtOptions): DetectLlmsTxtResul
     return { found: false };
   }
 
-  const scaffoldedPath = scaffoldLlmsTxtRoute(options, appDir);
+  const scaffoldedPath = scaffoldLlmsTxt(options, router);
   if (scaffoldedPath) return { found: false, scaffoldedPath };
 
   // Opted into scaffolding but nothing was written (no app/ dir, or a write error already warned
@@ -126,17 +131,24 @@ function findLlmsTxtRoute(appDir: string): string | undefined {
 }
 
 /**
- * Writes a starter `app/llms.txt/route.{ts,js}`. Never overwrites (callers only reach here once
- * neither a route nor a static file was found); any filesystem error (e.g. `app/llms.txt` already
- * exists as a plain file) is caught and warned about rather than failing the build — writing a
- * *helpful extra* file must never be why a build breaks.
+ * Scaffolds a starter llms.txt into the router-appropriate location: an `app/llms.txt/route.{ts,js}`
+ * handler when the project has an App Router, otherwise a static `public/llms.txt`. Never overwrites
+ * (callers only reach here once neither a route nor a static file was found); any filesystem error
+ * is caught and warned about rather than failing the build — writing a *helpful extra* file must
+ * never be why a build breaks. Returns undefined when the project has no router to scaffold for.
  */
+function scaffoldLlmsTxt(options: DetectLlmsTxtOptions, router: RouterModel): string | undefined {
+  if (router.appDir) return scaffoldLlmsTxtRoute(options, router, router.appDir);
+  if (router.pagesDir) return scaffoldLlmsTxtStatic(options, router);
+  return undefined;
+}
+
+/** Writes a starter App Router `app/llms.txt/route.{ts,js}` handler. */
 function scaffoldLlmsTxtRoute(
   options: DetectLlmsTxtOptions,
-  appDir: string | undefined,
+  router: RouterModel,
+  appDir: string,
 ): string | undefined {
-  if (!appDir) return undefined;
-
   const { cwd, warn } = options;
   const useTypeScript = existsSync(join(cwd, 'tsconfig.json'));
   const routeDir = join(appDir, 'llms.txt');
@@ -145,7 +157,7 @@ function scaffoldLlmsTxtRoute(
   try {
     if (existsSync(routeFile)) return undefined;
     mkdirSync(routeDir, { recursive: true });
-    writeFileSync(routeFile, starterRouteSource(options, appDir, useTypeScript), 'utf8');
+    writeFileSync(routeFile, starterRouteSource(options, router, useTypeScript), 'utf8');
   } catch (err) {
     warn(
       `Tried to scaffold a starter llms.txt at ${routeFile} but couldn't (${(err as Error).message}).`,
@@ -153,16 +165,48 @@ function scaffoldLlmsTxtRoute(
     return undefined;
   }
 
-  warn(
-    `Scaffolded a starter llms.txt at ${routeFile} — ax filled in what it can derive (your ` +
-      'package.json name and description, your real routes, and the machine-readable artifacts ' +
-      'this build produced). Write the "When to use" section yourself: it is the one part no build ' +
-      'tool can derive, and the part that tells an agent whether your site fits its task. Commit ' +
-      'the file and ax will reference /llms.txt starting with your next build. Pair it with ' +
-      'JSON-LD structured data (Organization + sameAs): llms.txt says what your site is for, ' +
-      'JSON-LD identifies it as an entity registries can rank — add both, not one alone.',
-  );
+  warn(scaffoldedNotice(routeFile));
   return routeFile;
+}
+
+/**
+ * Writes a starter static `public/llms.txt` — the Pages Router path, since a Pages Router app can't
+ * serve `/llms.txt` from `pages/api` at the correct URL without a rewrite. The file is plain
+ * markdown (no route handler wrapper), served identically to an App Router route at `/llms.txt`.
+ */
+function scaffoldLlmsTxtStatic(
+  options: DetectLlmsTxtOptions,
+  router: RouterModel,
+): string | undefined {
+  const { cwd, warn } = options;
+  const publicDir = join(cwd, 'public');
+  const filePath = join(publicDir, 'llms.txt');
+
+  try {
+    if (existsSync(filePath)) return undefined;
+    mkdirSync(publicDir, { recursive: true });
+    writeFileSync(filePath, buildLlmsTxtBody(options, router), 'utf8');
+  } catch (err) {
+    warn(
+      `Tried to scaffold a starter llms.txt at ${filePath} but couldn't (${(err as Error).message}).`,
+    );
+    return undefined;
+  }
+
+  warn(scaffoldedNotice(filePath));
+  return filePath;
+}
+
+function scaffoldedNotice(path: string): string {
+  return (
+    `Scaffolded a starter llms.txt at ${path} — ax filled in what it can derive (your ` +
+    'package.json name and description, your real routes, and the machine-readable artifacts ' +
+    'this build produced). Write the "When to use" section yourself: it is the one part no build ' +
+    'tool can derive, and the part that tells an agent whether your site fits its task. Commit ' +
+    'the file and ax will reference /llms.txt starting with your next build. Pair it with ' +
+    'JSON-LD structured data (Organization + sameAs): llms.txt says what your site is for, ' +
+    'JSON-LD identifies it as an entity registries can rank — add both, not one alone.'
+  );
 }
 
 /**
@@ -172,7 +216,7 @@ function scaffoldLlmsTxtRoute(
  */
 function starterRouteSource(
   options: DetectLlmsTxtOptions,
-  appDir: string,
+  router: RouterModel,
   useTypeScript: boolean,
 ): string {
   const signature = useTypeScript ? 'export function GET(): Response {' : 'export function GET() {';
@@ -180,13 +224,13 @@ function starterRouteSource(
 // edit it freely, ax never overwrites it.
 //
 // The title, description, key pages and machine-readable resources below were derived from your
-// package.json and your App Router source tree. The "When to use" section was not — nothing at
-// build time knows what agents should come here for, and that section is the whole point of an
-// llms.txt, so it ships as a TODO for you (or your coding agent) to replace.
+// package.json and your source tree. The "When to use" section was not — nothing at build time
+// knows what agents should come here for, and that section is the whole point of an llms.txt, so
+// it ships as a TODO for you (or your coding agent) to replace.
 export const dynamic = 'force-static';
 
 ${signature}
-  const body = \`${escapeTemplateLiteral(buildLlmsTxtBody(options, appDir))}\`;
+  const body = \`${escapeTemplateLiteral(buildLlmsTxtBody(options, router))}\`;
 
   return new Response(body, { headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
 }
@@ -202,7 +246,7 @@ function escapeTemplateLiteral(text: string): string {
  * The generated llms.txt content. Everything here is either a fact this build read off disk or an
  * explicitly-marked TODO — never invented prose about a site ax knows nothing about.
  */
-function buildLlmsTxtBody(options: DetectLlmsTxtOptions, appDir: string): string {
+function buildLlmsTxtBody(options: DetectLlmsTxtOptions, router: RouterModel): string {
   const site = options.site ?? readSiteMetadata(options.cwd);
   const sections: string[] = [`# ${site.displayName}`];
 
@@ -219,7 +263,7 @@ function buildLlmsTxtBody(options: DetectLlmsTxtOptions, appDir: string): string
     '## When not to use\n\n- TODO: a task this site is the wrong source for',
   );
 
-  const keyPages = buildKeyPages(options, appDir);
+  const keyPages = buildKeyPages(options, router);
   if (keyPages.length > 0) {
     sections.push(`## Key pages\n\n${keyPages.join('\n')}`);
   }
@@ -230,8 +274,9 @@ function buildLlmsTxtBody(options: DetectLlmsTxtOptions, appDir: string): string
 }
 
 /** The app's real, statically addressable routes — never dynamic segments, never guessed URLs. */
-function buildKeyPages(options: DetectLlmsTxtOptions, appDir: string): string[] {
-  return listStaticPageRoutes(appDir)
+function buildKeyPages(options: DetectLlmsTxtOptions, router: RouterModel): string[] {
+  return router
+    .listPageRoutes()
     .slice(0, MAX_KEY_PAGES)
     .map((route) => `- [${route}](${absoluteOrServed(options, route)})`);
 }

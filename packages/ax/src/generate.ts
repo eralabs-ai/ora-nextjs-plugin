@@ -24,6 +24,7 @@ import {
   type OraArtifact,
 } from './ora-checks.js';
 import type { BuildReport, ReportArtifact, ReportScaffolds } from './report.js';
+import { buildRouterModel } from './router-model.js';
 import type { JsonLdScaffoldResult } from './scaffold-json-ld.js';
 import { SPEC_VERSION } from './schema.js';
 import { buildMcpServerCard, type McpServerCard } from './server-card.js';
@@ -149,6 +150,10 @@ export async function generateCatalog(
 
   const site = readSiteMetadata(cwd);
 
+  // Decide the file-lookup strategy once (App Router, Pages Router, or both), then hand the same
+  // model to every detector so they all see one route universe — see router-model.ts.
+  const router = buildRouterModel(cwd);
+
   const { config, warnings: configWarnings } = await loadAxConfig(cwd);
   for (const warning of configWarnings) warn(warning);
 
@@ -173,9 +178,9 @@ export async function generateCatalog(
     detectedDomain: site.domain,
   });
 
-  // Scan `app/` for MCP mounts once, then feed the same mounts to both the catalog entry and the
-  // well-known server card (agents discover MCP via the card, not the entry — see server-card.ts).
-  const mcpMounts = detectMcpMounts({ cwd, warn });
+  // Scan route handlers for MCP mounts once, then feed the same mounts to both the catalog entry and
+  // the well-known server card (agents discover MCP via the card, not the entry — see server-card.ts).
+  const mcpMounts = detectMcpMounts({ cwd, warn, router });
   const inferredEntries: CatalogEntry[] = [
     ...buildMcpEntries({ mounts: mcpMounts, siteUrl, basePath, warn }),
   ];
@@ -194,6 +199,7 @@ export async function generateCatalog(
     recommend,
     scaffold: config.scaffoldLlmsTxt,
     site,
+    router,
     // Only what this build actually found: the starter's "Machine-readable resources" section is a
     // list of live artifacts, so a link to something that doesn't exist would be worse than none.
     resources: { openApi: openApi.found, mcpPathnames: mcpMounts.map((mount) => mount.pathname) },
@@ -204,7 +210,7 @@ export async function generateCatalog(
   // entries (the page is a real, addressable artifact); imperative registrations are runtime-only
   // with no spec-defined manifest, so they surface as warnings/recommendations, never invented
   // entries.
-  const webMcp = detectWebMcp({ cwd, siteUrl, basePath, warn, recommend });
+  const webMcp = detectWebMcp({ cwd, siteUrl, basePath, warn, recommend, router });
   inferredEntries.push(...webMcp.entries);
 
   // Declaring entries in config is expected, not noteworthy — the per-entry notes
@@ -246,6 +252,7 @@ export async function generateCatalog(
     warn,
     scaffold: config.scaffoldJsonLd,
     site,
+    router,
     ...(siteUrl !== undefined ? { siteUrl } : {}),
   });
   for (const message of buildDiscoveryRecommendations({ siteUrl, basePath })) recommend(message);
@@ -261,6 +268,7 @@ export async function generateCatalog(
     sitemapFound: sitemap.found,
     warn,
     recommend,
+    router,
   });
 
   // Derive the `did:web:` host from the resolved origin so it's consistent whatever the origin's
@@ -294,6 +302,7 @@ export async function generateCatalog(
     generatedAt: new Date().toISOString(),
     ...(siteUrl !== undefined ? { siteUrl } : {}),
     basePath,
+    routers: router.routers,
     catalog: {
       entryCount: entries.length,
       entries: entries.map((entry) => ({

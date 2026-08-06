@@ -66,10 +66,16 @@ jobs:
       - name: Install remaining dependencies
         run: pnpm install --frozen-lockfile
 
-      # Phase 0 safety net: every fixture must `next build`. Replaced by the Phase 2.6
-      # snapshot-and-validate suite once the generator exists.
+      # Every fixture must `next build` — that build also runs each fixture's `ax --report`
+      # postbuild, writing a machine-readable report to its `.ora/report.json`.
       - name: Build fixtures
         run: pnpm fixtures:build
+
+      # Report-snapshot layer: diff each freshly-built `.ora/report.json` against its committed,
+      # normalized golden (`fixtures/*/report.golden.json`). Proves the plugin's detections and
+      # recommendations are exactly what we expect for a real build of each fixture.
+      - name: Verify report snapshots
+        run: pnpm reports:verify
 
       # Official ARD conformance tool (vendored from ards-project/ard-spec — spec/ard/README.md)
       # over every catalog the fixture builds just generated. jsonschema enables the tool's strict

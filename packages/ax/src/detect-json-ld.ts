@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { findAppDir } from './app-dir.js';
+import { buildRouterModel, type RouterModel } from './router-model.js';
 import {
   JSON_LD_COMPONENT_BASE,
   scaffoldOrganizationJsonLd,
@@ -26,6 +26,8 @@ export interface DetectJsonLdOptions {
   site?: SiteMetadata;
   /** Non-fatal notices from the scaffold write. Optional so the detector can run standalone. */
   warn?: (message: string) => void;
+  /** The shared router model. Built from `cwd` when omitted, so the detector runs standalone. */
+  router?: RouterModel;
 }
 
 export interface DetectJsonLdResult {
@@ -54,6 +56,9 @@ const LAYOUT_PAGE_FILE_NAMES: ReadonlySet<string> = new Set([
   'page.ts',
 ]);
 
+/** Any Pages Router source file can render a JSON-LD block (`_app`/`_document` or a page itself). */
+const PAGES_SOURCE_FILE_RE = /\.(?:tsx|jsx|ts|js)$/;
+
 const JSON_LD_MARKER = 'application/ld+json';
 
 const ABSENT_RECOMMENDATION =
@@ -76,13 +81,13 @@ const ABSENT_RECOMMENDATION =
  * never fails a build.
  */
 export function detectJsonLd(options: DetectJsonLdOptions): DetectJsonLdResult {
-  const appDir = findAppDir(options.cwd);
-  if (!appDir) {
+  const router = options.router ?? buildRouterModel(options.cwd);
+  if (router.routers.length === 0) {
     options.recommend(ABSENT_RECOMMENDATION);
     return { found: false };
   }
 
-  const detected = findRenderedJsonLd(options.cwd, appDir);
+  const detected = findRenderedJsonLd(options.cwd, router);
   if (detected !== undefined) {
     options.recommend(
       `JSON-LD structured data detected (${detected}) — confirm it includes an Organization block ` +
@@ -102,7 +107,7 @@ export function detectJsonLd(options: DetectJsonLdOptions): DetectJsonLdResult {
 
   const scaffold = scaffoldOrganizationJsonLd({
     cwd: options.cwd,
-    appDir,
+    router,
     site: options.site,
     warn: options.warn ?? (() => {}),
     ...(options.siteUrl !== undefined ? { siteUrl: options.siteUrl } : {}),
@@ -138,8 +143,15 @@ export function detectJsonLd(options: DetectJsonLdOptions): DetectJsonLdResult {
  * this pair check, correctly wiring up the scaffold would leave the site looking like it still had
  * no structured data.
  */
-function findRenderedJsonLd(cwd: string, appDir: string): string | undefined {
-  const files = walkFiles(appDir, (name) => LAYOUT_PAGE_FILE_NAMES.has(name));
+function findRenderedJsonLd(cwd: string, router: RouterModel): string | undefined {
+  // App Router `layout`/`page` files, plus any Pages Router source file (`_app`/`_document`/pages) —
+  // either can carry the block or import the scaffolded component.
+  const files = [
+    ...(router.appDir ? walkFiles(router.appDir, (name) => LAYOUT_PAGE_FILE_NAMES.has(name)) : []),
+    ...(router.pagesDir
+      ? walkFiles(router.pagesDir, (name) => PAGES_SOURCE_FILE_RE.test(name))
+      : []),
+  ];
   const importers: string[] = [];
 
   for (const file of files) {
@@ -153,16 +165,19 @@ function findRenderedJsonLd(cwd: string, appDir: string): string | undefined {
     if (content.includes(JSON_LD_COMPONENT_BASE)) importers.push(file.absolutePath);
   }
 
+  const componentDir = router.primary === 'pages' ? router.pagesDir : router.appDir;
   for (const importer of importers) {
-    if (scaffoldedComponentRendersJsonLd(appDir)) return relativeSource(cwd, importer);
+    if (componentDir && scaffoldedComponentRendersJsonLd(componentDir)) {
+      return relativeSource(cwd, importer);
+    }
   }
   return undefined;
 }
 
 /** Whether the scaffolded component file exists and still renders a JSON-LD script tag. */
-function scaffoldedComponentRendersJsonLd(appDir: string): boolean {
+function scaffoldedComponentRendersJsonLd(componentDir: string): boolean {
   for (const extension of ['tsx', 'jsx', 'js']) {
-    const path = join(appDir, `${JSON_LD_COMPONENT_BASE}.${extension}`);
+    const path = join(componentDir, `${JSON_LD_COMPONENT_BASE}.${extension}`);
     if (!existsSync(path)) continue;
     try {
       return readFileSync(path, 'utf8').includes(JSON_LD_MARKER);
