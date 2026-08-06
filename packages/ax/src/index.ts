@@ -120,6 +120,15 @@ export {
 
 export { findAppDir } from './app-dir.js';
 
+export { findPagesDir, listStaticPagesRoutes, resolvePagesPathname } from './pages-dir.js';
+
+export {
+  buildRouterModel,
+  type RouterModel,
+  type RouterKind,
+  type ApiEndpoint,
+} from './router-model.js';
+
 export {
   detectMcpServers,
   detectMcpMounts,

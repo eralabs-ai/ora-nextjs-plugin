@@ -1,7 +1,7 @@
 import { existsSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
-import { pathSegments, walkFiles } from './walk-files.js';
+import { pathSegments, ROUTE_FILE_NAMES, walkFiles } from './walk-files.js';
 
 /**
  * Locates the project's App Router root: `app/` or `src/app/` (Next.js supports both; it forbids
@@ -58,4 +58,42 @@ export function listStaticPageRoutes(appDir: string): string[] {
     if (pathname !== undefined) routes.add(pathname);
   }
   return [...routes].sort();
+}
+
+/** An App Router route handler (`route.*`) file paired with the URL it mounts at. */
+export interface AppApiEndpoint {
+  file: string;
+  url: string | undefined;
+}
+
+/**
+ * The URL an App Router route handler's directory mounts at. Route groups (`(name)`) contribute no
+ * segment; a `[transport]` segment — the name mcp-handler's docs and CLI scaffold use — resolves to
+ * `mcp`, its documented default `streamableHttpEndpoint`. Any other dynamic (`[id]`) or parallel
+ * (`@slot`) segment makes the URL ambiguous from static inspection, so this returns undefined rather
+ * than guess. `relativeDir` is the handler's directory relative to the app dir.
+ */
+export function resolveRouteHandlerMount(relativeDir: string): string | undefined {
+  const resolved: string[] = [];
+  for (const segment of pathSegments(relativeDir)) {
+    if (segment.startsWith('(') && segment.endsWith(')')) continue;
+    if (segment === '[transport]') {
+      resolved.push('mcp');
+      continue;
+    }
+    if (/[[\]@]/.test(segment)) return undefined;
+    resolved.push(segment);
+  }
+  return `/${resolved.join('/')}`;
+}
+
+/**
+ * Every App Router `route.*` handler paired with the URL it mounts at (undefined when ambiguous).
+ * The source for MCP-mount detection; the Pages Router mirror is `listPagesApiEndpoints`.
+ */
+export function listAppApiEndpoints(appDir: string): AppApiEndpoint[] {
+  return walkFiles(appDir, (name) => ROUTE_FILE_NAMES.has(name)).map((file) => ({
+    file: file.absolutePath,
+    url: resolveRouteHandlerMount(file.relativeDir),
+  }));
 }

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { detectJsonLd } from '../src/detect-json-ld.js';
+import { buildRouterModel } from '../src/router-model.js';
 import { scaffoldOrganizationJsonLd } from '../src/scaffold-json-ld.js';
 import type { SiteMetadata } from '../src/site-metadata.js';
 
@@ -51,7 +52,7 @@ describe('scaffoldOrganizationJsonLd', () => {
   it('writes app/organization-json-ld.tsx with an Organization block from package.json', () => {
     const result = scaffoldOrganizationJsonLd({
       cwd: dir,
-      appDir: join(dir, 'app'),
+      router: buildRouterModel(dir),
       siteUrl: 'https://example.com',
       site,
       warn,
@@ -73,7 +74,7 @@ describe('scaffoldOrganizationJsonLd', () => {
   it('serializes to valid JSON — the block ends up in a <script> tag', () => {
     scaffoldOrganizationJsonLd({
       cwd: dir,
-      appDir: join(dir, 'app'),
+      router: buildRouterModel(dir),
       siteUrl: 'https://example.com',
       site,
       warn,
@@ -86,7 +87,7 @@ describe('scaffoldOrganizationJsonLd', () => {
   it('escapes package.json values that would otherwise break the generated source', () => {
     scaffoldOrganizationJsonLd({
       cwd: dir,
-      appDir: join(dir, 'app'),
+      router: buildRouterModel(dir),
       siteUrl: 'https://example.com',
       site: { displayName: 'acme', description: 'Quote " backslash \\ and a\nnewline.' },
       warn,
@@ -99,7 +100,7 @@ describe('scaffoldOrganizationJsonLd', () => {
   it('leaves sameAs empty with a TODO — external profiles are not statically derivable', () => {
     scaffoldOrganizationJsonLd({
       cwd: dir,
-      appDir: join(dir, 'app'),
+      router: buildRouterModel(dir),
       siteUrl: 'https://example.com',
       site,
       warn,
@@ -111,7 +112,7 @@ describe('scaffoldOrganizationJsonLd', () => {
   });
 
   it('leaves url as a TODO rather than guessing an origin when none resolved', () => {
-    scaffoldOrganizationJsonLd({ cwd: dir, appDir: join(dir, 'app'), site, warn });
+    scaffoldOrganizationJsonLd({ cwd: dir, router: buildRouterModel(dir), site, warn });
 
     const source = readFileSync(componentPath(), 'utf8');
     expect(evaluateOrganization(source)['url']).toBe('');
@@ -121,7 +122,7 @@ describe('scaffoldOrganizationJsonLd', () => {
   it('writes a .jsx component when the project has no tsconfig.json', () => {
     rmSync(join(dir, 'tsconfig.json'));
 
-    const result = scaffoldOrganizationJsonLd({ cwd: dir, appDir: join(dir, 'app'), site, warn });
+    const result = scaffoldOrganizationJsonLd({ cwd: dir, router: buildRouterModel(dir), site, warn });
 
     expect(result.path).toBe(componentPath('jsx'));
     expect(existsSync(componentPath())).toBe(false);
@@ -132,7 +133,7 @@ describe('scaffoldOrganizationJsonLd', () => {
 
     const result = scaffoldOrganizationJsonLd({
       cwd: dir,
-      appDir: join(dir, 'app'),
+      router: buildRouterModel(dir),
       siteUrl: 'https://example.com',
       site,
       warn,
@@ -147,10 +148,11 @@ describe('scaffoldOrganizationJsonLd', () => {
     });
   });
 
-  it('skips (rather than throws) when there is no App Router directory', () => {
-    const result = scaffoldOrganizationJsonLd({ cwd: dir, appDir: undefined, site, warn });
+  it('skips (rather than throws) when there is no router directory', () => {
+    rmSync(join(dir, 'app'), { recursive: true, force: true });
+    const result = scaffoldOrganizationJsonLd({ cwd: dir, router: buildRouterModel(dir), site, warn });
     expect(result).toMatchObject({ action: 'skipped' });
-    expect(result.reason).toContain('App Router');
+    expect(result.reason).toContain('Router');
   });
 });
 

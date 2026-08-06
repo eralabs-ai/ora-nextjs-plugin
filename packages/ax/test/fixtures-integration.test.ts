@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import { generateCatalog } from '../src/generate.js';
 import { loadNextConfig } from '../src/next-config.js';
+import { buildRouterModel } from '../src/router-model.js';
 import { validateCatalog, validateCatalogArd } from '../src/validate.js';
 
 const fixturesDir = fileURLToPath(new URL('../../../fixtures/', import.meta.url));
@@ -108,17 +109,30 @@ describe('generateCatalog zero-config detection against the fixture corpus', () 
   });
 
   it('never writes into the fixture corpus as a side effect (every scaffold flag defaults to false)', async () => {
-    const fixtures = ['bare', 'bare-js', 'mcp-adapter', 'openapi'];
+    const fixtures = [
+      'bare',
+      'bare-js',
+      'mcp-adapter',
+      'openapi',
+      'pages-bare',
+      'pages-mcp',
+      'pages-webmcp-declarative',
+      'hybrid',
+    ];
     for (const name of fixtures) {
       await generateCatalog({ cwd: `${fixturesDir}${name}` });
     }
     // One entry per opt-in scaffold: each writes into the consumer's source tree, so a fixture
-    // gaining any of these files means a default flipped to on.
+    // gaining any of these files means a default flipped to on. Covers both router shapes: the App
+    // Router route-handler / component targets and the Pages Router static / `_app` targets.
     const neverWritten = [
       'app/llms.txt',
+      'public/llms.txt',
       'public/robots.txt',
       'app/organization-json-ld.tsx',
       'app/organization-json-ld.jsx',
+      'pages/organization-json-ld.tsx',
+      'pages/organization-json-ld.jsx',
     ];
     for (const name of fixtures) {
       for (const path of neverWritten) {
@@ -215,5 +229,68 @@ describe('loadNextConfig against the fixture corpus', () => {
     expect(result.config).toEqual({});
     expect(result.warnings).toEqual([]);
     expect(result.path).toMatch(/next\.config\.mjs$/);
+  });
+});
+
+// Pages Router (and hybrid) support: the same detectors run against `pages/` route topology, and a
+// project with both routers scans both. Output is still the router-agnostic `public/` catalog.
+describe('generateCatalog against the Pages Router fixtures', () => {
+  it('produces a spec-valid catalog for pages-bare and reports the pages router', async () => {
+    const { catalog, report } = await generateCatalog({ cwd: `${fixturesDir}pages-bare` });
+    expect(validateCatalog(catalog).valid).toBe(true);
+    expect(validateCatalogArd(catalog).valid).toBe(true);
+    expect(report.routers).toEqual(['pages']);
+  });
+
+  it('lists Pages Router content routes, excluding special/dynamic/error files', () => {
+    // Asserted through the model directly (no scaffold opt-in needed) against the real fixture:
+    // `/` and `/about` are content; `_app`/`_document`/`404`/`[slug]` are not.
+    const routes = buildRouterModel(`${fixturesDir}pages-bare`).listPageRoutes();
+    expect(routes).toEqual(['/', '/about']);
+  });
+
+  it('detects the pages/api/[transport].ts MCP mount at /api/mcp', async () => {
+    const { catalog, serverCard } = await generateCatalog({ cwd: `${fixturesDir}pages-mcp` });
+    expect(validateCatalogArd(catalog).valid).toBe(true);
+
+    const entry = catalog.entries.find(
+      (e) => e.identifier === 'urn:air:pages-mcp-fixture.example.com:mcp-server',
+    );
+    expect(entry).toMatchObject({
+      type: 'application/mcp-server-card+json',
+      url: 'https://pages-mcp-fixture.example.com/api/mcp',
+      capabilities: ['roll_dice'],
+    });
+    expect(serverCard).toMatchObject({
+      serverUrl: 'https://pages-mcp-fixture.example.com/api/mcp',
+      tools: [{ name: 'roll_dice' }],
+    });
+  });
+
+  it('attributes a declarative WebMCP form to its Pages Router page URL', async () => {
+    const { catalog, webMcpToolNames } = await generateCatalog({
+      cwd: `${fixturesDir}pages-webmcp-declarative`,
+    });
+    expect(validateCatalogArd(catalog).valid).toBe(true);
+    expect(webMcpToolNames).toEqual(['subscribe_newsletter']);
+
+    const entry = catalog.entries.find(
+      (e) => e.identifier === 'urn:air:pages-webmcp-fixture.example.com:webmcp',
+    );
+    expect(entry).toMatchObject({
+      type: 'text/html',
+      url: 'https://pages-webmcp-fixture.example.com/',
+      capabilities: ['subscribe_newsletter'],
+    });
+  });
+
+  it('scans both routers for the hybrid fixture and unions their routes (App Router wins collisions)', async () => {
+    const { catalog, report } = await generateCatalog({ cwd: `${fixturesDir}hybrid` });
+    expect(validateCatalogArd(catalog).valid).toBe(true);
+    expect(report.routers).toEqual(['app', 'pages']);
+
+    // `/dashboard` is defined by both routers — it appears exactly once.
+    const routes = buildRouterModel(`${fixturesDir}hybrid`).listPageRoutes();
+    expect(routes).toEqual(['/', '/about', '/dashboard']);
   });
 });

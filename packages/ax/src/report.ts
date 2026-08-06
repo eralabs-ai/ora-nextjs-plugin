@@ -1,5 +1,6 @@
 import type { WebMcpToolSite } from './detect-webmcp.js';
 import type { OraCheckStatus } from './ora-checks.js';
+import type { RouterKind } from './router-model.js';
 import type { JsonLdScaffoldResult } from './scaffold-json-ld.js';
 import type { RobotsScaffoldResult } from './scaffold-robots.js';
 import type { EmissionTarget } from './write.js';
@@ -57,6 +58,8 @@ export interface BuildReport {
   siteUrl?: string;
   /** `next.config` `basePath`, or `''` when unset. */
   basePath: string;
+  /** Which Next.js routers were scanned (`app`, `pages`, or both). Empty for a project with neither. */
+  routers: RouterKind[];
   catalog: {
     /** Where the catalog was written — filled in by the CLI after the write succeeds. */
     path?: string;

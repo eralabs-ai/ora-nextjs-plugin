@@ -178,3 +178,53 @@ describe('manageAgent404 — scaffolding (opt-in)', () => {
     expect(() => run({ scaffold: true })).not.toThrow();
   });
 });
+
+describe('manageAgent404 — Pages Router', () => {
+  it('does nothing without an app or pages dir', () => {
+    expect(run()).toEqual({ notFoundPresent: false, agentAware: false });
+  });
+
+  it('detects an existing pages/404.tsx and recommends signposts when it has none', () => {
+    write(join('pages', '404.tsx'), 'export default function NotFound() { return <h1>404</h1>; }');
+
+    const result = run();
+    expect(result).toMatchObject({
+      notFoundPresent: true,
+      agentAware: false,
+      source: join('pages', '404.tsx'),
+    });
+    expect(recommendations.join('\n')).toContain('point agents anywhere');
+  });
+
+  it('recommends the pages/404 convention path when none exists', () => {
+    mkdirSync(join(dir, 'pages'), { recursive: true });
+
+    const result = run();
+    expect(result.notFoundPresent).toBe(false);
+    expect(recommendations.join('\n')).toContain('No pages/404.tsx found');
+  });
+
+  it('scaffolds pages/404.tsx plus a data module whose routes come from the pages dir', () => {
+    write('tsconfig.json', '{}');
+    write(join('pages', 'index.tsx'), 'export default function H() { return null; }');
+    write(join('pages', 'about.tsx'), 'export default function A() { return null; }');
+
+    const result = run({ scaffold: true });
+    expect(result.notFoundPresent).toBe(true);
+    expect(existsSync(join(dir, 'pages', '404.tsx'))).toBe(true);
+
+    const dataModule = readFileSync(join(dir, 'pages', 'not-found-agent-data.ts'), 'utf8');
+    expect(dataModule).toContain('"/about"');
+    expect(dataModule).toContain('"/"');
+  });
+
+  it('prefers the App Router when both routers are present', () => {
+    write('tsconfig.json', '{}');
+    mkdirSync(join(dir, 'app'), { recursive: true });
+    mkdirSync(join(dir, 'pages'), { recursive: true });
+
+    run({ scaffold: true });
+    expect(existsSync(join(dir, 'app', 'not-found.tsx'))).toBe(true);
+    expect(existsSync(join(dir, 'pages', '404.tsx'))).toBe(false);
+  });
+});

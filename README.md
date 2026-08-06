@@ -69,7 +69,7 @@ This matrix is a public contract from day one. Anything outside it is out of sco
 
 | Dimension       | Supported                                           | Out of scope for v1              |
 | --------------- | --------------------------------------------------- | -------------------------------- |
-| Next.js router  | **App Router**                                      | Pages Router                     |
+| Next.js router  | **App Router and Pages Router** (and both at once)  | —                                |
 | Next.js version | 14.x, 15.x (a CI canary job is planned)             | < 14                             |
 | Language        | **JavaScript and TypeScript** apps                  | —                                |
 | Config format   | `next.config.js` / `.mjs` / `.ts`                   | —                                |
@@ -77,8 +77,8 @@ This matrix is a public contract from day one. Anything outside it is out of sco
 | Bundler         | Webpack **and** Turbopack (CLI is bundler-agnostic) | —                                |
 | Monorepo        | Turborepo: **detect-and-warn** planned for v1       | Full nested-workspace resolution |
 
-> A few matrix rows (Pages Router exclusion, monorepo support level) are still open decisions — see
-> the open-questions table in `docs-internal/PLAN.md`.
+> The monorepo support level is still an open decision — see the open-questions table in
+> `docs-internal/PLAN.md`.
 
 ## Repository layout
 

@@ -1,0 +1,116 @@
+import {
+  findAppDir,
+  listAppApiEndpoints,
+  listStaticPageRoutes,
+  resolvePagePathname,
+} from './app-dir.js';
+import {
+  findPagesDir,
+  listPagesApiEndpoints,
+  listStaticPagesRoutes,
+  resolvePagesPathname,
+} from './pages-dir.js';
+
+// The single place that decides how this project's files are looked up. Next.js apps come in three
+// shapes — App Router (`app/`), Pages Router (`pages/`), or both at once during a migration — and
+// every detector needs the same answer to "which pages exist, what URL is this file, where do MCP
+// mounts live". Deciding that per-detector would drift (one merges both routers, another checks
+// only `app/`), so it's decided exactly once here and consumed everywhere through this narrow,
+// semantic port. The port deliberately does NOT leak `route.ts`/`page.tsx` naming — a caller asks
+// for "page routes" or "API endpoints", not for a convention only one router has.
+//
+// Output artifacts (the catalog, the server card) are static files under `public/` and are
+// router-agnostic — a `.well-known` resource is a served file, not a route — so this model is only
+// about *reading* topology and about *where scaffolds write their router-specific source*.
+
+export type RouterKind = 'app' | 'pages';
+
+/** A route handler / API endpoint, tagged with the router it came from. */
+export interface ApiEndpoint {
+  /** Absolute path of the handler file. */
+  file: string;
+  /** The URL it mounts at, or undefined when a dynamic segment makes it ambiguous. */
+  url: string | undefined;
+  router: RouterKind;
+}
+
+export interface RouterModel {
+  cwd: string;
+  /** Routers present in the project, in precedence order (`app` before `pages`). Empty for neither. */
+  routers: RouterKind[];
+  /** Where opt-in scaffolds write their router-specific source: App Router when present, else Pages. */
+  primary?: RouterKind;
+  /** The App Router root (`app/` or `src/app/`), when present. */
+  appDir?: string;
+  /** The Pages Router root (`pages/` or `src/pages/`), when present. */
+  pagesDir?: string;
+  /** Every statically addressable page route across both routers, deduped and sorted. */
+  listPageRoutes(): string[];
+  /**
+   * The URL a source file is served at, for attribution of a whole-tree scan (e.g. a WebMCP
+   * `<form toolname>` page). Tries the App Router first, then the Pages Router; undefined when the
+   * file is neither a statically addressable page.
+   */
+  resolveUrlForFile(absolutePath: string): string | undefined;
+  /** Every route handler / API endpoint across both routers (App `route.*` + `pages/api/**`). */
+  listApiEndpoints(): ApiEndpoint[];
+}
+
+/**
+ * Builds the project's `RouterModel` once, composing the App and/or Pages adapters based on which
+ * router directories exist. On a route defined by both routers, the App Router's URL wins the dedupe
+ * (matching Next.js's runtime precedence), though for a plain URL set that only means it appears
+ * once. A project with neither router yields empty results from every method — the same silent,
+ * never-throwing degradation the individual `findAppDir`-based detectors had.
+ */
+export function buildRouterModel(cwd: string): RouterModel {
+  const appDir = findAppDir(cwd);
+  const pagesDir = findPagesDir(cwd);
+
+  const routers: RouterKind[] = [];
+  if (appDir) routers.push('app');
+  if (pagesDir) routers.push('pages');
+  const primary: RouterKind | undefined = appDir ? 'app' : pagesDir ? 'pages' : undefined;
+
+  return {
+    cwd,
+    routers,
+    ...(primary !== undefined ? { primary } : {}),
+    ...(appDir !== undefined ? { appDir } : {}),
+    ...(pagesDir !== undefined ? { pagesDir } : {}),
+
+    listPageRoutes() {
+      const routes = new Set<string>();
+      if (appDir) for (const route of listStaticPageRoutes(appDir)) routes.add(route);
+      if (pagesDir) for (const route of listStaticPagesRoutes(pagesDir)) routes.add(route);
+      return [...routes].sort();
+    },
+
+    resolveUrlForFile(absolutePath) {
+      if (appDir) {
+        const url = resolvePagePathname(absolutePath, appDir);
+        if (url !== undefined) return url;
+      }
+      if (pagesDir) {
+        const url = resolvePagesPathname(absolutePath, pagesDir);
+        if (url !== undefined) return url;
+      }
+      return undefined;
+    },
+
+    listApiEndpoints() {
+      const endpoints: ApiEndpoint[] = [];
+      if (appDir) {
+        for (const endpoint of listAppApiEndpoints(appDir)) {
+          endpoints.push({ ...endpoint, router: 'app' });
+        }
+      }
+      if (pagesDir) {
+        for (const endpoint of listPagesApiEndpoints(pagesDir)) {
+          endpoints.push({ ...endpoint, router: 'pages' });
+        }
+      }
+      return endpoints;
+    },
+  };
+}
