@@ -3,6 +3,8 @@
 // This schema is this package's own contract, not the vendored spec, so it lives here rather than
 // in spec/.
 
+import type { IsGated } from './gating.js';
+
 /** One entry the developer declares by hand, merged over/appended to inferred entries. */
 export interface AxEntryOverride {
   /**
@@ -91,12 +93,19 @@ export interface AxConfig {
    */
   scaffoldJsonLd?: boolean;
   /**
-   * Glob patterns for paths that must never be published, even if some future detector would
-   * otherwise infer an entry for them. Default-on: see DEFAULT_DENYLIST.
+   * Marks an artifact (MCP server, OpenAPI/REST surface, or a config-declared entry) as gated
+   * behind auth. Supersedes the old `denylist`/`allowlist` pair: a single matcher subsumes both
+   * (return `false` to re-include a path the built-in floor would gate). A gated artifact is never
+   * advertised as an *open* surface — one ax can describe (a detected `withMcpAuth` /
+   * `securitySchemes`) is emitted with a secret-free `auth` descriptor; one it can't describe is
+   * dropped rather than published. With no `isGated`, a built-in floor gates `/api/auth/**` and
+   * `/api/webhooks/**` (see {@link import('./gating.js').defaultIsGated}); supplying `isGated`
+   * replaces that floor wholesale, so call `defaultIsGated` from your own matcher to keep it.
+   *
+   * A function, so it is validated at load time by a `typeof` check rather than the JSON Schema
+   * (which has no function type) — see validate-config.ts.
    */
-  denylist?: string[];
-  /** Glob patterns that re-include a path the denylist would otherwise exclude. */
-  allowlist?: string[];
+  isGated?: IsGated;
   /**
    * Write a machine-readable build report — everything the run detected, referenced, warned about,
    * and recommended — so a coding agent or CI step can read one JSON file instead of parsing log
@@ -114,7 +123,8 @@ export interface AxConfig {
  * `siteUrl` is the one exception: there is no meaningful default for "unknown", so it stays
  * optional even here (undefined means "no absolute site URL could be determined").
  */
-export type ResolvedAxConfig = Required<Omit<AxConfig, 'siteUrl'>> & Pick<AxConfig, 'siteUrl'>;
+export type ResolvedAxConfig = Required<Omit<AxConfig, 'siteUrl' | 'isGated'>> &
+  Pick<AxConfig, 'siteUrl' | 'isGated'>;
 
 /** @deprecated Renamed to {@link AxConfig} along with `ard.config.*` → `ax.config.*`. */
 export type ArdConfig = AxConfig;
@@ -124,12 +134,6 @@ export type ArdEntryOverride = AxEntryOverride;
 
 /** @deprecated Renamed to {@link ResolvedAxConfig} along with `ard.config.*` → `ax.config.*`. */
 export type ResolvedArdConfig = ResolvedAxConfig;
-
-/**
- * Default-on denylist: auth and webhook routes are never safe to publish
- * unconditionally, so they're excluded even with zero config. `allowlist` re-includes.
- */
-export const DEFAULT_DENYLIST: readonly string[] = ['/api/auth/**', '/api/webhooks/**'];
 
 const entryOverrideSchema = {
   type: 'object',
@@ -168,13 +172,13 @@ export const axConfigSchema: Record<string, unknown> = {
     scaffoldAgent404: { type: 'boolean' },
     scaffoldRobots: { type: 'boolean' },
     scaffoldJsonLd: { type: 'boolean' },
-    denylist: { type: 'array', items: { type: 'string', minLength: 1 } },
-    allowlist: { type: 'array', items: { type: 'string', minLength: 1 } },
     report: { anyOf: [{ type: 'boolean' }, { type: 'string', minLength: 1 }] },
     entries: { type: 'array', items: entryOverrideSchema },
   },
   // Unlike entries, the top-level config shape is closed — an unrecognized key is almost always a
-  // typo, and this is the "fails loudly" surface this validation exists for.
+  // typo, and this is the "fails loudly" surface this validation exists for. `isGated` is the one
+  // legitimate key not listed here: it's a function, which JSON Schema has no type for, so
+  // validate-config.ts strips it before Ajv runs and validates it with a `typeof` check instead.
   additionalProperties: false,
 };
 

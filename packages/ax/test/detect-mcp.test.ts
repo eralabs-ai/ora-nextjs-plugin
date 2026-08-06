@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { detectMcpServers } from '../src/detect-mcp.js';
+import { detectMcpMounts, detectMcpServers } from '../src/detect-mcp.js';
 
 let dir: string;
 let warnings: string[];
@@ -317,6 +317,93 @@ describe('detectMcpServers', () => {
     });
     expect(entries).toHaveLength(1);
     expect(entries[0]?.capabilities).toEqual(['roll_dice']);
+  });
+
+  it('leaves a plain (un-wrapped) mount with no auth field — never infers open', () => {
+    writeMcpRoute('[transport]');
+    const entries = detectMcpServers({
+      cwd: dir,
+      siteUrl: 'https://example.com',
+      basePath: '',
+      warn,
+    });
+    expect(entries[0]).not.toHaveProperty('auth');
+  });
+
+  it('marks a withMcpAuth-wrapped mount gated with auth.status "unknown"', () => {
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      `import { createMcpHandler } from 'mcp-handler';\n` +
+        `import { withMcpAuth } from 'mcp-handler';\n` +
+        `const handler = createMcpHandler((server) => { server.tool('roll_dice', 'd', {}, async () => ({})); });\n` +
+        `const authed = withMcpAuth(handler, verifyToken, { resourceMetadataPath: '/.well-known/oauth-protected-resource' });\n` +
+        `export { authed as GET };\n`,
+      'utf8',
+    );
+
+    const entries = detectMcpServers({
+      cwd: dir,
+      siteUrl: 'https://example.com',
+      basePath: '',
+      warn,
+    });
+    expect(entries[0]?.auth).toEqual({ status: 'unknown' });
+
+    // The mount also carries the RFC 9728 metadata path (for the server card cross-link).
+    const mounts = detectMcpMounts({ cwd: dir, warn });
+    expect(mounts[0]).toMatchObject({
+      auth: { status: 'unknown' },
+      resourceMetadataPath: '/.well-known/oauth-protected-resource',
+    });
+  });
+
+  it('does not treat a withMcpAuth mention inside a comment as gated', () => {
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      `import { createMcpHandler } from 'mcp-handler';\n` +
+        `// Wrap with withMcpAuth(handler, verifyToken) if you add auth.\n` +
+        `const handler = createMcpHandler((server) => { server.tool('roll_dice', 'd', {}, async () => ({})); });\n` +
+        `export { handler as GET };\n`,
+      'utf8',
+    );
+
+    const entries = detectMcpServers({
+      cwd: dir,
+      siteUrl: 'https://example.com',
+      basePath: '',
+      warn,
+    });
+    expect(entries[0]).not.toHaveProperty('auth');
+  });
+
+  it('does not gate a mount that merely references a verifyToken symbol (no withMcpAuth call)', () => {
+    // `verifyToken` is far too common a name to gate on: an open server with a helper (or import)
+    // called verifyToken must not be marked gated. Gating keys on the `withMcpAuth(` call only.
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      `import { createMcpHandler } from 'mcp-handler';\n` +
+        `function verifyToken(req) { return undefined; }\n` +
+        `const handler = createMcpHandler((server) => {\n` +
+        `  server.tool('roll_dice', 'd', {}, async () => ({}));\n` +
+        `});\n` +
+        `export { handler as GET, verifyToken };\n`,
+      'utf8',
+    );
+
+    const entries = detectMcpServers({
+      cwd: dir,
+      siteUrl: 'https://example.com',
+      basePath: '',
+      warn,
+    });
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).not.toHaveProperty('auth');
   });
 
   it('finds an app dir nested under src/', () => {

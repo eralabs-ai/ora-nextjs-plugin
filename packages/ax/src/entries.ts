@@ -37,8 +37,8 @@ export function applyEntryOverrides(
 }
 
 /**
- * The URL path a catalog entry would be served at, for denylist/allowlist matching. Entries with
- * `data` instead of `url` (spec allows either) have no path to match, so they're never denied.
+ * The URL path a catalog entry would be served at, for `isGated` matching. Entries with `data`
+ * instead of `url` (spec allows either) have no path to match, so they're never gated on path.
  */
 export function entryUrlPath(entry: Pick<CatalogEntry, 'url'>): string | undefined {
   if (typeof entry.url !== 'string' || entry.url === '') return undefined;

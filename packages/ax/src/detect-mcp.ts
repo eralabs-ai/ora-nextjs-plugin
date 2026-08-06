@@ -4,7 +4,7 @@ import { relative } from 'node:path';
 import { buildRouterModel, type RouterModel } from './router-model.js';
 import { scrubSource } from './scrub-source.js';
 import { buildArtifactUrl, buildUrn, NO_SITE_URL_HINT } from './site-url.js';
-import type { CatalogEntry } from './types.js';
+import type { CatalogEntry, EntryAuth } from './types.js';
 
 // An existing MCP server is unambiguous intent to publish, so this is the one zero-config
 // detector that runs with no opt-in marker. Detection is deliberately textual, not AST-based: a
@@ -28,6 +28,18 @@ const MCP_HANDLER_CALL_RE = /createMcpHandler\s*\(/;
 // picks up a `.tool('x')` that only appears in a comment or a template literal.
 const TOOL_NAME_RE = /\.tool\(\s*['"`]([^'"`]+)['"`]/g;
 
+// Auth detection: a mount wrapped in `mcp-handler`'s `withMcpAuth(handler, verifyToken, ...)` call
+// (Clerk's official MCP path, and the ecosystem-idiomatic one) is gated. We key on the
+// `withMcpAuth(` *call* specifically — not a bare `verifyToken` symbol, which is far too common a
+// name to gate on without over-gating an open server. Detection stays textual on the
+// already-`scrubSource`d content, so a mention in a comment/template can't misfire; a match only
+// marks the surface as requiring auth (status "unknown"), never guesses the OAuth endpoints, which
+// aren't statically derivable.
+const WITH_MCP_AUTH_CALL_RE = /\bwithMcpAuth\s*\(/;
+// The RFC 9728 protected-resource metadata path `withMcpAuth` is configured with, when declared as
+// a literal — cross-linked into the server card so agents can discover the auth requirements.
+const RESOURCE_METADATA_PATH_RE = /resourceMetadataPath\s*:\s*['"]([^'"]+)['"]/;
+
 export interface DetectMcpMountsOptions {
   cwd: string;
   /** Reported via `generateCatalog`'s `onWarning` — never thrown, this detector never fails a build. */
@@ -48,6 +60,10 @@ export interface McpMount {
   filePath: string;
   pathname: string;
   capabilities: string[];
+  /** Auth posture when a `withMcpAuth`/`verifyToken` wrapper was detected; omitted otherwise. */
+  auth?: EntryAuth;
+  /** RFC 9728 metadata path from `withMcpAuth`'s `resourceMetadataPath`, when a literal was found. */
+  resourceMetadataPath?: string;
 }
 
 /**
@@ -80,10 +96,20 @@ export function detectMcpMounts(options: DetectMcpMountsOptions): McpMount[] {
       continue;
     }
 
+    // ax can't probe the live server for OAuth metadata at build time, so a gated mount can only
+    // ever be described as `status: 'unknown'` (requires auth; how is not statically derivable) —
+    // mirroring Ora's "requires-auth but no metadata → unknown, never api_key". No wrapper → no
+    // auth block at all (absence of a wrapper is not evidence the server is open).
+    const gated = WITH_MCP_AUTH_CALL_RE.test(content);
+    const auth: EntryAuth | undefined = gated ? { status: 'unknown' } : undefined;
+    const resourceMetadataPath = gated ? RESOURCE_METADATA_PATH_RE.exec(content)?.[1] : undefined;
+
     mounts.push({
       filePath: endpoint.file,
       pathname: endpoint.url,
       capabilities: extractToolNames(content),
+      ...(auth !== undefined ? { auth } : {}),
+      ...(resourceMetadataPath !== undefined ? { resourceMetadataPath } : {}),
     });
   }
 
@@ -139,6 +165,7 @@ export function buildMcpEntries(options: BuildMcpEntriesOptions): CatalogEntry[]
       url: buildArtifactUrl(siteUrl, options.basePath, mount.pathname),
       updatedAt: statSync(mount.filePath).mtime.toISOString(),
       ...(mount.capabilities.length > 0 ? { capabilities: mount.capabilities } : {}),
+      ...(mount.auth !== undefined ? { auth: mount.auth } : {}),
     };
   });
 }

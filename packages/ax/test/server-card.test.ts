@@ -119,6 +119,47 @@ describe('buildMcpServerCard', () => {
     expect(recs.some((r) => r.includes('2 MCP server mounts'))).toBe(true);
   });
 
+  it('omits the authentication block for an un-gated mount', () => {
+    const card = buildMcpServerCard({
+      mounts: [mount()],
+      siteUrl: 'https://example.com',
+      basePath: '',
+      site,
+      recommend: () => {},
+    });
+    expect(card).not.toHaveProperty('authentication');
+  });
+
+  it('adds an authentication block (with the RFC 9728 metadata URL) for a gated mount', () => {
+    const card = buildMcpServerCard({
+      mounts: [
+        mount({
+          auth: { status: 'unknown' },
+          resourceMetadataPath: '/.well-known/oauth-protected-resource',
+        }),
+      ],
+      siteUrl: 'https://example.com',
+      basePath: '',
+      site,
+      recommend: () => {},
+    });
+    expect(card?.authentication).toEqual({
+      required: true,
+      resourceMetadata: 'https://example.com/.well-known/oauth-protected-resource',
+    });
+  });
+
+  it('marks a gated mount required even when no resourceMetadataPath literal was found', () => {
+    const card = buildMcpServerCard({
+      mounts: [mount({ auth: { status: 'unknown' } })],
+      siteUrl: 'https://example.com',
+      basePath: '',
+      site,
+      recommend: () => {},
+    });
+    expect(card?.authentication).toEqual({ required: true });
+  });
+
   it('reverses a multi-label host into reverse-DNS and slugifies the name', () => {
     const card = buildMcpServerCard({
       mounts: [mount()],

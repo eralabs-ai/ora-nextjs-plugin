@@ -14,7 +14,15 @@ export {
   ARD_SPEC_SOURCE_COMMIT,
 } from './schema.js';
 
-export type { AiCatalog, CatalogEntry, CatalogHost, CatalogPublisher } from './types.js';
+export type {
+  AiCatalog,
+  CatalogEntry,
+  CatalogHost,
+  CatalogPublisher,
+  EntryAuth,
+  EntryAuthOAuth,
+  EntryAuthStatus,
+} from './types.js';
 
 export {
   generateCatalog,
@@ -72,7 +80,6 @@ export { runCli, type CliIO } from './cli.js';
 
 export {
   axConfigSchema,
-  DEFAULT_DENYLIST,
   type AxConfig,
   type AxEntryOverride,
   type ResolvedAxConfig,
@@ -106,7 +113,16 @@ export {
   type LoadNextConfigResult,
 } from './next-config.js';
 
-export { isPathDenied, matchesAnyGlob } from './denylist.js';
+export {
+  defaultIsGated,
+  resolveGating,
+  matchesAnyGlob,
+  DEFAULT_GATED_GLOBS,
+  type GateTarget,
+  type IsGated,
+} from './gating.js';
+
+export { authForOpenApi, safeHttpUrl } from './auth.js';
 
 export { applyEntryOverrides, entryUrlPath, type ApplyEntryOverridesResult } from './entries.js';
 
@@ -144,6 +160,7 @@ export {
   type McpServerCard,
   type McpServerCardTool,
   type McpServerCardRemote,
+  type McpServerCardAuthentication,
   type BuildMcpServerCardOptions,
 } from './server-card.js';
 

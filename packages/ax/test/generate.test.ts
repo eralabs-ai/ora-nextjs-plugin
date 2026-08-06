@@ -314,11 +314,41 @@ describe('generateCatalog zero-config artifact detection', () => {
     expect(joined).toContain('No JSON-LD structured data found');
   });
 
-  it('applies the denylist to a detected entry, not just config-declared ones', async () => {
+  it('drops a detected entry that isGated marks gated and ax cannot describe', async () => {
+    // A plain MCP mount (no withMcpAuth wrapper) has no derivable auth descriptor, so a gated
+    // decision means "don't advertise it as open" → drop, the old denylist behavior, but now on a
+    // detected (not just config-declared) entry.
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
     writeFileSync(
       join(dir, 'ax.config.mjs'),
-      "export default { siteUrl: 'https://example.com', denylist: ['/openapi.json'] };\n",
+      "export default { siteUrl: 'https://example.com', isGated: ({ path }) => path === '/mcp' };\n",
+      'utf8',
+    );
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      "import { createMcpHandler } from 'mcp-handler';\n" +
+        "const handler = createMcpHandler((server) => { server.tool('roll_dice', 'd', {}, async () => ({})); });\n" +
+        'export { handler as GET };\n',
+      'utf8',
+    );
+
+    const warnings: string[] = [];
+    const { catalog } = await generateCatalog({ cwd: dir, onWarning: (m) => warnings.push(m) });
+
+    expect(catalog.entries).toEqual([]);
+    expect(warnings.some((w) => w.includes('isGated excluded entry'))).toBe(true);
+  });
+
+  it('emits a describable gated entry with an auth descriptor rather than dropping it', async () => {
+    // An OpenAPI doc always carries a derived auth descriptor. Marking it gated when its own doc
+    // declares no auth (`none`) is a disagreement: the explicit isGated wins (downgrade to
+    // "unknown") and the entry is still published — more discoverable than a silent drop.
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com', isGated: ({ kind }) => kind === 'openapi' };\n",
       'utf8',
     );
     mkdirSync(join(dir, 'public'), { recursive: true });
@@ -331,8 +361,53 @@ describe('generateCatalog zero-config artifact detection', () => {
     const warnings: string[] = [];
     const { catalog } = await generateCatalog({ cwd: dir, onWarning: (m) => warnings.push(m) });
 
-    expect(catalog.entries).toEqual([]);
-    expect(warnings.some((w) => w.includes('denylist excluded entry'))).toBe(true);
+    expect(catalog.entries).toHaveLength(1);
+    expect(catalog.entries[0]?.auth).toEqual({ status: 'unknown' });
+    expect(warnings.some((w) => w.includes('as gated, but its own declaration shows'))).toBe(true);
+  });
+
+  it('keeps a gated MCP mount that carries its own auth descriptor (withMcpAuth), not dropped', async () => {
+    // A withMcpAuth-wrapped mount is describable (auth.status "unknown"), so even when isGated also
+    // marks it, it's published *with* the descriptor rather than dropped — the more-discoverable path.
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com', isGated: ({ path }) => path === '/mcp' };\n",
+      'utf8',
+    );
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      "import { createMcpHandler, withMcpAuth } from 'mcp-handler';\n" +
+        "const handler = createMcpHandler((server) => { server.tool('roll_dice', 'd', {}, async () => ({})); });\n" +
+        'const authed = withMcpAuth(handler, verifyToken, {});\n' +
+        'export { authed as GET };\n',
+      'utf8',
+    );
+
+    const { catalog } = await generateCatalog({ cwd: dir });
+
+    expect(catalog.entries).toHaveLength(1);
+    expect(catalog.entries[0]?.auth).toEqual({ status: 'unknown' });
+  });
+
+  it('passes a data-only entry through gating untouched (no URL path to match)', async () => {
+    // Entries carrying `data` instead of `url` have no pathname, so isGated can't decide on them —
+    // they pass through even when isGated returns true for everything it *can* match.
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com', isGated: () => true, " +
+        "entries: [{ identifier: 'urn:air:example.com:inline', type: 'application/json', displayName: 'Inline', data: { hello: 'world' } }] };\n",
+      'utf8',
+    );
+
+    const { catalog } = await generateCatalog({ cwd: dir });
+
+    const entry = catalog.entries.find((e) => e.identifier === 'urn:air:example.com:inline');
+    expect(entry).toMatchObject({ data: { hello: 'world' } });
+    expect(entry).not.toHaveProperty('auth');
   });
 
   it('a config-declared override extends a zero-config-detected entry by identifier', async () => {

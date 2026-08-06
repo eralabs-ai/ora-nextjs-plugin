@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { authForOpenApi } from './auth.js';
 import { buildArtifactUrl, buildUrn, NO_SITE_URL_HINT } from './site-url.js';
 import type { CatalogEntry } from './types.js';
 
@@ -110,6 +111,11 @@ export function detectOpenApi(options: DetectOpenApiOptions): CatalogEntry | und
   const title = typeof doc.info?.title === 'string' ? doc.info.title : undefined;
   const description = typeof doc.info?.description === 'string' ? doc.info.description : undefined;
 
+  // Read the doc's own `securitySchemes` into a secret-free auth descriptor (see auth.ts). The doc
+  // is the developer's committed declaration, so a `none` here means "declared open", not an
+  // inference from silence — `generateCatalog` reconciles this against an explicit `isGated`.
+  const auth = authForOpenApi(doc);
+
   return {
     identifier: buildUrn(options.siteUrl, 'openapi'),
     type: `application/vnd.oai.openapi+json;version=${version}`,
@@ -117,6 +123,7 @@ export function detectOpenApi(options: DetectOpenApiOptions): CatalogEntry | und
     url: buildArtifactUrl(options.siteUrl, options.basePath, '/openapi.json'),
     updatedAt: statSync(filePath).mtime.toISOString(),
     ...(description !== undefined ? { description } : {}),
+    auth,
   };
 }
 

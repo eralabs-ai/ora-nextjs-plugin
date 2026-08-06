@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
 
 export const metadata = {
-  title: 'Config Overrides Fixture',
-  description: 'A Next.js app that declares catalog entries and an isGated policy via ax.config.',
+  title: 'MCP Adapter (gated) Fixture',
+  description: 'A Next.js app hosting an MCP server gated behind OAuth via withMcpAuth.',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

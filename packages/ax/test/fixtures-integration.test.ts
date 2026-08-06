@@ -36,10 +36,10 @@ describe('generateCatalog against the fixture corpus', () => {
 });
 
 // End-to-end: the config-overrides fixture ships a real `ax.config.ts`, so this
-// exercises the whole config path (jiti load -> validate -> entry overrides -> denylist/allowlist)
-// against a committed fixture rather than a synthetic tmp dir.
+// exercises the whole config path (jiti load -> validate -> entry overrides -> isGated) against a
+// committed fixture rather than a synthetic tmp dir.
 describe('generateCatalog with the config-overrides fixture', () => {
-  it('emits config-declared entries and applies denylist + allowlist', async () => {
+  it('emits config-declared entries and applies the isGated policy', async () => {
     const { catalog } = await generateCatalog({ cwd: `${fixturesDir}config-overrides` });
     expect(validateCatalog(catalog).valid).toBe(true);
     expect(validateCatalogArd(catalog).valid).toBe(true);
@@ -47,9 +47,9 @@ describe('generateCatalog with the config-overrides fixture', () => {
     const ids = catalog.entries.map((entry) => entry.identifier);
     expect(ids).toContain('urn:air:example.com:docs');
     expect(ids).toContain('urn:air:example.com:skills');
-    // Denylisted by default (/api/auth/**) but re-included via the config's allowlist.
+    // Gated by the default floor (/api/auth/**) but re-included via the config's isGated matcher.
     expect(ids).toContain('urn:air:example.com:auth-status');
-    // Denylisted by default and NOT allowlisted — dropped even though the config declares it.
+    // Gated and NOT re-included — ax can't describe its auth, so it's dropped though it's declared.
     expect(ids).not.toContain('urn:air:example.com:auth-internal');
   });
 });
@@ -80,6 +80,27 @@ describe('generateCatalog zero-config detection against the fixture corpus', () 
       serverUrl: 'https://mcp-adapter-fixture.example.com/mcp',
       remotes: [{ type: 'streamable-http', url: 'https://mcp-adapter-fixture.example.com/mcp' }],
       tools: [{ name: 'roll_dice' }],
+    });
+  });
+
+  it('marks the gated mcp-adapter-gated mount with auth and a server-card authentication block', async () => {
+    const { catalog, serverCard } = await generateCatalog({
+      cwd: `${fixturesDir}mcp-adapter-gated`,
+    });
+    expect(validateCatalogArd(catalog).valid).toBe(true);
+
+    const entry = catalog.entries.find(
+      (e) => e.identifier === 'urn:air:mcp-gated-fixture.example.com:mcp-server',
+    );
+    expect(entry).toMatchObject({
+      type: 'application/mcp-server-card+json',
+      url: 'https://mcp-gated-fixture.example.com/mcp',
+      auth: { status: 'unknown' },
+    });
+    expect(serverCard?.authentication).toEqual({
+      required: true,
+      resourceMetadata:
+        'https://mcp-gated-fixture.example.com/.well-known/oauth-protected-resource',
     });
   });
 

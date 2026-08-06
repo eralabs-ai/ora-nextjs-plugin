@@ -415,10 +415,14 @@ Precision over recall, applied to the plugin's own output, not just to what it d
 
 ### 2.3 Review-before-publish flow
 
-- [ ] First run (no committed catalog present): print a full "about to expose" summary and write
-      the catalog only after `--yes` / interactive confirm; CI mode requires the flag.
-- [ ] Every run prints a build summary: `✓ N artifacts referenced (MCP/OpenAPI/docs/skills),
-      K warnings`.
+- [x] First run (no committed catalog present): print a full "about to expose" summary and write
+      the catalog only after `--yes` / interactive confirm; CI mode requires the flag. (`cli.ts` —
+      `--yes`/`--dry-run` flags, an "About to expose" per-entry summary that flags each entry's
+      `auth` status, a first-publish gate that refuses in non-interactive shells without `--yes`
+      and prompts via `node:readline` interactively, and skips entirely once a catalog already
+      exists at the target path. Fixture `postbuild` scripts now pass `ax --report --yes`.)
+- [x] Every run prints a build summary; warnings are aggregated into the summary line
+      (`✓ N entries referenced, K warnings`) rather than only printed individually.
 
 ### 2.4 Emission targets
 
@@ -565,34 +569,47 @@ failure this project exists to prevent (agents hit blind 401s; a token prompt co
 crawl). Design converged 2026-07-22; grounded in research on OpenAPI `securitySchemes`, MCP SEP-1649/2127,
 and how Clerk actually gates routes.
 
-- [ ] **Detection-first, per-kind — never infer, never guess.** Each artifact carries its own native
+**Open question #21 resolved from Ora's code (repo access granted):** the emitted `auth` descriptor is
+Ora's own `EntryAuth` shape (`eralabs-ai/ora:src/lib/ard/{types,resource-projection,entry-auth}.ts`) —
+`status: 'oauth2' | 'api_key' | 'none' | 'unknown'`, optional `oauth` (endpoints + scope keys + `dcr`),
+optional `docsUrl` — so a first-party catalog's block survives Ora's crawl-time `sanitizeEntryAuth`
+(enum-checked status, http(s)-only URLs, arrays capped 32×256). Ora's derivation
+(`authForOpenApi`/`authForMcp`) is mirrored in `src/auth.ts`. Also confirmed in `ora`'s `docs/scoring.md`:
+**auth-gating does not lower the score** — advertising a gated surface as *open* (or hiding it) is the
+only failure. Emitted verbatim in `src/types.ts` (`EntryAuth`).
+
+- [x] **Detection-first, per-kind — never infer, never guess.** Each artifact carries its own native
       auth-declaration; read the right one per kind:
-      - MCP → detect the `withMcpAuth` / `verifyToken` wrapper and/or a served
-        `/.well-known/oauth-protected-resource` (RFC 9728) route → mark gated; read `withMcpAuth`'s
-        `resourceMetadataPath` (a literal) to cross-link it in the server card. (Clerk's official MCP
-        path uses exactly `withMcpAuth` + RFC 9728, so this is ecosystem-idiomatic.)
-      - OpenAPI/REST → read `components.securitySchemes` + the effective `security` from the committed
-        doc → a compact, **secret-free** `auth` descriptor (`apiKey` / `http-bearer` / `oauth2` /
-        `openIdConnect`). Emit only URLs/names/scope-keys; a **secret-guard** rejects token/key-looking
-        values; skip `description` prose.
-- [ ] **Safe default:** a detected auth signal → the artifact is not advertised as open. **Never infer
-      "open" from the absence of a signal** (auth may sit in middleware, a reverse proxy, a WAF, or
-      Vercel Deployment Protection — none statically visible).
-- [ ] **Escape hatch:** optional `isGated?: (target: { kind: 'mcp' | 'openapi' | 'entry'; path: string;
-      tools?: string[] }) => boolean` in `ax.config` for infra auth the plugin can't detect. Boolean,
-      whole-artifact for v1. **Not** built on reusing Clerk's `createRouteMatcher` — that API is
-      deprecated and has a bypass CVE (GHSA-vqx2-fgx2-5wq9), and Clerk differentiates MCP-vs-API by auth
-      *mechanism* (OAuth bearer vs session cookie), not by a shared path matcher.
-- [ ] **Backstop = review-before-publish (Phase 2.3).** Surface the exposure surface and require `--yes`
-      in CI before writing; flag `withMcpAuth`-vs-`isGated` disagreements. **This means Phase 2.3 must
-      also land before Phase 3.5.**
-- [ ] **Config cleanup:** `isGated` supersedes `denylist`/`allowlist` (a matcher subsumes both; there is
-      no over-exclusion for an allowlist to undo). Breaking pre-1.0 config change → migrate the
-      `config-overrides` fixture + README. No agentic-auth descriptor modeling in v1 — deferred until
-      agentic auth is common.
+      - MCP → detect the `withMcpAuth` / `verifyToken` wrapper (`src/detect-mcp.ts`, textual on
+        `scrubSource`d content) → mark gated (`auth.status: 'unknown'` — ax can't probe the live
+        server for OAuth endpoints at build time); read `withMcpAuth`'s `resourceMetadataPath` literal
+        and cross-link it in the server card (`src/server-card.ts` `authentication`). Clerk's official
+        MCP path uses exactly `withMcpAuth` + RFC 9728, so this is ecosystem-idiomatic.
+      - OpenAPI/REST → read `components.securitySchemes` from the committed doc → the secret-free
+        descriptor (`src/auth.ts` `authForOpenApi`): oauth2/openIdConnect → `oauth2` + endpoints/scope
+        keys; apiKey/http-bearer/basic → `api_key`; no schemes → `none`. The **secret-guard** is
+        `safeHttpUrl` (http(s)-only) + list caps; only structural fields cross, never `description`.
+- [x] **Safe default:** a detected/declared gated signal → the artifact is not advertised as open.
+      **Never infer "open" from the absence of a signal** — MCP with no wrapper carries no `auth`
+      block (never `none`); only a committed OpenAPI doc's own `securitySchemes` can yield `none`.
+- [x] **Escape hatch:** optional `isGated?: (target: { kind: 'mcp' | 'openapi' | 'entry'; path: string;
+      tools?: string[] }) => boolean` in `ax.config` (`src/gating.ts`). Boolean, whole-artifact for v1.
+      A function value, so it's split out before Ajv (which has no function type) and validated with a
+      `typeof` check. In `generateCatalog` (`applyGating`): a gated artifact ax can describe is emitted
+      *with* its `auth` descriptor; one it can't describe is dropped; an `isGated`-vs-`none` disagreement
+      downgrades to `unknown` with a warning. Not built on Clerk's deprecated `createRouteMatcher`.
+- [x] **Backstop = review-before-publish (Phase 2.3).** Landed first (see 2.3): the exposure summary
+      flags each entry's `auth` status, `--yes` is required in CI, and the disagreement warning is the
+      `withMcpAuth`-vs-`isGated` flag. **Phase 2.3 landed alongside this, ahead of Phase 3.5.**
+- [x] **Config cleanup:** `isGated` supersedes `denylist`/`allowlist` (a matcher subsumes both; a
+      `false` return re-includes, replacing the allowlist). Breaking pre-1.0 change → `src/denylist.ts`
+      removed, `config-overrides` fixture + README migrated, `DEFAULT_GATED_GLOBS`/`defaultIsGated`
+      replace `DEFAULT_DENYLIST`. No agentic-auth descriptor modeling in v1.
 
 **Done when:** no artifact (catalog entry or server-card) for a detected/declared-gated surface is ever
-advertised as open; review-before-publish gates the ambiguous case; and this lands before the canary.
+advertised as open ✓; review-before-publish gates the ambiguous case ✓; and this lands before the canary
+✓. (Deploy-only step still open, like the rest of the plan: re-scan a deployed gated fixture through Ora
+to confirm the `auth` block is ingested — folded into the Phase 3.5 Vercel step.)
 
 ---
 
