@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
@@ -235,11 +236,24 @@ describe('loadNextConfig against the fixture corpus', () => {
 // Pages Router (and hybrid) support: the same detectors run against `pages/` route topology, and a
 // project with both routers scans both. Output is still the router-agnostic `public/` catalog.
 describe('generateCatalog against the Pages Router fixtures', () => {
-  it('produces a spec-valid catalog for pages-bare and reports the pages router', async () => {
-    const { catalog, report } = await generateCatalog({ cwd: `${fixturesDir}pages-bare` });
+  it('produces a spec-valid catalog for pages-bare, reports the pages router, and detects the existing 404', async () => {
+    const recommendations: string[] = [];
+    const { catalog, report } = await generateCatalog({
+      cwd: `${fixturesDir}pages-bare`,
+      onRecommendation: (m) => recommendations.push(m),
+    });
     expect(validateCatalog(catalog).valid).toBe(true);
     expect(validateCatalogArd(catalog).valid).toBe(true);
     expect(report.routers).toEqual(['pages']);
+
+    // pages-bare ships a plain pages/404.tsx: detected, but not agent-aware — so a "signpost it"
+    // recommendation, proving the Pages Router 404 convention is recognized (not just app/not-found).
+    expect(report.agent404).toMatchObject({
+      notFoundPresent: true,
+      agentAware: false,
+      source: join('pages', '404.tsx'),
+    });
+    expect(recommendations.some((r) => r.includes("doesn't point agents anywhere"))).toBe(true);
   });
 
   it('lists Pages Router content routes, excluding special/dynamic/error files', () => {
@@ -249,9 +263,14 @@ describe('generateCatalog against the Pages Router fixtures', () => {
     expect(routes).toEqual(['/', '/about']);
   });
 
-  it('detects the pages/api/[transport].ts MCP mount at /api/mcp', async () => {
-    const { catalog, serverCard } = await generateCatalog({ cwd: `${fixturesDir}pages-mcp` });
+  it('detects the pages/api/[transport].ts MCP mount at /api/mcp (entry, server card, and report)', async () => {
+    const recommendations: string[] = [];
+    const { catalog, serverCard, report } = await generateCatalog({
+      cwd: `${fixturesDir}pages-mcp`,
+      onRecommendation: (m) => recommendations.push(m),
+    });
     expect(validateCatalogArd(catalog).valid).toBe(true);
+    expect(report.routers).toEqual(['pages']);
 
     const entry = catalog.entries.find(
       (e) => e.identifier === 'urn:air:pages-mcp-fixture.example.com:mcp-server',
@@ -265,10 +284,14 @@ describe('generateCatalog against the Pages Router fixtures', () => {
       serverUrl: 'https://pages-mcp-fixture.example.com/api/mcp',
       tools: [{ name: 'roll_dice' }],
     });
+    // The report mirrors the detection: the mount is surfaced at /api/mcp with its tools.
+    expect(report.mcp.mounts).toEqual([{ pathname: '/api/mcp', tools: ['roll_dice'] }]);
+    // No pages/404.tsx here — the "add one" recommendation names the Pages Router convention.
+    expect(recommendations.some((r) => r.includes('No pages/404.tsx found'))).toBe(true);
   });
 
-  it('attributes a declarative WebMCP form to its Pages Router page URL', async () => {
-    const { catalog, webMcpToolNames } = await generateCatalog({
+  it('attributes a declarative WebMCP form to its Pages Router page URL (entry + report site)', async () => {
+    const { catalog, webMcpToolNames, report } = await generateCatalog({
       cwd: `${fixturesDir}pages-webmcp-declarative`,
     });
     expect(validateCatalogArd(catalog).valid).toBe(true);
@@ -282,6 +305,15 @@ describe('generateCatalog against the Pages Router fixtures', () => {
       url: 'https://pages-webmcp-fixture.example.com/',
       capabilities: ['subscribe_newsletter'],
     });
+    // The report records the declarative site attributed to the Pages Router page URL `/` — proving
+    // resolveUrlForFile handles the file-is-the-route rule, not just the App Router `page.*` shape.
+    expect(report.webmcp.sites).toContainEqual(
+      expect.objectContaining({
+        kind: 'declarative',
+        names: ['subscribe_newsletter'],
+        pagePathname: '/',
+      }),
+    );
   });
 
   it('scans both routers for the hybrid fixture and unions their routes', async () => {
