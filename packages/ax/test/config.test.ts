@@ -20,9 +20,8 @@ afterEach(() => {
 
 describe('loadAxConfig', () => {
   it('defaults every field when no config file exists (isGated stays unset)', async () => {
-    const { config, path, warnings } = await loadAxConfig(dir);
+    const { config, path } = await loadAxConfig(dir);
     expect(path).toBeUndefined();
-    expect(warnings).toEqual([]);
     expect(config).toEqual({
       siteUrl: undefined,
       emit: 'static',
@@ -117,68 +116,38 @@ describe('loadAxConfig', () => {
     });
   });
 
-  // The config file was renamed `ard.config.*` → `ax.config.*`. The old name keeps working so an
-  // existing project doesn't silently lose its config on upgrade — but never silently: loading a
-  // legacy file, or ignoring one that's been superseded, is always warned about.
-  it('falls back to a legacy ard.config.* and warns that it is deprecated', async () => {
+  // `ard.config.*` was `ax.config.*`'s pre-rename name; support for it was dropped (pre-1.0,
+  // maintainer-approved breaking change). An `ard.config.*`-only project is not "unconfigured" —
+  // it has real settings sitting under a name this loader no longer reads — so silently falling
+  // back to defaults would drop them without telling anyone. It must fail loudly instead, same as
+  // an invalid `ax.config.*` does.
+  it('throws AxConfigError with a rename message when only a legacy ard.config.* exists', async () => {
     writeFileSync(
       join(dir, 'ard.config.mjs'),
       "export default { siteUrl: 'https://legacy.example.com' };\n",
     );
-    const { config, path, warnings } = await loadAxConfig(dir);
-    expect(path).toBe(join(dir, 'ard.config.mjs'));
-    expect(config.siteUrl).toBe('https://legacy.example.com');
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain('ard.config.* is deprecated, rename to ax.config.*');
-  });
-
-  it('applies the same validation to a legacy ard.config.* as to ax.config.*', async () => {
-    writeFileSync(join(dir, 'ard.config.js'), 'module.exports = { emit: 123 };\n', 'utf8');
     await expect(loadAxConfig(dir)).rejects.toThrow(AxConfigError);
-    await expect(loadAxConfig(dir)).rejects.toThrow(/ard\.config\.js/);
+    await expect(loadAxConfig(dir)).rejects.toThrow(
+      /ard\.config\.mjs.*rename it to ax\.config\.mjs/is,
+    );
   });
 
-  it('prefers ax.config.* over a legacy ard.config.* and warns that the legacy file is ignored', async () => {
-    writeFileSync(
-      join(dir, 'ax.config.mjs'),
-      "export default { siteUrl: 'https://new.example.com' };\n",
-    );
-    writeFileSync(
-      join(dir, 'ard.config.mjs'),
-      "export default { siteUrl: 'https://legacy.example.com' };\n",
-    );
-    const { config, path, warnings } = await loadAxConfig(dir);
-    expect(path).toBe(join(dir, 'ax.config.mjs'));
-    expect(config.siteUrl).toBe('https://new.example.com');
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain('ignoring ard.config.mjs');
+  it('throws the same rename error regardless of the legacy file extension', async () => {
+    writeFileSync(join(dir, 'ard.config.ts'), "export default { siteUrl: 'https://x.com' };\n");
+    await expect(loadAxConfig(dir)).rejects.toThrow(/rename it to ax\.config\.ts/i);
   });
 
-  // The legacy file is ignored outright when superseded — not merged, and not even evaluated, so a
-  // stale one that throws can't fail a build that has already migrated to ax.config.*.
-  it('never evaluates a superseded ard.config.*, even one that throws', async () => {
+  // Once `ax.config.*` exists, the project has migrated — a leftover `ard.config.*` is ignored
+  // outright, not merged, and not even evaluated, so a stale one that throws can't fail a build
+  // that already migrated. No warning either: unsupported means unsupported, not deprecated.
+  it('ignores a legacy ard.config.* entirely once ax.config.* exists', async () => {
     writeFileSync(
       join(dir, 'ax.config.mjs'),
       "export default { siteUrl: 'https://new.example.com' };\n",
     );
     writeFileSync(join(dir, 'ard.config.mjs'), "throw new Error('boom');\n");
-    const { config } = await loadAxConfig(dir);
-    expect(config.siteUrl).toBe('https://new.example.com');
-  });
-
-  // Extension precedence is resolved within a basename, not across the two: any `ax.config.*`
-  // outranks every `ard.config.*`, even a higher-precedence extension.
-  it('prefers ax.config.cjs over ard.config.ts (name beats extension order)', async () => {
-    writeFileSync(
-      join(dir, 'ax.config.cjs'),
-      "module.exports = { siteUrl: 'https://new.example.com' };\n",
-    );
-    writeFileSync(
-      join(dir, 'ard.config.ts'),
-      "export default { siteUrl: 'https://legacy.example.com' };\n",
-    );
     const { config, path } = await loadAxConfig(dir);
-    expect(path).toBe(join(dir, 'ax.config.cjs'));
+    expect(path).toBe(join(dir, 'ax.config.mjs'));
     expect(config.siteUrl).toBe('https://new.example.com');
   });
 

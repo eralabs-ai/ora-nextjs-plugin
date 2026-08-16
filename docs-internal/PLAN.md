@@ -414,18 +414,28 @@ Goal: the `next-sitemap`-style production core. Stable regardless of spec churn.
 > refer to `ax.config` throughout; what shipped is `ax.config.{ts,mts,cts,mjs,js,cjs}`, typed with `AxConfig`
 > and failing loudly via `AxConfigError`. This supersedes the vendor-neutrality rationale recorded
 > below — the file is now named after the `ax` tool that reads it, so a file committed into a
-> consumer's repo says which tool it configures. A legacy `ard.config.*` still loads, with a
-> deprecation warning; when both exist the `ax.config.*` wins and the `ard.config.*` is ignored
-> (also warned). `ArdConfig` / `ArdEntryOverride` / `ResolvedArdConfig` / `ArdConfigError` /
-> `loadArdConfig` / `validateArdConfig` / `ardConfigSchema` remain exported as deprecated aliases,
-> so existing imports keep resolving.
+> consumer's repo says which tool it configures.
+>
+> **✓ `ard.config.*` fallback removed (2026-08-16, maintainer-approved).** The package is pre-1.0,
+> so the rename above got a hard cutover instead of an indefinite compatibility shim: `ard.config.*`
+> is no longer read at all, and `ArdConfig` / `ArdEntryOverride` / `ResolvedArdConfig` /
+> `ArdConfigError` / `loadArdConfig` / `validateArdConfig` / `ardConfigSchema` are gone (not just
+> deprecated). Carrying a second config surface — and the dual-file precedence/warning logic it
+> required — indefinitely cost more than the one-line rename it was covering for. An
+> `ard.config.*`-only project isn't silently treated as unconfigured, though: `loadAxConfig` throws
+> `AxConfigError` pointing at the rename, since a project's real settings sitting under an unread
+> filename is exactly the silent-data-loss case this package's "fail loudly" posture exists to
+> prevent. `findExistingConfig` (the never-overwrite guard `ax init` uses) no longer looks for the
+> legacy name either, but `ax init` still refuses on an `ard.config.*`-only project — its detection
+> pass reuses `generateCatalog`, which throws the same `AxConfigError`, and `runInit` now surfaces
+> that instead of writing a fresh `ax.config.*` next to a file it can no longer make sense of.
 
 - [x] `ax.config.{ts,mts,cts,mjs,js,cjs}` — typed config, validated via JSON Schema through the
       existing Ajv instance (not Zod — see *decision* below), loaded via the CLI. (Originally named
       `ard.config` — "Agentic Resource Discovery", vendor-neutral for eventual upstreaming into
       Next.js; renamed 2026-07-27 to `ax.config` after the tool that reads it, so a file committed
       into a consumer's repo names which tool it configures. See the 2.1 rename note above; the
-      legacy `ard.config.*` still loads with a deprecation warning.)
+      `ard.config.*` fallback was later removed outright, per the same note.)
 - [x] Load the user's `next.config.*` (js/mjs/ts) and extract `basePath`, `distDir`, and `output`
       so users never repeat Next settings in plugin config. Handle both object and function-form
       configs; on load failure, warn and fall back to defaults (never crash over their config).

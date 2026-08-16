@@ -114,11 +114,6 @@ export {
   type AxConfig,
   type AxEntryOverride,
   type ResolvedAxConfig,
-  // Deprecated pre-`ax.config` names, kept so existing imports keep resolving.
-  ardConfigSchema,
-  type ArdConfig,
-  type ArdEntryOverride,
-  type ResolvedArdConfig,
 } from './config-schema.js';
 
 export {
@@ -126,9 +121,6 @@ export {
   findExistingConfig,
   AxConfigError,
   type LoadAxConfigResult,
-  loadArdConfig,
-  ArdConfigError,
-  type LoadArdConfigResult,
 } from './config.js';
 
 export {
@@ -136,7 +128,6 @@ export {
   formatConfigErrors,
   type ConfigValidationResult,
   type ConfigValidationError,
-  validateArdConfig,
 } from './validate-config.js';
 
 export {

@@ -196,17 +196,24 @@ describe('runInit never overwrites', () => {
     expect(existsSync(join(dir, 'ax.config.ts'))).toBe(false);
   });
 
-  it('also refuses when only a legacy ard.config exists, so it is never shadowed', async () => {
+  // Decision: findExistingConfig (deliberately simplified to look only for ax.config.*) reports an
+  // ard.config.*-only project as unconfigured, so the never-overwrite guard above doesn't catch it.
+  // But detection right after that guard reuses generateCatalog, which throws AxConfigError for
+  // exactly this project shape (see config.ts) — so init still refuses, just via that error path
+  // instead of the "already exists" guard, and with the same rename message a build would show.
+  // Proceeding to write a fresh ax.config.ts next to the broken ard.config.* was considered and
+  // rejected: it would leave the stale file behind with no signal that it's now dead weight, and
+  // silently fixing only half the project (new config, but the old one still there confusing the
+  // next reader) is worse than telling the developer to rename it up front.
+  it('refuses when only a legacy ard.config exists, surfacing the same rename message a build would', async () => {
     writeBareApp(dir);
-    // A project still on the pre-rename config is already configured; loadAxConfig would honor it,
-    // so writing a fresh ax.config.ts would silently shadow it. init must refuse.
     const legacyPath = join(dir, 'ard.config.mjs');
     writeFileSync(legacyPath, "export default { siteUrl: 'https://legacy.com' };\n", 'utf8');
 
     const code = await runInit(['--yes', '--site-url', 'https://acme.com'], io());
 
     expect(code).toBe(1);
-    expect(stderr.some((l) => l.includes('already exists'))).toBe(true);
+    expect(stderr.some((l) => l.toLowerCase().includes('rename it to ax.config.mjs'))).toBe(true);
     expect(readFileSync(legacyPath, 'utf8')).toContain('https://legacy.com');
     expect(existsSync(join(dir, 'ax.config.ts'))).toBe(false);
   });

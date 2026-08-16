@@ -194,9 +194,10 @@ describe('runCli', () => {
     expect(existsSync(join(dir, CATALOG_OUTPUT_PATH))).toBe(false);
   });
 
-  // The `ard.config.*` → `ax.config.*` rename is a warn-and-keep-working deprecation, so a build
-  // that hasn't migrated yet must still succeed — and must say so in its output.
-  it('still builds from a legacy ard.config, printing the deprecation warning', async () => {
+  // `ard.config.*` support was dropped entirely (pre-1.0 breaking change) — a project still on the
+  // pre-rename name has real settings this loader no longer reads, so the build must fail loudly
+  // with a rename message rather than silently building with defaults and no site URL.
+  it('fails with a rename message when only ard.config exists', async () => {
     writeFileSync(
       join(dir, 'ard.config.mjs'),
       "export default { siteUrl: 'https://example.com' };\n",
@@ -205,10 +206,10 @@ describe('runCli', () => {
 
     const code = await runCli([], { ...io, cwd: dir });
 
-    expect(code).toBe(0);
-    expect(stdout.some((l) => l.includes('ard.config.* is deprecated'))).toBe(true);
-    const parsed = JSON.parse(readFileSync(join(dir, CATALOG_OUTPUT_PATH), 'utf8'));
-    expect(parsed.host.identifier).toBe('did:web:example.com');
+    expect(code).toBe(1);
+    expect(stderr.some((l) => l.includes('ard.config.mjs'))).toBe(true);
+    expect(stderr.some((l) => l.toLowerCase().includes('rename it to ax.config.mjs'))).toBe(true);
+    expect(existsSync(join(dir, CATALOG_OUTPUT_PATH))).toBe(false);
   });
 
   it('warns (but still succeeds) when next.config sets basePath', async () => {
@@ -522,8 +523,8 @@ describe('runCli agent handoff footer', () => {
 });
 
 // The bare-`ax` tip nudges a first-time, un-configured, interactive run toward the wizard. It must
-// fire only in exactly that situation — never under --yes, never once a config already exists (in
-// either the current or legacy name), and never on a re-run.
+// fire only in exactly that situation — never under --yes, never once an ax.config already exists,
+// and never on a re-run.
 describe('runCli ax init tip', () => {
   const TIP = 'run `ax init`';
 
@@ -545,15 +546,21 @@ describe('runCli ax init tip', () => {
     expect(stdout.some((l) => l.includes(TIP))).toBe(false);
   });
 
-  it('does not suggest it when only a legacy ard.config exists', async () => {
+  // With ard.config.* unsupported, an ard.config.*-only project now errors out of loadAxConfig
+  // before runCli ever reaches the tip check below — so there's no scenario left where the tip
+  // logic itself needs to special-case a legacy file. This asserts that reality: the run fails
+  // loudly instead of reaching (and suppressing) the tip.
+  it('fails loudly instead of suggesting ax init when only a legacy ard.config exists', async () => {
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
     writeFileSync(
       join(dir, 'ard.config.mjs'),
       "export default { siteUrl: 'https://example.com' };\n",
       'utf8',
     );
-    await runCli([], { ...io, cwd: dir });
+    const code = await runCli([], { ...io, cwd: dir });
+    expect(code).toBe(1);
     expect(stdout.some((l) => l.includes(TIP))).toBe(false);
+    expect(stderr.some((l) => l.toLowerCase().includes('rename it to ax.config.mjs'))).toBe(true);
   });
 
   it('does not suggest it on a re-run once a catalog already exists', async () => {

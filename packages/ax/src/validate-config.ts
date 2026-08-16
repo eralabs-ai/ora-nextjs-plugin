@@ -54,6 +54,3 @@ export function validateAxConfig(json: unknown): ConfigValidationResult {
 export function formatConfigErrors(errors: ConfigValidationError[]): string {
   return formatValidationErrors(errors);
 }
-
-/** @deprecated Renamed to {@link validateAxConfig} along with `ard.config.*` → `ax.config.*`. */
-export const validateArdConfig = validateAxConfig;
