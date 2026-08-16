@@ -520,3 +520,47 @@ describe('runCli agent handoff footer', () => {
     expect(stdout.join('\n')).not.toContain('Agent handoff');
   });
 });
+
+// The bare-`ax` tip nudges a first-time, un-configured, interactive run toward the wizard. It must
+// fire only in exactly that situation — never under --yes, never once a config already exists (in
+// either the current or legacy name), and never on a re-run.
+describe('runCli ax init tip', () => {
+  const TIP = 'run `ax init`';
+
+  it('suggests ax init on a first interactive run with no config', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    await runCli([], { ...io, cwd: dir });
+    expect(stdout.some((l) => l.includes(TIP))).toBe(true);
+  });
+
+  it('does not suggest it under --yes (that run already consented to run headless)', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    await runCli(['--yes'], { ...io, cwd: dir });
+    expect(stdout.some((l) => l.includes(TIP))).toBe(false);
+  });
+
+  it('does not suggest it when an ax.config already exists', async () => {
+    writeMcpFixture(dir); // writes ax.config.mjs
+    await runCli([], { ...io, cwd: dir });
+    expect(stdout.some((l) => l.includes(TIP))).toBe(false);
+  });
+
+  it('does not suggest it when only a legacy ard.config exists', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(
+      join(dir, 'ard.config.mjs'),
+      "export default { siteUrl: 'https://example.com' };\n",
+      'utf8',
+    );
+    await runCli([], { ...io, cwd: dir });
+    expect(stdout.some((l) => l.includes(TIP))).toBe(false);
+  });
+
+  it('does not suggest it on a re-run once a catalog already exists', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    await runCli([], { ...io, cwd: dir }); // first publish
+    stdout = [];
+    await runCli([], { ...io, cwd: dir }); // re-run
+    expect(stdout.some((l) => l.includes(TIP))).toBe(false);
+  });
+});

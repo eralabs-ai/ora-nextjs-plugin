@@ -9,8 +9,9 @@ import {
   measureArtifact,
   measureContent,
 } from './artifact-size.js';
-import { AxConfigError } from './config.js';
+import { AxConfigError, findExistingConfig } from './config.js';
 import { generateCatalog, type GenerateCatalogResult } from './generate.js';
+import { runInit } from './init.js';
 import { ORA_SCAN_API, ORA_SKILL_MCP_URL } from './ora-checks.js';
 import type { BuildReport } from './report.js';
 import type { McpServerCard } from './server-card.js';
@@ -28,6 +29,8 @@ const HELP_TEXT = `ax — generate a spec-valid ai-catalog.json at build time
 
 Usage:
   ax [options]
+  ax init [options]   First-time setup: detect your app, write ax.config, wire "postbuild": "ax".
+                      Run \`ax init --help\` for its options.
 
 Options:
   --cwd <dir>,
@@ -115,6 +118,17 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   const stdout = io.stdout ?? ((line: string) => console.log(line));
   const stderr = io.stderr ?? ((line: string) => console.error(line));
 
+  // `ax init` is the onboarding wizard — a distinct subcommand with its own arg surface. Bare `ax`
+  // (and every existing flag) is unchanged; an unknown subcommand still errors below as before.
+  if (argv[0] === 'init') {
+    const initIo: { cwd?: string; stdout: (l: string) => void; stderr: (l: string) => void } = {
+      stdout,
+      stderr,
+    };
+    if (io.cwd !== undefined) initIo.cwd = io.cwd;
+    return runInit(argv.slice(1), initIo);
+  }
+
   let args: ParsedArgs;
   try {
     args = parseArgs(argv);
@@ -168,9 +182,18 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   }
 
   const firstPublish = !existsSync(join(cwd, CATALOG_OUTPUT_PATH));
+  const interactive =
+    io.confirm !== undefined || (process.stdout.isTTY === true && !process.env.CI);
+
+  // A first interactive run with no config at all (neither ax.config.* nor a legacy ard.config.*):
+  // suggest the wizard, which wires the build and captures the judgment (siteUrl, gating, scaffolds)
+  // a bare run can only leave to defaults. Suppressed under --yes: that run already consented to run
+  // headless, so it doesn't need onboarding advice.
+  if (firstPublish && interactive && !args.yes && findExistingConfig(cwd) === undefined) {
+    stdout('[ax] Tip: run `ax init` to set up ax.config and wire your postbuild in one step.');
+  }
+
   if (firstPublish && !args.yes) {
-    const interactive =
-      io.confirm !== undefined || (process.stdout.isTTY === true && !process.env.CI);
     if (!interactive) {
       stderr(
         '[ax] This run would publish a new ai-catalog.json exposing the surface above. Re-run ' +

@@ -1137,6 +1137,43 @@ wizard's choices.
 **Done when:** `npx ax init` on the `bare` fixture produces a valid `ax.config.ts` + wired
 `postbuild` from scripted answers, refuses to touch an existing config, and `--yes` works headless.
 
+**✓ shipped (2026-08-16).** `ax init` implemented as `src/init.ts` (wizard flow), `src/prompt.ts`
+(the injected `Prompter` interface over `node:readline`, so the whole flow is unit-tested with
+scripted answers and no TTY), `src/init-config.ts` (pure answers→`ax.config` source renderer, one
+rationale comment per field), and `src/init-package-json.ts` (pure `postbuild` wiring decision).
+`cli.ts` routes the `init` subcommand (bare `ax` unchanged; an unknown subcommand still errors), and
+a bare interactive `ax` run with no config now prints a one-line `ax init` tip. Detection reuses
+`generateCatalog` verbatim — the same pass a build runs — so the findings can't drift; it writes no
+public artifact, so the review-before-publish gate remains the first-build consent ceremony,
+pre-answered by the wizard. Config language follows `tsconfig.json` presence and `.js` module system
+follows `package.json` `type`; `isGated` composes `defaultIsGated` (or is omitted when only the floor
+is kept, since an absent `isGated` already means "floor applies"), and is only written as real code
+loaded through the existing jiti path — no parallel config writer/validator. Colocated tests:
+`init-config.test.ts`, `init-package-json.test.ts`, and `init.test.ts` (scripted-answer flow, the
+never-overwrite refusal, headless `--yes`, `siteUrl` validation refusing localhost/preview, and a
+fixture round-trip that init→loads+validates via `loadAxConfig`→builds via `runCli` and confirms the
+review gate sees the wizard's `siteUrl`). No new dependencies.
+
+**Deviations from the plan, each with its reason:**
+
+- **Round-trip runs against a synthesized bare app, not the committed `fixtures/bare/`.** Mutating a
+  committed fixture from a test (writing `ax.config.ts` + editing its `package.json`) would leave the
+  working tree dirty and race parallel fixture use, so the test builds a byte-identical minimal
+  TS Next app in a temp dir. Same assertion surface as "on the `bare` fixture".
+- **The first-build offer (step 6) is default-**no** and skipped entirely in `--yes`/headless mode**,
+  and its build runner is injected (`InitIO.spawnBuild`). Spawning a full `next build` unasked is
+  heavy and a headless run should stay side-effect-light; the injection keeps tests from spawning.
+- **Markdown-twin intent (step 3's Phase 9 bullet) is intentionally omitted, not stubbed.** Per the
+  scope note, twins are out of scope until Phase 9; the wizard invents no config surface it can't yet
+  honour. See the Phase 9 hand-off note below for where it should slot in.
+
+**For Phase 9/10:** the wizard is where markdown-twin *intent* should be captured once twins exist —
+add a scaffold-style question and render a new `ax.config` field in `src/init-config.ts`'s
+`renderAxConfig` (its field list is the single place to extend, with the same yes-when-asked policy).
+The generated `isGated` the wizard writes is already the matcher Phase 9's Tier-2 twin derivation must
+consult ("never derive a twin from a route `isGated` matches"), so no new gating surface is needed
+there — the wizard and the twin generator read the same predicate.
+
 ---
 
 ## Phase 9 — Markdown twins & generated markdown artifacts (added 2026-08-16)
