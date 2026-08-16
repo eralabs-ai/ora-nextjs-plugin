@@ -175,6 +175,89 @@ deterministic detect/emit/validate half; the skill owns the judgment/authoring h
 
 ---
 
+## Vercel strategy sync (added 2026-08-16 — opened the runtime track)
+
+We synced with Vercel on the plugin's strategy for agent-facing serving (2026-08-16). The
+alignment settled the runtime direction and a set of engineering invariants; this section records
+the agreed steps forward in enough detail that Phases 7–10 are implementable as written, without
+further context.
+
+**The agreed serving model:** three jobs at HTTP time — *detect* AI agents from request headers,
+*serve* them markdown via composable middleware, and let a black-box *audit* verify the deployed
+result. The runtime layer must be zero-dependency and Web-API-only (Edge-safe). The division of
+labor is the key alignment: **the build step generates and knows; the runtime negotiates.** A
+middleware alone cannot know a site's route table, which artifacts exist, or which surfaces are
+gated — that knowledge is exactly what our postbuild step derives, so our runtime consumes a
+build-generated manifest instead of guessing.
+
+**Aligned engineering invariants (each with the reason it exists):**
+
+- **The agent/bot detection corpus** — four data sets, maintained together as one module with a
+  recorded review date so staleness is visible (sources: bots.fyi + official vendor bot docs;
+  last cross-reviewed 2026-03-20): (1) ~31 lowercase AI-agent UA substrings grouped by vendor
+  (Anthropic: claudebot / claude-searchbot / claude-user / anthropic-ai / claude-web; OpenAI:
+  chatgpt / gptbot / oai-searchbot / openai; Google AI, Meta, search/research AI, coding
+  assistants, plus amazonbot / ai2bot / diffbot / bytespider / omgili(bot)); (2) known
+  `Signature-Agent` domains (currently only `chatgpt.com`); (3) a 19-entry traditional-bot
+  exclusion list (googlebot, bingbot, social-preview and uptime monitors — bots that must keep
+  receiving user HTML: the **cloaking firewall**); (4) a bot-like UA regex
+  (`/bot|agent|fetch|crawl|spider|search/i`) used only by the heuristic layer.
+- **Detection is a 3-layer cascade:** UA-substring match (suppressed when the request is a real
+  browser document navigation — `sec-fetch-mode: navigate` + `sec-fetch-dest: document` — so
+  agent-embedded browsers like Cursor's, whose UA contains "cursor", still get HTML), then
+  `Signature-Agent` (RFC 9421), then a heuristic (no `sec-fetch-mode` at all + bot-like UA + not
+  a traditional bot). Posture for serving: **recall over precision** — mis-serving markdown to a
+  non-agent is low-harm.
+- **Two response-header invariants on every negotiated markdown response:** `Vary: Accept`
+  appended with *token-level* dedup (split the existing Vary on commas; never substring-match),
+  and `Link: <url>; rel="canonical"` added only when no canonical Link already exists (markdown
+  has no `<link rel="canonical">` equivalent — this header is the only attribution mechanism).
+  Without Vary, CDNs cache the wrong variant; without the canonical Link, crawlers index markdown
+  twins as duplicate pages.
+- **Middleware composes, never owns.** The runtime entry is a higher-order function that wraps
+  the user's existing middleware (Clerk-style) instead of owning `middleware.ts`. `onDetection`
+  analytics are armored — sync throws swallowed, promises passed to `event.waitUntil()` — so
+  telemetry can never break serving. A recommended `matcher` excludes `_next`, `api`, static
+  files, favicon/robots/health/status.
+- **No blind rewrites.** A Next.js middleware has no cheap way to check that a rewrite target
+  exists (no zero-hop internal fetch primitive), so a rewrite fired on a guessed path serves
+  agents broken responses. Agreed fix, and our structural advantage: the middleware only rewrites
+  paths the **build-generated manifest** lists as having a markdown target (Phases 9–10).
+- **The 404 doctrine:** agents discard 404 response bodies, so a missing-page request from a
+  detected agent should get a **200 + markdown wayfinding body** (links to the discovery
+  artifacts and real routes) while plain clients keep the honest 404 — the pair only passes
+  together on genuinely negotiation-aware error handling. The 200-for-agents move is legitimate
+  *only* for 404s (a dead end with no honest next step); a gated route has an honest next step,
+  so auth walls keep truthful 401/403 (see Phase 9's gated policy).
+- **Ship the companion skill inside the npm tarball** (`files` allowlist gains a `skill/` dir) —
+  the package documents its own installation to the coding agents that install it. Adopted for
+  Phase 6.
+- **Audit checks are acceptance criteria, not our scanner.** The black-box audit funnel
+  (reach → find → read → parse: soft-404 truthfulness, auth gates, redirect hygiene, llms.txt
+  format/size/link integrity, markdown retrieval via UA / Accept / `.md` URLs, frontmatter, code
+  fences, page size) is scanner territory — Ora's, not ours. Our relationship to those checks is
+  emission-side: everything ax generates should be **born passing them** (Phase 7), and the
+  negotiation-dependent ones (Vary, agent-404 markdown, canonical Link) should pass **by
+  construction** once the middleware ships (Phase 10). Live auth-gate *detection* (401/403 counts
+  + login-page fingerprints) is the scanner-side complement of what our `isGated` (Phase 2.8)
+  prevents at emission time.
+
+**What this changes in the plan:** the middleware follow-up deferred in Phase 4.5 ("writing into a
+user's singleton `middleware.ts` is too invasive to scaffold today") is unblocked — the
+compose-never-own pattern means we never need to own that file. Four new phases: **Phase 7**
+(serving-correctness groundwork — header helper, detection corpus, born-passing tests), **Phase 8**
+(`ax init` onboarding wizard), **Phase 9** (markdown twins + generated markdown artifacts + the
+route/serving manifest + the gated-surface policy), **Phase 10** (the `@ora-ai/ax/middleware`
+runtime entry).
+
+**What this does NOT change:** posture. *Recall over precision* is correct for **serving** (a
+mis-served markdown variant is low-harm and reversible), while *precision over recall* remains
+correct for **emission** (a published claim isn't). The runtime layer adopts the serving posture
+without loosening the emission one — the two coexist because the stakes differ by layer, and
+Phase 10 documents the distinction explicitly.
+
+---
+
 ## Phase 0 — Alignment & groundwork
 
 Goal: requirements ratified by Ora, spec pinned, project scaffolded. No plugin logic yet.
@@ -729,11 +812,15 @@ Two additions shipped alongside Phase 4, both following existing conventions:
       agent-aware `not-found.tsx` **once** (user-owned, never overwritten) importing a data module
       (`app/not-found-agent-data.*`) **regenerated every build** with the static route list
       (dynamic segments never guessed) and discovery links (catalog / llms.txt / sitemap — only
-      artifacts that exist). Grounding: Vercel's agent-readability guidance (llms.txt signposting,
+      artifacts that exist). Grounding: public agent-readability guidance (llms.txt signposting,
       `Link` headers) and Mintlify's benchmark that one llms.txt link on responses eliminates most
       agent 404 dead-ends. Middleware-based content negotiation (markdown 404s for
       `Accept: text/markdown` / `Signature-Agent` requesters) is a documented follow-up — writing
       into a user's singleton `middleware.ts` is too invasive to scaffold today.
+      **Update (2026-08-16): the follow-up is now planned as Phase 10** — per the Vercel strategy
+      sync, the agreed pattern is a composing higher-order middleware that wraps the user's
+      existing middleware instead of owning the file, which removes the invasiveness objection.
+      See the Vercel strategy sync section.
 - [x] **Machine-readable build report** (`src/report.ts`; `--report[=path]` / `ax.config`
       `report`, default off; default path `.ora/report.json`). The structured twin of the CLI
       output: entries + written paths, MCP mounts + server card, WebMCP sites, per-artifact
@@ -872,10 +959,399 @@ Goal: prove the output is *usable by agents*, not just spec-valid, and lock in c
       the sitemap (delegate to `next-sitemap`). Defers to Ora's skill for the score scan and for the
       runtime API-behavior fixes (rate-limit headers, idempotency, JSON errors) the build-time plugin
       can't emit. Written last, once the config surface stabilizes.
+      **Update (2026-08-16): ship the skill inside the npm tarball** (`files: ["dist", "skill"]`,
+      a packaging practice agreed in the Vercel strategy sync) so the package documents its own
+      installation to the coding agents that install it. The skill closes the full loop:
+      install → `ax init` → build → read `.ora/report.json` → work the `actionable` checks →
+      verify via Ora's scan API.
 - [ ] Supply-chain: npm provenance on publish, lockfile committed, dependency count reviewed before
       v1 (target: near-zero runtime deps).
 
 **Done when:** v1 success criterion met (Ora + partners indexed) and `latest` published.
+
+---
+
+## Phase 7 — Serving-correctness groundwork (added 2026-08-16)
+
+Goal: the small, independently-shippable primitives Phases 9–10 need, each also useful on its own.
+Grounded in the Vercel strategy sync section above — the invariants below are the agreed
+engineering behaviors from that alignment; implement them exactly as specified there.
+
+- [x] **`src/markdown-headers.ts` — the two response-header invariants.** One helper (the
+      agreed `applyMarkdownHeaders` semantics from the sync) applied to every markdown response ax
+      ever serves or scaffolds a server for:
+      1. `Vary: Accept`, appended with **token-level dedup** — split the existing `Vary` value on
+         commas, trim, compare case-insensitively; never substring-match (a `Vary:
+         Accept-Encoding` must not be mistaken for `Accept`). *Why:* without it a CDN caches the
+         markdown variant and serves it to browsers, or vice versa — this is the exact failure
+         Ora's `markdown-negotiation-vary` check hard-fails on.
+      2. `Link: <canonicalUrl>; rel="canonical"` (RFC 8288), added **only when no canonical Link is
+         already present** (test the existing `Link` header with `/rel="?canonical"?/i`). *Why:*
+         markdown has no `<link rel="canonical">` equivalent; without this header, crawlers index a
+         markdown twin as a separate duplicate page and citations attribute to the wrong URL.
+      Scope note: `llms.txt` keeps `Content-Type: text/plain` and needs neither header (it is a
+      fixed-path artifact, not a negotiated variant of another page) — the helper is for twins,
+      the agent-404 markdown body, and any negotiated response (Phases 9–10).
+      (Shipped `src/markdown-headers.ts` + `test/markdown-headers.test.ts`; Web-API-only, exported
+      from `index.ts`. Vary uses comma-split token dedup + `*` handling; canonical Link tested
+      `/rel="?canonical"?/i`. Cites RFC 8288 / RFC 9110 §12.5.5, no `#` phase references in source.)
+- [x] **`src/agent-ua.ts` — the agent/bot detection corpus, single source of truth.** Implement
+      the four data sets specified in the sync section (`AI_AGENT_UA_PATTERNS`,
+      `SIGNATURE_AGENT_DOMAINS`, `TRADITIONAL_BOT_PATTERNS`, `BOT_LIKE_REGEX`), citing the
+      underlying sources (bots.fyi + vendor bot docs) and carrying a review date so staleness is
+      visible. Consumers: (a) `scaffold-robots.ts` — today it names only 5
+      allow-crawlers; regroup from the corpus so the generated `Allow` block covers the retrieval/
+      search families we currently miss (OAI-SearchBot, Claude-SearchBot, Meta-ExternalAgent /
+      Meta-ExternalFetcher, Amazonbot, AI2Bot, Diffbot, …) while **keeping the existing policy
+      split**: reputable retrieval crawlers get `Allow`; training-only crawlers (CCBot, Bytespider)
+      stay a commented-out example — blocking is the owner's call, never ours. (b) The Phase 10
+      middleware's detection layer. (c) Future docs/recommendation copy, so crawler names never
+      drift between features.
+      (Shipped `src/agent-ua.ts` + `test/agent-ua.test.ts` with `UA_CORPUS_REVIEWED` = 2026-03-20
+      and the four data sets, plus `REPUTABLE_AI_CRAWLERS` / `TRAINING_ONLY_CRAWLERS` as the robots
+      policy split — exported so casing (canonical robots tokens) and match form (lowercase UA
+      substrings) each live in one place. `scaffold-robots.ts` now consumes them; its Allow block
+      grew from 5 crawlers to the OpenAI/Anthropic/Google/Perplexity/Meta/Amazon/AI2/Diffbot
+      retrieval+search families. scaffold-robots tests + the README copy updated deliberately.
+      Deviation: the corpus is not yet consumed by a detection module — that is Phase 10; this only
+      lands the data + the robots consumer.)
+- [x] **Born-passing tests: the agreed audit criteria become our scaffold acceptance criteria.**
+      Add a test suite asserting every generated artifact passes the relevant audit criterion from
+      the sync *by construction* (the audits are black-box HTTP probes, so the assertions run on
+      the generated file contents): scaffolded `llms.txt` has an H1, ≥1 markdown link, is ≤100,000
+      chars, and has an **even count of column-0 code-fence markers** (`/^(`{3,}|~{3,})/gm` — an odd
+      count means an unclosed fence, which corrupts everything below it in an agent's context);
+      generated `robots.txt`, run through a real user-agent block parser, never leaves
+      gptbot / claudebot / ccbot / google-extended covered by a `Disallow: /`; generated markdown
+      (Phase 9 twins, `/auth.md`) carries the agreed frontmatter keys (see Phase 9).
+      *Why:* "ax ran" should imply "the mechanical half of any agent-readiness audit is green" —
+      that's the product promise, and these tests make it a regression-tested invariant instead of
+      a hope.
+      (Shipped `test/born-passing.test.ts`: the scaffolded llms.txt (both the static Pages-Router
+      output and the App-Router route body) is asserted to have an H1, ≥1 link, ≤100,000 chars, and
+      an even column-0 fence count; the generated robots.txt is run through a hand-written
+      user-agent-block parser — groups User-agent lines with the rules that follow, most-specific
+      match wins, comments ignored — and gptbot/claudebot/ccbot/google-extended are confirmed not
+      Disallowed, with a negative control proving the parser catches a real block. Deviation: the
+      markdown-twin / `/auth.md` frontmatter assertion is deferred with Phase 9, since no markdown
+      twins are generated yet — added the moment Phase 9 emits them.)
+- [x] **Token-aware sizes in the CLI summary and `.ora/report.json`.** Report every generated
+      artifact's size as KB **and** estimated tokens (chars ÷ 4 — the same estimate Ora uses), and
+      warn above 100,000 chars (≈25k tokens): "Claude Code truncates responses over 100K chars."
+      *Why:* tokens are the unit that actually constrains the consuming agent; the numbers are free
+      to compute at write time.
+      (Shipped `src/artifact-size.ts` (`chars ÷ 4` token estimate, KB/B, 100K-char truncation gate)
+      + `test/artifact-size.test.ts`; the CLI measures each written artifact — catalog, server card,
+      and any scaffold that produced a file this run — off disk, prints a sizes block, and warns per
+      over-limit artifact. `.ora/report.json` gained a `sizes[]` section. Deviation: the report no
+      longer carries a `reportVersion` field at all — versioning starts at first publish (add
+      `reportVersion: 1` then), so the field was removed rather than bumped. README updated.)
+- [x] **Two recommendation-copy refinements** (advisory channel, no new detection): the sitemap
+      recommendation mentions including `<lastmod>` (agents use it to judge freshness — Ora's own
+      recommendation copy already says this); and when markdown twins exist (Phase 9), recommend an
+      HTML `<link rel="alternate" type="text/markdown" href="…">` in the root layout — printed with
+      the exact tag, like the JSON-LD wiring instructions, never auto-inserted.
+      (Shipped: `detect-sitemap.ts` recommendations (both present + absent) now mention `<lastmod>`,
+      asserted in `test/detect-sitemap.test.ts`. The markdown-alternate copy lives in
+      `src/markdown-alternate.ts` gated on a `twinPaths` presence check — empty today, so it adds
+      nothing to a current build and stays invisible until Phase 9 supplies the twin manifest;
+      `test/markdown-alternate.test.ts` drives it with a synthetic twin list. Wired into
+      `generate.ts` with `twinPaths: []`.)
+
+**Done when:** the header helper + corpus module exist with tests; scaffold outputs are covered by
+born-passing assertions in CI; sizes print in tokens; both recommendation texts ship.
+✓ All shipped and green (typecheck / test / lint / fixtures:build). Note for Phases 9–10: Phase 9
+must (a) populate `buildMarkdownAlternateRecommendation`'s `twinPaths` from its serving manifest to
+switch that recommendation on, and (b) extend `test/born-passing.test.ts` with the twin/`auth.md`
+frontmatter assertions. Phase 10's detection layer consumes `src/agent-ua.ts` and its middleware
+markdown responses call `applyMarkdownHeaders` from `src/markdown-headers.ts`.
+
+---
+
+## Phase 8 — `ax init`: the onboarding wizard (added 2026-08-16)
+
+Goal: collapse "read the config docs, hand-write `ax.config.ts`, wire `postbuild`" into one
+interactive command. The wizard's principle: **it captures judgment; the build derives facts.** It
+asks only questions whose answers are genuinely underivable from the source tree, writes them into
+`ax.config.ts`, wires the scripts — and generates **no public-facing artifact itself**, so the
+first real build remains the moment the review-before-publish gate (Phase 2.3) runs, now
+pre-answered by the wizard's choices. The two features compose; there is no second consent
+ceremony.
+
+**Hard constraints (each has a reason):**
+
+- **An explicit command, never a `postinstall` hook.** npm lifecycle hooks can't reliably prompt
+  (no TTY under CI/pnpm/silent installs) and interactive postinstall is a supply-chain smell.
+  Install stays inert; README + companion skill say `npx ax init`.
+- **Detect first, ask second.** Run the existing detection pass (router model, MCP/OpenAPI/llms.txt/
+  robots/sitemap/JSON-LD detectors — all source-tree-based, **no `next build` required**) before
+  any question, then show a findings summary. Questions are then *informed* ("I found these
+  surfaces — which are gated?") instead of blank forms.
+- **Never ask what the source tree answers.** Language (TS vs JS) comes from `tsconfig.json`
+  presence — the config file extension and scaffold extensions follow it. Routers, routes, and
+  existing artifacts come from detection. Every derivable question the wizard asks erodes trust in
+  the detection story that is ax's identity.
+- **Never overwrite.** If any `ax.config.*` exists, abort with a message pointing at the file
+  (v1; a targeted "add missing keys" mode can come later). Same write-once posture as scaffolds.
+
+**The flow (implementation order):**
+
+1. `ax init` subcommand in `cli.ts` (bare `ax` behavior unchanged; when bare `ax` runs with no
+   config in an interactive TTY, it may *suggest* `ax init` in its output).
+2. Detection pass → findings summary (routers found, N static routes, detected surfaces, existing
+   artifacts).
+3. Questions, each with a default and the reason it must be asked:
+   - **`siteUrl`** — the production origin. Underivable locally (`VERCEL_PROJECT_PRODUCTION_URL`
+     exists only on Vercel builds). Validate: absolute `https://` origin; **refuse `localhost`/
+     preview URLs** with the explanation that the value is written verbatim into public catalog
+     URLs.
+   - **Gated surfaces** — multi-select over the *detected* MCP mounts / OpenAPI paths / declared
+     entries, with the default floor (`/api/auth/**`, `/api/webhooks/**`) pre-noted. Answers
+     become an `isGated` matcher (compose `defaultIsGated` unless the user deselects the floor).
+     A reviewed detection beats free-text glob authoring.
+   - **Scaffold opt-ins** (`scaffoldLlmsTxt`, `scaffoldJsonLd`, `scaffoldRobots`,
+     `scaffoldAgent404`) — **default yes in the wizard.** This is not a contradiction of the
+     config's `false` defaults: config defaults are `false` because *silent* writes into a source
+     tree are invasive; in a wizard the user is present and the ask itself is the opt-in.
+     Default-yes-when-asked / default-no-when-silent is one coherent policy — state it in the docs.
+   - **Markdown twins** (once Phase 9 ships) — records intent into config; generation still
+     happens at build (twins need rendered output — see Phase 9's tier ladder).
+   - **`report`** — default yes (the agent-handoff loop is the product).
+4. Write `ax.config.ts` (or `.js`, per detected language) with the answers **and a one-line
+   comment per field saying why it's there** — the generated config doubles as documentation.
+5. Wire scripts in `package.json`: add `"postbuild": "ax"` **only when no `postbuild` exists**;
+   if one exists, print the exact edit instead of chaining into a script we don't own (same rule
+   as never editing `layout.tsx`). This wiring is the actual friction-killer — `postbuild` runs
+   wherever `build` runs (Vercel, CI), so builders who never build locally still get every
+   artifact on deploy.
+6. Offer to run the first build + ax pass now, so the user sees the report immediately.
+7. Non-interactive mode: `ax init --yes --site-url <url>` applies all defaults (siteUrl has no
+   default and must be supplied via flag or env); exits non-zero with a clear message when
+   required inputs are missing.
+
+**Tests:** the prompt layer is injected (an interface over `node:readline`), so the wizard is unit
+tested with scripted answers; a fixture round-trip asserts init → generated config validates via
+the existing `AxConfig` schema → subsequent `ax` build succeeds and the review gate sees the
+wizard's choices.
+
+**Done when:** `npx ax init` on the `bare` fixture produces a valid `ax.config.ts` + wired
+`postbuild` from scripted answers, refuses to touch an existing config, and `--yes` works headless.
+
+---
+
+## Phase 9 — Markdown twins & generated markdown artifacts (added 2026-08-16)
+
+Goal: the **retrieval half** of agent-readiness — per-page markdown representations of real
+content — which no tool generates today: the ecosystem's middleware approach routes agents to
+markdown the developer was supposed to write; ax writes it from the build, and is honest about
+which pages it can't (a division of labor confirmed in the Vercel strategy sync). Twins are
+**generated artifacts, not scaffolds**: regenerated every build, never user-owned
+(the scaffold contract is write-once/user-edited, which for twins would mean drift — a stale twin
+silently lies about the page it shadows, and an agent cites it as current truth). The moment a
+human wants to edit a twin, the page belongs in Tier 1 (a real markdown source in the repo), not
+in a fork of generated output.
+
+### 9.1 The tier ladder — where twin content comes from
+
+The whole design is one question — *where does the markdown come from?* — answered as a ladder of
+decreasing certainty, so precision-over-recall maps onto it directly:
+
+- [ ] **Tier 1 — reference/derive from markdown-shaped sources (no build output needed).** Detect
+      routes whose content already lives as markdown in the repo: `app/**/page.mdx`, existing
+      markdown route handlers, stray `public/*.md`. Map route → source. For MDX, emit the twin
+      only when the file is *mostly markdown* (guard: fraction of lines that are imports/exports/
+      JSX blocks below a threshold — strip those, keep the markdown); otherwise recommend instead
+      of guessing. Highest fidelity — the markdown is the source, not a reconstruction — and it
+      covers the docs-site audience with zero conversion machinery.
+- [ ] **Tier 2 — derive from the build output for prerendered routes.** After `next build`, every
+      statically prerendered route's final HTML exists in the build output (App Router:
+      `.next/server/app/**.html` — **verify the location per supported Next minor and cover it in
+      the Phase 5.2 canary job; this is a semi-stable internal**). Pipeline per route: locate the
+      HTML → extract the content region (`<main>`, else `<article>`, else skip — extracting
+      `<body>` would drag nav/footer chrome into the twin) → convert HTML→markdown → apply guards
+      → write. **Guards (each one is a refusal to publish a lie):** skip when extracted text
+      < 200 chars (a twin of a JS-shell page is an empty lie — 200 chars is also where the agreed
+      server-rendered-content audit criterion draws the line); skip when > 100,000 chars
+      (truncation ceiling); **never derive from
+      a route `isGated` matches** (a gated page's prerender is typically a login shell — the twin
+      would be a beautifully-converted login page, the exact artifact auth-gate audits exist to
+      catch); assert an even code-fence count post-conversion. Every skip is recorded in the
+      report **with its reason** — the skip list is itself the "what to do next" guidance.
+- [ ] **Tier 3 — dynamic/SSR routes: refuse.** No build-time HTML exists, so no twin, no guessing
+      (same policy as dynamic segments in llms.txt and the agent-404). The manifest records "no
+      markdown target"; the CLI recommends what the developer could do (add a markdown source, or
+      prerender the route).
+
+### 9.2 Twin output & metadata
+
+- [ ] Twins are written as **static files in `public/`**: route `/docs/getting-started` →
+      `public/docs/getting-started.md`; the root route → `public/index.md` (which also satisfies
+      Ora's `markdown-url-fallback` homepage probe). *Why static files:* the `.md`-URL twin then
+      works with **zero runtime** — Next serves `public/` as-is — so one of the three retrieval
+      mechanisms (`.md` URL / Accept header / agent UA) passes before any middleware ships, and
+      the middleware (Phase 10) becomes an upgrade, not a requirement. Same emission path and
+      deploy-verification story as the catalog.
+- [ ] Every twin opens with **YAML frontmatter** carrying the four keys the agreed audit criteria
+      check for, all derivable at build time: `title` (page `<title>`/first H1), `description`
+      (meta description when present), `canonical_url` (siteUrl + route — the attribution link
+      back to the HTML page), `last_updated` (build time — truthful: twins are exactly as fresh as
+      the build). Plus a `generated-by: @ora-ai/ax` marker so humans and tools know not to
+      hand-edit.
+- [ ] Twins never become catalog entries (the per-route-entry prohibition stands — nobody indexes
+      per-page entries); they surface via the scaffolded `llms.txt` (Machine-readable resources
+      section), the `<link rel="alternate" type="text/markdown">` recommendation (Phase 7), and
+      the manifest (9.4).
+- [ ] **Review gate extension:** twins change the site's public surface, so the first run that
+      would write them extends the Phase 2.3 "about to expose" summary with the twin count + sample
+      paths, behind the same `--yes` / interactive confirm.
+
+### 9.3 The gated-surface serving policy + generated `/auth.md`
+
+What should a gated route serve an agent? **Not** a 200 "this is gated" page — that's a soft auth
+wall, status-code lying of exactly the kind agents are built to distrust (the 200-wayfinding move
+is legitimate only for 404s, which have no honest next step; a 401 has one). The policy, split by
+who can implement it:
+
+- [ ] **Generated `/auth.md` (build-side, this phase):** one markdown document derived from the
+      auth detection Phase 2.8 already does — the gated surfaces (paths + kind), the auth scheme
+      per surface (from the `EntryAuth` descriptors: oauth2 endpoints / api_key / unknown), the
+      `resourceMetadataPath` cross-link when `withMcpAuth` declared one, and where a human obtains
+      credentials (`docsUrl` when known, TODO otherwise). Regenerated every build; written to
+      `public/auth.md` with the same frontmatter as twins; linked from the scaffolded `llms.txt`.
+      *Why one doc instead of N gated twins:* it aggregates what agents actually need (how do I
+      get access?), it's fully derivable, and Ora's agent-simulation checks already look for
+      auth-docs artifacts. One honest, derivable artifact doing the job N invented ones would.
+- [ ] **Recommendation (advisory, this phase):** for detected gated routes, recommend keeping the
+      honest 401/403 status and adding a `WWW-Authenticate` header + a body/`Link` pointer to
+      `/auth.md` — the gated cousin of the agent-404. Route-handler *behavior* is the developer's
+      code, so this stays a recommendation (with the report carrying it), never a rewrite.
+
+### 9.4 The serving manifest (the piece Phase 10 consumes)
+
+- [ ] Generate a **manifest data module** (pattern proven by `app/not-found-agent-data.*`):
+      regenerated every run, importable by user middleware, containing — the route table
+      (static routes only), which routes have markdown twins (and the twin path), which paths are
+      gated (from `isGated` results), and where the discovery artifacts actually live
+      (basePath-aware). This is what makes our middleware **never rewrite blind** — the specific
+      middleware weakness the strategy sync identified (a Next.js middleware alone cannot check a
+      rewrite target exists).
+- [ ] **Build-ordering wrinkle (design decision needed at implementation time):** `middleware.ts`
+      is compiled *during* `next build`, but ax runs *post*build — so a manifest generated
+      postbuild is consumed by the *next* build (one-build staleness). The manifest is derived
+      from the **source tree** (router model + config), not from build output, so the fix is
+      cheap: expose a fast `ax manifest` subcommand and let `ax init` wire it as `prebuild`.
+      Twin *files* (build-output-derived, Tier 2) stay postbuild — they're served from `public/`,
+      not compiled into the middleware, so ordering doesn't bite them. Document whichever shape
+      ships; the constraint (middleware bundles at build time, `public/` doesn't) is the invariant
+      to design around.
+
+### 9.5 Open decisions (record resolutions here)
+
+- **Twins default-on vs opt-in.** Leaning **default-on behind the existing first-publish review
+  gate** (the confirmation makes default-on safe, and it's the stronger product statement — the
+  wizard asks anyway); but every scaffold precedent is opt-in. Product call, deliberately not
+  derivable. _pending_
+- **HTML→markdown converter dependency** (Tier 2 only; Tier 1 needs none). A turndown-class
+  library would be the first non-trivial CLI dependency beyond ajv/jiti. Options: smallest
+  maintained converter vs. a minimal internal one (headings/paragraphs/lists/links/code — refuse
+  exotic HTML rather than mis-convert it, consistent with the tier ladder). Tier 1 + manifest can
+  ship first and defer this. _pending_
+- **Tier-1 MDX "mostly markdown" threshold.** Pick empirically against fixtures. _pending_
+
+**Fixtures:** an `mdx-content` fixture (Tier 1), a prerendered-pages fixture with `<main>`
+(Tier 2 happy path), a JS-shell page (Tier 2 skip: too little text), a gated route (Tier 2 skip:
+gated), a dynamic route (Tier 3). Snapshot the twins like catalogs; every twin snapshot must pass
+the Phase 7 born-passing assertions.
+
+**Done when:** Tier 1 + manifest + `/auth.md` ship with the review-gate extension and fixtures;
+Tier 2 ships behind the converter decision; every generated twin passes the born-passing suite;
+the report's skip list names a reason for every twin-less route.
+
+---
+
+## Phase 10 — Runtime: `@ora-ai/ax/middleware` (added 2026-08-16)
+
+Goal: the **negotiation half** — detected agents (and `Accept: text/markdown` requesters) receive
+the markdown ax generated, with correct headers, without the developer writing any serving logic.
+This is the follow-up Phase 4.5 deferred, now unblocked (see the Vercel strategy sync section).
+Design brief: implement the engineering invariants agreed in the sync (detection cascade, header
+invariants, HOF composition, armored callbacks), and close the one structural weakness the sync
+identified in middleware-only approaches (blind rewriting) with the Phase 9 manifest.
+
+**Posture note (document in the module):** detection here is deliberately *recall over precision*
+— mis-serving markdown to a misidentified client is low-harm and reversible. This does not loosen
+the emission-side precision posture; the stakes differ by layer. Both cloaking guards are
+**non-optional**: traditional search crawlers (Googlebot et al.) must never be rerouted (cloaking
+risk), and browser document navigations must never match on UA substrings (Cursor's embedded
+browser contains "cursor" in its UA and must get HTML).
+
+### 10.1 Packaging
+
+- [ ] New export `"./middleware"` in `packages/ax/package.json` `exports`, built as its own tsup
+      entry. **Zero dependencies, Web-API only** (Edge-safe) — ajv/jiti must not enter this
+      entry's import graph (the CLI keeps them; the runtime entry is the only code a consumer's
+      app imports at runtime). `next` becomes an **optional peer dependency** (types only),
+      `sideEffects: false` stays.
+
+### 10.2 Detection (`src/middleware/detection.ts`)
+
+- [ ] Implement the 3-layer cascade exactly as specified in the sync section, consuming the
+      Phase 7 corpus: (1) UA-substring match, suppressed on real browser document navigations;
+      (2) `Signature-Agent` header contains a known domain; (3) heuristic — `sec-fetch-mode`
+      absent + `BOT_LIKE_REGEX` UA + not in `TRADITIONAL_BOT_PATTERNS`. Return a discriminated
+      result (`{ detected, method }`) so `onDetection` can log the method. Cover the agreed edge
+      cases (embedded-browser UA like Cursor's must stay HTML; Googlebot never rerouted;
+      Signature-Agent positive) as table tests.
+
+### 10.3 Behavior (`src/middleware/index.ts`)
+
+- [ ] A composing HOF (working name `withAx(options, existingMiddleware?)` — final name open),
+      taking the **generated manifest** (imported module, Phase 9.4) plus `onDetection?` and
+      `canonicalUrl?` overrides. Per request, in order:
+      1. Not an agent and no markdown `Accept` → fall through to the wrapped middleware /
+         `NextResponse.next()`. (Also export a recommended `matcher` with the agreed exclusion
+         list: `_next`, `api`, static files, favicon/robots/health/status.)
+      2. Agent/Accept + **manifest says the path has a twin** → `NextResponse.rewrite()` to the
+         twin path + apply `markdown-headers` (Vary + canonical Link pointing at the HTML URL).
+         Never rewrite a path the manifest doesn't list — no blind rewrites, ever.
+      3. Agent/Accept + **manifest says the path is gated** → fall through untouched. The app's
+         own 401/403 answers; middleware never fakes or masks auth (the 9.3 recommendation covers
+         the 401 body). 
+      4. Agent/Accept + **path matches no route in the manifest** → respond **200 +
+         `text/markdown`** with a wayfinding body rendered from the manifest (real routes + only
+         the discovery artifacts that exist) — the runtime completion of the Phase 4.5 agent-404,
+         and the "agents discard 404 bodies" doctrine applied with real build-derived data instead
+         of a generic template. Plain clients keep the honest 404 via the normal app path.
+- [ ] **Armored `onDetection`:** sync throws swallowed; promises to `event.waitUntil()`.
+      Telemetry must never break serving.
+- [ ] **Canonical-URL hardening:** when deriving the canonical from request headers (proxy
+      setups), round-trip `Host`/`X-Forwarded-Proto` through the URL parser and rebuild from
+      parsed components; unparseable → omit the Link header rather than reflect raw input
+      (header-injection guard — hostile `Host` values must never corrupt a response header).
+
+### 10.4 Wiring (same rules as every scaffold)
+
+- [ ] Never edit an existing `middleware.ts`. The CLI prints the exact 3-line wiring (import,
+      wrap, matcher) phrased for a coding agent, and `.ora/report.json` carries the same strings —
+      identical to the JSON-LD wiring pattern.
+- [ ] Optionally scaffold `middleware.ts` **only when none exists** (write-once, behind an opt-in
+      flag / the wizard question).
+
+### 10.5 Verification
+
+- [ ] Unit: detection table tests; manifest gating (gated path never rewritten; unlisted path
+      never rewritten); header invariants (Vary deduped against pre-existing values; canonical
+      Link not duplicated); 404-negotiation body renders from a manifest fixture.
+- [ ] **Dogfood target:** a fixture app running `next start` must pass Ora's
+      `markdown-negotiation-vary` semantics — dual-fetch of the same URL (with and without
+      `Accept: text/markdown`) returns different content-types, correct bodies both ways, and
+      `Vary: Accept` on the negotiated response. This is the strictest known external check; the
+      header helper should make failing it impossible. Live-deploy confirmation folds into the
+      existing Vercel deploy steps.
+
+**Done when:** the fixture passes the dual-fetch dogfood test locally; no rewrite ever fires for a
+gated or unlisted path (asserted); the wiring instructions appear in CLI output + report; the
+runtime entry's bundle contains no CLI dependencies.
 
 ---
 
@@ -904,6 +1380,8 @@ Goal: prove the output is *usable by agents*, not just spec-valid, and lock in c
 | 19 | Confirm the **MCP server-card path/schema** Ora's `mcp-server-card` check expects: SEP-1649/PR-2127 `/.well-known/mcp/server-card.json` (media type `application/mcp-server-card+json`)? The contact cited `agentic-community/mcp-gateway-registry#119`, but that issue is a *different* vendor's multi-server `/.well-known/mcp-servers` registry format — likely a miscitation. Also: should we emit the `/.well-known/mcp.json` alias (SEP-1649's original name)? | Build the SEP-1649/2127 server card (matches the path Ora already probes); alias `mcp.json` if it helps clients | **Empirically pinned (2026-07-22, tunnel scans of a deployed `mcp-handler` server):** `mcp-server-card` **passes** on the plugin's generated card at `/.well-known/mcp/server-card.json` (found + accepted). But **`mcp-well-known-discovery` never extracts the server URL and all runtime `mcp-*` checks stay `na` ("No MCP server detected")** — unchanged across `serverUrl`/`remotes`/`transport.endpoint` field shapes, with a `/.well-known/mcp.json` alias also present, and with a live endpoint that answers `initialize`. So Ora's MCP *discovery* is **decoupled** from the server-card and uses an undocumented mechanism. Caveat: tested on a `*.trycloudflare.com` tunnel (the `mcp-server: pass` was a Cloudflare brand false-positive), so discovery may not run truthfully off a real domain — **re-test on the Vercel deploy.** Open for Ora: how does `mcp-well-known-discovery` find the URL, and does it connect on non-registered domains? |
 | 20 | Should Ora's **MCP discovery consume the ARD catalog's `application/mcp-server-card+json` entry**? Empirically (2026-07-22 scan) Ora validates the catalog (`ard-catalog: pass`) but ignores it for MCP discovery — it only reads `/.well-known/mcp/server-card.json`, so a real MCP server scored **0**. If discovery consumed the catalog entry, the plugin's existing output would already work. | Ideally yes — otherwise the plugin must emit the well-known card too (Phase 2.7) | _pending_ |
 | 21 | Which **auth shape** does Ora reward, and where does it read it — OpenAPI `securitySchemes`, the server-card `authentication` block, or RFC 9728 `/.well-known/oauth-protected-resource`? Drives Phase 2.8. | Read the native per-kind declaration (securitySchemes for REST, `withMcpAuth`+RFC 9728 for MCP); confirm Ora's weighting | _pending_ |
+| 22 | Markdown twins (Phase 9): **default-on behind the review gate, or opt-in** like every scaffold? Twins are generated (not user-owned) and the first-publish y/N gate makes default-on safe, but all scaffold precedent is opt-in. | Default-on behind the existing review gate — the stronger product statement; the `ax init` wizard asks explicitly either way | _pending — product call_ |
+| 23 | How does Ora **weight per-page markdown retrieval** — `.md` URL twins per content page, agent-UA → markdown, Accept-header negotiation, per-response frontmatter? Determines how much of Phase 9 Tier 2 / Phase 10 to prioritize vs. Tier 1 alone. (Known today: `markdown-negotiation`/`markdown-negotiation-vary` score Accept-based negotiation; `markdown-url-fallback` probes `/index.md` only.) | Ship Tier 1 + manifest + middleware regardless (they satisfy the known checks); confirm weighting before investing in the Tier 2 converter | _pending_ |
 
 ---
 
@@ -918,7 +1396,17 @@ canary publish (Phase 3.5) comes once that core is real, so partners can adopt t
 workflow before the least-stable work lands; WebMCP depends on the least-stable spec so it goes late;
 evals only make sense once there's real output to consume.
 
+**Where the 2026-08-16 phases slot in:** Phase 7 (serving-correctness groundwork) is immediate —
+small, independently shippable, and it hardens artifacts that already exist. Phase 8 (`ax init`)
+can land any time before the public `latest` and is most valuable before the Phase 3.5 canary
+partners onboard. Phase 9 splits: Tier 1 + the manifest + `/auth.md` come before Phase 10 (the
+middleware consumes the manifest); Tier 2 waits on the converter decision and open question #23.
+Phase 10 follows Phase 9's manifest. Phases 5 (evals) and 6 (release/`latest`) remain the tail —
+and the Phase 5 eval harness should exercise the twins/middleware fixtures once they exist, since
+"an agent can actually retrieve the content" is precisely what those phases add.
+
 **If timelines compress:** the shippable, useful v1 is **detect-and-reference alone** — site metadata
 + MCP-server detection + a `public/openapi.json` + config-declared docs/skills + `llms.txt`. That
 already improves a site's Ora score. WebMCP discoverability is the near-future add; LLM-tier evals are
-a first cut.
+a first cut. Of the 2026-08-16 phases, Phase 7 is the keep-at-all-costs slice (correctness +
+born-passing tests); wizard, twins, and middleware degrade gracefully to later releases.

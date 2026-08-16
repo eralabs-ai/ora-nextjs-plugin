@@ -32,6 +32,8 @@ describe('detectSitemap', () => {
     expect(result.source).toBe(join(dir, 'app', 'sitemap.ts'));
     expect(recommendations.some((r) => r.includes('sitemap detected'))).toBe(true);
     expect(recommendations.some((r) => r.includes('Sitemap:'))).toBe(true);
+    // Freshness signal: agents read <lastmod> to decide whether a page is worth re-fetching.
+    expect(recommendations.some((r) => r.includes('<lastmod>'))).toBe(true);
   });
 
   it('detects a static public/sitemap.xml', () => {
@@ -51,6 +53,7 @@ describe('detectSitemap', () => {
     expect(message).toContain('No sitemap found');
     expect(message).toContain('app/sitemap.ts');
     expect(message).toContain('never generates a sitemap itself');
+    expect(message).toContain('<lastmod>');
     // No third-party package names — the plugin shouldn't couple to their lifecycles.
     expect(message).not.toContain('next-sitemap');
   });

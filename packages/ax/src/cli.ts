@@ -1,6 +1,13 @@
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
+import {
+  type ArtifactSize,
+  exceedsTruncationLimit,
+  formatArtifactSize,
+  formatTokens,
+  measureArtifact,
+} from './artifact-size.js';
 import { AxConfigError } from './config.js';
 import { generateCatalog, type GenerateCatalogResult } from './generate.js';
 import { ORA_SCAN_API, ORA_SKILL_MCP_URL } from './ora-checks.js';
@@ -215,6 +222,24 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     stdout(`[ax] ✓ wrote ${cardResult.path} (MCP server card)`);
   }
 
+  // Token-aware sizes: report each artifact this build wrote in bytes *and* estimated tokens
+  // (chars ÷ 4), since tokens — not disk size — are what constrain the agent that later reads it.
+  // Measured off the written files so the numbers reflect exactly what ships.
+  const sizes = measureGeneratedArtifacts(cwd, result.path, serverCardPath, generated.report);
+  generated.report.sizes = sizes;
+  if (sizes.length > 0) {
+    stdout('[ax] Generated artifact sizes (estimated tokens = chars ÷ 4):');
+    for (const size of sizes) stdout(`[ax]   • ${size.path} — ${formatArtifactSize(size)}`);
+    for (const size of sizes) {
+      if (exceedsTruncationLimit(size.chars)) {
+        stdout(
+          `[ax] ⚠ ${size.path} is ${size.chars.toLocaleString()} chars (${formatTokens(size.tokens)}) — ` +
+            'Claude Code truncates responses over 100K chars.',
+        );
+      }
+    }
+  }
+
   if (recommendations.length > 0) {
     stdout('[ax] Recommendations to improve agent-readiness:');
     for (const recommendation of recommendations) stdout(`[ax]   → ${recommendation}`);
@@ -263,6 +288,45 @@ function printAgentHandoff(
     `[ax]   Point your coding agent at it and connect Ora's skill server (MCP): ${ORA_SKILL_MCP_URL}`,
   );
   stdout(`[ax]   Then scan your deployed site: ${ORA_SCAN_API.scan} {"url": "${domain}"}`);
+}
+
+/**
+ * Measures every artifact this build wrote: the catalog and server card (written by the CLI), plus
+ * any source-tree scaffold that produced a file *this run* (a `created` robots.txt or JSON-LD
+ * component, an appended robots.txt, a scaffolded llms.txt). A scaffold that was left unchanged or
+ * skipped isn't ax's output for this build, so it isn't measured.
+ */
+function measureGeneratedArtifacts(
+  cwd: string,
+  catalogPath: string,
+  serverCardPath: string | undefined,
+  report: BuildReport,
+): ArtifactSize[] {
+  const { scaffolds } = report;
+  const robots = scaffolds.robotsTxt;
+  const jsonLd = scaffolds.jsonLd;
+
+  const targets: Array<{ artifact: string; path: string | undefined }> = [
+    { artifact: 'ai-catalog.json', path: catalogPath },
+    { artifact: 'mcp-server-card', path: serverCardPath },
+    { artifact: 'llms.txt', path: scaffolds.llmsTxt?.path },
+    {
+      artifact: 'robots.txt',
+      path: robots?.action === 'created' || robots?.action === 'appended' ? robots.path : undefined,
+    },
+    {
+      artifact: 'organization-json-ld',
+      path: jsonLd?.action === 'created' ? jsonLd.path : undefined,
+    },
+  ];
+
+  const sizes: ArtifactSize[] = [];
+  for (const target of targets) {
+    if (target.path === undefined) continue;
+    const size = measureArtifact(cwd, target.path, target.artifact);
+    if (size !== undefined) sizes.push(size);
+  }
+  return sizes;
 }
 
 /**

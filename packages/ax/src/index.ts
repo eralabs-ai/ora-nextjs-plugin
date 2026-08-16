@@ -46,6 +46,17 @@ export {
 export type { BuildReport, ReportArtifact, ReportScaffolds, OraReport } from './report.js';
 
 export {
+  measureArtifact,
+  estimateTokens,
+  formatArtifactSize,
+  formatTokens,
+  humanSize,
+  exceedsTruncationLimit,
+  TRUNCATION_CHAR_LIMIT,
+  type ArtifactSize,
+} from './artifact-size.js';
+
+export {
   buildOraChecks,
   ORA_CHECK_MAP,
   ORA_SCAN_API,
@@ -204,6 +215,11 @@ export {
 } from './discovery.js';
 
 export {
+  buildMarkdownAlternateRecommendation,
+  type MarkdownAlternateOptions,
+} from './markdown-alternate.js';
+
+export {
   detectWebMcp,
   type DetectWebMcpOptions,
   type DetectWebMcpResult,
@@ -211,5 +227,21 @@ export {
 } from './detect-webmcp.js';
 
 export { manageAgent404, type Agent404Options, type Agent404Result } from './agent-404.js';
+
+export {
+  applyMarkdownHeaders,
+  canonicalLinkHeader,
+  type MarkdownHeaderOptions,
+} from './markdown-headers.js';
+
+export {
+  AI_AGENT_UA_PATTERNS,
+  SIGNATURE_AGENT_DOMAINS,
+  TRADITIONAL_BOT_PATTERNS,
+  BOT_LIKE_REGEX,
+  REPUTABLE_AI_CRAWLERS,
+  TRAINING_ONLY_CRAWLERS,
+  UA_CORPUS_REVIEWED,
+} from './agent-ua.js';
 
 export { listStaticPageRoutes, resolvePagePathname } from './app-dir.js';
