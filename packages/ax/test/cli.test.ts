@@ -326,6 +326,32 @@ describe('runCli', () => {
     );
   });
 
+  it('sizes a scaffolded llms.txt by its served body, not the route.ts wrapper', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(join(dir, 'tsconfig.json'), '{}', 'utf8');
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com', scaffoldLlmsTxt: true };\n",
+      'utf8',
+    );
+    mkdirSync(join(dir, 'app'), { recursive: true });
+
+    const code = await runCli(['--report'], { ...io, cwd: dir });
+    expect(code).toBe(0);
+
+    const routeFile = join(dir, 'app', 'llms.txt', 'route.ts');
+    const routeFileChars = readFileSync(routeFile, 'utf8').length;
+    const report = JSON.parse(readFileSync(join(dir, REPORT_OUTPUT_PATH), 'utf8'));
+    const llmsSize = report.sizes.find((s: { artifact: string }) => s.artifact === 'llms.txt');
+
+    expect(llmsSize).toBeDefined();
+    expect(llmsSize.path).toBe(join('app', 'llms.txt', 'route.ts'));
+    // The served markdown body is smaller than the route.ts file (JS wrapper + JSON-escaped literal).
+    expect(llmsSize.chars).toBeLessThan(routeFileChars);
+    // And it's a valid measurement of real content, not zero.
+    expect(llmsSize.chars).toBeGreaterThan(0);
+  });
+
   it('does not warn about truncation for a normal, small build', async () => {
     // The oversize branch is exercised deterministically in the artifact-size unit test; here we
     // just guard against the warning firing spuriously on a typical (well under 100K) build.

@@ -1,4 +1,4 @@
-import { buildArtifactUrl } from './site-url.js';
+import { absoluteOrServedUrl } from './site-url.js';
 
 // The advisory nudge to link an HTML page to its markdown twin, so a crawler that fetches the page
 // learns a machine-readable version exists: `<link rel="alternate" type="text/markdown" href="…">`
@@ -32,19 +32,10 @@ export function buildMarkdownAlternateRecommendation(options: MarkdownAlternateO
   const first = options.twinPaths[0];
   if (first === undefined) return [];
 
-  const href = markdownTwinHref(options, first);
+  const href = absoluteOrServedUrl(options.siteUrl, options.basePath, first);
   return [
     'Markdown twins exist for your pages — link each HTML page to its twin so crawlers find the ' +
       'machine-readable version. Add this to the page <head> (ax prints the tag; it never edits ' +
       `your layout): <link rel="alternate" type="text/markdown" href="${href}" />`,
   ];
-}
-
-/** An absolute twin URL when the origin resolved, else the served (basePath-prefixed) path. */
-function markdownTwinHref(options: MarkdownAlternateOptions, path: string): string {
-  if (options.siteUrl === undefined) {
-    const prefix = options.basePath === '/' ? '' : options.basePath.replace(/\/$/, '');
-    return `${prefix}${path}`;
-  }
-  return buildArtifactUrl(options.siteUrl, options.basePath, path);
 }

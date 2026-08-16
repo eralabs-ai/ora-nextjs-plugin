@@ -67,6 +67,23 @@ describe('applyMarkdownHeaders — canonical Link', () => {
     expect(headers.get('link')).toBe(existing);
   });
 
+  it('recognizes canonical within a multi-type quoted rel value', () => {
+    const existing = '<https://example.com/original>; rel="alternate canonical"';
+    const headers = applyMarkdownHeaders(new Headers({ Link: existing }), {
+      canonicalUrl: 'https://example.com/other',
+    });
+    expect(headers.get('link')).toBe(existing);
+  });
+
+  it('does not treat "rel=canonical" inside a link target URL as a canonical declaration', () => {
+    // The substring lives in the URI, not in a rel= parameter, so a real canonical must still be added.
+    const headers = applyMarkdownHeaders(
+      new Headers({ Link: '<https://example.com/p?to=rel=canonical>; rel="preload"' }),
+      { canonicalUrl: 'https://example.com/canonical' },
+    );
+    expect(headers.get('link')).toContain('<https://example.com/canonical>; rel="canonical"');
+  });
+
   it('adds a canonical Link alongside an unrelated existing Link', () => {
     const headers = applyMarkdownHeaders(new Headers({ Link: '</style.css>; rel="preload"' }), {
       canonicalUrl: 'https://example.com/docs',

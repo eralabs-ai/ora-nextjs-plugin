@@ -61,5 +61,12 @@ function varyAlreadyCoversAccept(vary: string | null): boolean {
 
 /** Whether an existing `Link` header already declares a `rel=canonical` link (quoted or bare). */
 function hasCanonicalLink(link: string | null): boolean {
-  return link !== null && /rel="?canonical"?/i.test(link);
+  if (link === null) return false;
+  // Test only the link *parameters*, not the target URIs: a URL that happens to contain the literal
+  // "rel=canonical" (e.g. in a query string) must not be read as an existing canonical declaration.
+  // `rel` may list several space-separated types, so match `canonical` anywhere inside a quoted value.
+  const params = link.replace(/<[^>]*>/g, '');
+  return /\brel\s*=\s*("[^"]*\bcanonical\b[^"]*"|'[^']*\bcanonical\b[^']*'|canonical\b)/i.test(
+    params,
+  );
 }

@@ -11,6 +11,7 @@ import {
   formatTokens,
   humanSize,
   measureArtifact,
+  measureContent,
   TRUNCATION_CHAR_LIMIT,
 } from '../src/artifact-size.js';
 
@@ -35,6 +36,27 @@ describe('token / size formatting', () => {
   it('flags only character counts above the truncation limit', () => {
     expect(exceedsTruncationLimit(TRUNCATION_CHAR_LIMIT)).toBe(false);
     expect(exceedsTruncationLimit(TRUNCATION_CHAR_LIMIT + 1)).toBe(true);
+  });
+});
+
+describe('measureContent', () => {
+  it('measures a served string in chars, UTF-8 bytes, and tokens with the given path', () => {
+    const size = measureContent('hello', 'x', 'public/x.txt');
+    expect(size).toEqual({ artifact: 'x', path: 'public/x.txt', bytes: 5, chars: 5, tokens: 1 });
+  });
+
+  it('counts multibyte content as chars for tokens but bytes for size', () => {
+    const size = measureContent('é', 'm', 'm.txt');
+    expect(size.chars).toBe(1);
+    expect(size.bytes).toBe(2);
+  });
+
+  it('measures the served payload, which is smaller than the same body wrapped in a route handler', () => {
+    const body = '# Title\n[link](/a)\n';
+    const wrapped = `export const dynamic = 'force-static';\nconst body = ${JSON.stringify(body)};\n`;
+    expect(measureContent(body, 'llms.txt', 'app/llms.txt/route.ts').chars).toBeLessThan(
+      wrapped.length,
+    );
   });
 });
 

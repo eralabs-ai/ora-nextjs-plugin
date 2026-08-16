@@ -70,6 +70,11 @@ export interface GenerateCatalogResult {
   report: BuildReport;
   /** `ax.config` `report`, resolved: `false` (default), `true` (default path), or a custom path. */
   reportTarget: boolean | string;
+  /**
+   * The markdown body a scaffolded `llms.txt` serves, when one was written this run. The CLI sizes
+   * this rather than the `route.ts` file on disk, so the reported tokens match what an agent fetches.
+   */
+  scaffoldedLlmsTxtBody?: string;
 }
 
 /** Presence-shape shared by the detect-and-recommend detectors (`{found, source?}`). */
@@ -443,5 +448,8 @@ export async function generateCatalog(
     report,
     reportTarget: config.report,
     ...(serverCard ? { serverCard } : {}),
+    ...(llmsTxtResult.scaffoldedBody !== undefined
+      ? { scaffoldedLlmsTxtBody: llmsTxtResult.scaffoldedBody }
+      : {}),
   };
 }

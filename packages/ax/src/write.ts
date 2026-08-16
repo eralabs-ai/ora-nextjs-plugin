@@ -189,7 +189,12 @@ function writeRouteHandler(
   return routeFile;
 }
 
-function jsonText(value: unknown): string {
+/**
+ * The exact on-the-wire serialization ax writes for JSON artifacts (pretty-printed, trailing
+ * newline). Exported so size reporting can measure the *served* body from the in-memory object
+ * rather than re-reading a file — which, for the `'route'` target, is a JS wrapper, not this JSON.
+ */
+export function jsonText(value: unknown): string {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 

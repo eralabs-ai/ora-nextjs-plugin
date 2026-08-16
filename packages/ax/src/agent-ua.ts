@@ -114,11 +114,16 @@ export const BOT_LIKE_REGEX = /bot|agent|fetch|crawl|spider|search/i;
  * `User-agent` tokens (correct casing, as each vendor documents them) rather than lowercase match
  * substrings — the two forms differ and both are needed.
  *
- * Reputable retrieval and search crawlers named individually: a blanket `User-agent: *` says nothing
- * about whether agent traffic is welcome, so agent-readiness scanners look for explicit per-agent
- * rules. These are the crawlers whose tokens are stable, publicly documented, and fetch content to
- * answer a user's live question (retrieval/search) rather than to train a model — allowing them is
- * uncontroversial. Grouped by vendor to match the layer-1 groups.
+ * Reputable, publicly-documented AI crawlers named individually: a blanket `User-agent: *` says
+ * nothing about whether agent traffic is welcome, so agent-readiness scanners look for explicit
+ * per-agent rules. This roster is a *mix* — retrieval/search fetchers (OAI-SearchBot, Claude-User,
+ * PerplexityBot, …) and model-training crawlers (GPTBot, ClaudeBot, Meta-ExternalAgent, AI2Bot)
+ * alike — because a site opting into agent visibility generally wants both, and naming each one
+ * states that welcome explicitly. The distinction that matters here is *reputable and documented*
+ * (these) vs *aggressive/undocumented* (TRAINING_ONLY_CRAWLERS below): restricting any crawler,
+ * training ones included, stays the owner's call, which is why the scaffold only ever writes `Allow`
+ * for these and leaves blocking as a commented-out example. Grouped by vendor to match the layer-1
+ * groups.
  */
 export const REPUTABLE_AI_CRAWLERS: readonly string[] = [
   // OpenAI
@@ -146,8 +151,11 @@ export const REPUTABLE_AI_CRAWLERS: readonly string[] = [
 ];
 
 /**
- * Crawlers the scaffold shows how to restrict, always commented out. These collect content to train
- * models rather than to answer a user's live question, so whether to block them is a decision about
- * the site's content and business — the owner's call, never ours.
+ * The crawlers the scaffold shows how to restrict, always commented out — the ones most commonly
+ * singled out as aggressive or undocumented bulk scrapers (CCBot feeds the Common Crawl corpus;
+ * Bytespider has a reputation for ignoring robots directives). Whether to block them is a decision
+ * about the site's content and business — the owner's call, never ours — so the example stays
+ * commented. (This is a *default*-restriction hint, not a claim that the crawlers above never train:
+ * some of those do too; see REPUTABLE_AI_CRAWLERS.)
  */
 export const TRAINING_ONLY_CRAWLERS: readonly string[] = ['CCBot', 'Bytespider'];

@@ -60,8 +60,33 @@ export function readSiteUrlFromEnv(): string | undefined {
  * `url` field requires.
  */
 export function buildArtifactUrl(siteUrl: string, basePath: string, pathname: string): string {
+  return `${stripTrailingSlash(siteUrl)}${servedPath(basePath, pathname)}`;
+}
+
+/**
+ * The path a `basePath`-hosted artifact is actually served at (`basePath` prefix + `pathname`), with
+ * no origin — for when no absolute site origin resolved. A relative served path is still resolvable
+ * by whoever fetched the document that references it, so this degrades usefully instead of guessing
+ * an origin.
+ */
+export function servedPath(basePath: string, pathname: string): string {
   const normalizedBasePath = basePath === '/' ? '' : stripTrailingSlash(basePath);
-  return `${stripTrailingSlash(siteUrl)}${normalizedBasePath}${pathname}`;
+  return `${normalizedBasePath}${pathname}`;
+}
+
+/**
+ * An absolute URL when `siteUrl` is known, and the served (basePath-prefixed) path otherwise — the
+ * "absolute if we can, resolvable path if we can't" rule shared by every artifact that may be
+ * rendered before an origin resolves (llms.txt links, the markdown-alternate tag, …).
+ */
+export function absoluteOrServedUrl(
+  siteUrl: string | undefined,
+  basePath: string,
+  pathname: string,
+): string {
+  return siteUrl === undefined
+    ? servedPath(basePath, pathname)
+    : buildArtifactUrl(siteUrl, basePath, pathname);
 }
 
 /** The hostname of an absolute URL, or undefined if it doesn't parse — never throws. */

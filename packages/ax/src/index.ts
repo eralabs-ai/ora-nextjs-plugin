@@ -47,6 +47,7 @@ export type { BuildReport, ReportArtifact, ReportScaffolds, OraReport } from './
 
 export {
   measureArtifact,
+  measureContent,
   estimateTokens,
   formatArtifactSize,
   formatTokens,
@@ -141,6 +142,8 @@ export {
   resolveSiteUrl,
   readSiteUrlFromEnv,
   buildArtifactUrl,
+  servedPath,
+  absoluteOrServedUrl,
   buildUrn,
   hostnameFromUrl,
 } from './site-url.js';
