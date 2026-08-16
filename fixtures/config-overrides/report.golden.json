@@ -1,5 +1,4 @@
 {
-  "reportVersion": 2,
   "generatedAt": "<generatedAt>",
   "basePath": "",
   "routers": [
@@ -62,6 +61,15 @@
     }
   },
   "scaffolds": {},
+  "sizes": [
+    {
+      "artifact": "ai-catalog.json",
+      "path": "public/.well-known/ai-catalog.json",
+      "bytes": 658,
+      "chars": 658,
+      "tokens": 165
+    }
+  ],
   "ora": {
     "skillMcp": "https://ora.ai/skill/mcp",
     "skillUrl": "https://ora.ai/.well-known/agent-skills/agent-ready-website/SKILL.md",
@@ -143,7 +151,7 @@
   "recommendations": [
     "No OpenAPI doc found (public/openapi.json) — this is the highest-value artifact for agent discovery, since it lets agents understand and call your API without guessing at routes or schemas. ax never generates one; produce it however your API is defined (many schema/validation libraries can emit OpenAPI from your existing route definitions) and commit the result to public/openapi.json.",
     "No llms.txt found — a short natural-language guide agents read to decide whether your site fits their task, and to find your key pages. Add one at app/llms.txt/route.ts (or public/llms.txt), or set scaffoldLlmsTxt: true in ax.config to have a starter written for you. Pair it with JSON-LD structured data (an Organization block with a sameAs array): llms.txt says what your site is for, JSON-LD identifies it as an entity registries can rank — the two reinforce each other, so add both rather than one alone.",
-    "No sitemap found — add one so agents can discover all public routes. Use the built-in Next.js path (app/sitemap.ts); ax never generates a sitemap itself. Then reference it from robots.txt with a \"Sitemap:\" line.",
+    "No sitemap found — add one so agents can discover all public routes. Use the built-in Next.js path (app/sitemap.ts); ax never generates a sitemap itself. Give each entry a <lastmod> date (agents use it to judge freshness), then reference it from robots.txt with a \"Sitemap:\" line.",
     "No robots.txt found — add one (app/robots.ts or public/robots.txt) that explicitly Allows the reputable AI agents you want to reach, scoped to specific User-agent groups (never \"User-agent: *\"), plus a \"Sitemap:\" line. Note: Next's MetadataRoute.Robots (app/robots.ts) has no field for the \"Agentmap:\" catalog pointer — put that line in a static public/robots.txt. Set scaffoldRobots: true in ax.config to have one written for you.",
     "No agents.md found — consider adding one (public/agents.md) with when-to-use / when-NOT-to-use guidance for agents. ax won't write its content for you; the companion skill can help author it from your repo.",
     "No JSON-LD structured data found in your layouts/pages — structured data is how registries and agents disambiguate and rank your site. Add an Organization block in your root layout <head> (<script type=\"application/ld+json\">) with a \"sameAs\" array linking your LinkedIn/GitHub/npm/social profiles (the entity-disambiguation signal registries value), and at least one more schema.org @type beyond Organization — SoftwareApplication or Product for an app/API, or a FAQPage — since covering more types helps registries understand your site more fully. JSON-LD pairs with an llms.txt: llms.txt tells agents what your site is for, JSON-LD identifies it as an entity registries can rank — add both, not one alone. ax won’t author the block (the fields are judgment content); the companion skill can help draft it from your repo.",

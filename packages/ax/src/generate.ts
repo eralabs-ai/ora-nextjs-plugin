@@ -15,6 +15,7 @@ import { buildDiscoveryRecommendations } from './discovery.js';
 import { applyEntryOverrides, entryUrlPath } from './entries.js';
 import { resolveGating, type GateTarget } from './gating.js';
 import { loadProjectEnv } from './load-project-env.js';
+import { buildMarkdownAlternateRecommendation } from './markdown-alternate.js';
 import { loadNextConfig } from './next-config.js';
 import {
   buildOraChecks,
@@ -69,6 +70,11 @@ export interface GenerateCatalogResult {
   report: BuildReport;
   /** `ax.config` `report`, resolved: `false` (default), `true` (default path), or a custom path. */
   reportTarget: boolean | string;
+  /**
+   * The markdown body a scaffolded `llms.txt` serves, when one was written this run. The CLI sizes
+   * this rather than the `route.ts` file on disk, so the reported tokens match what an agent fetches.
+   */
+  scaffoldedLlmsTxtBody?: string;
 }
 
 /** Presence-shape shared by the detect-and-recommend detectors (`{found, source?}`). */
@@ -322,6 +328,17 @@ export async function generateCatalog(
   });
   for (const message of buildDiscoveryRecommendations({ siteUrl, basePath })) recommend(message);
 
+  // Markdown-twin alternate link. ax does not generate markdown twins yet, and nothing names them,
+  // so `twinPaths` is empty today and this adds nothing to a current build — the recommendation
+  // lands the moment there is a twin for a `<link rel="alternate">` to point at.
+  for (const message of buildMarkdownAlternateRecommendation({
+    siteUrl,
+    basePath,
+    twinPaths: [],
+  })) {
+    recommend(message);
+  }
+
   // Agent-aware 404: detect-and-recommend, or (opted in) scaffold a not-found page whose
   // route-manifest data module is regenerated every build. Runs after the artifact detectors so
   // its discovery links only reference what actually exists.
@@ -363,7 +380,6 @@ export async function generateCatalog(
   };
 
   const report: BuildReport = {
-    reportVersion: 2,
     generatedAt: new Date().toISOString(),
     ...(siteUrl !== undefined ? { siteUrl } : {}),
     basePath,
@@ -398,6 +414,9 @@ export async function generateCatalog(
       openapi: openApi,
     },
     scaffolds,
+    // Filled in by the CLI once artifacts are on disk (it knows the written catalog / server-card
+    // paths and can read the scaffolded files back), so the generator leaves it empty.
+    sizes: [],
     ora: {
       skillMcp: ORA_SKILL_MCP_URL,
       skillUrl: ORA_SKILL_URL,
@@ -429,5 +448,8 @@ export async function generateCatalog(
     report,
     reportTarget: config.report,
     ...(serverCard ? { serverCard } : {}),
+    ...(llmsTxtResult.scaffoldedBody !== undefined
+      ? { scaffoldedLlmsTxtBody: llmsTxtResult.scaffoldedBody }
+      : {}),
   };
 }

@@ -63,6 +63,28 @@ describe('scaffoldRobots — creating a robots.txt', () => {
     expect(contents).toContain('Agentmap: https://example.com/.well-known/ai-catalog.json');
   });
 
+  it('names the retrieval/search crawler families the corpus tracks, from the shared source', () => {
+    scaffoldRobots(options());
+
+    const contents = readFileSync(robotsPath(), 'utf8');
+    // The Allow block is built from the agent-ua corpus, so it covers the retrieval/search families
+    // a five-name list missed — search fetchers and the reputable general crawlers alike.
+    for (const agent of [
+      'OAI-SearchBot',
+      'ChatGPT-User',
+      'Claude-SearchBot',
+      'Meta-ExternalAgent',
+      'Meta-ExternalFetcher',
+      'Amazonbot',
+      'AI2Bot',
+      'Diffbot',
+    ]) {
+      expect(contents).toContain(`User-agent: ${agent}`);
+    }
+    // Every named crawler is allowed, never disallowed — the scaffold never blocks on the owner's behalf.
+    expect(contents).not.toMatch(/^Disallow:/m);
+  });
+
   it('shows how to restrict training-only crawlers but never does it for you', () => {
     scaffoldRobots(options());
 

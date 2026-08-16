@@ -34,15 +34,16 @@ export function detectSitemap(options: DetectSitemapOptions): DetectSitemapResul
   if (source) {
     options.recommend(
       `sitemap detected (${relativeSource(options.cwd, source)}) — make sure robots.txt references ` +
-        'it with a "Sitemap:" line, and that it lists all public routes.',
+        'it with a "Sitemap:" line, that it lists all public routes, and that each entry carries a ' +
+        '<lastmod> date so agents can judge how fresh a page is before fetching it.',
     );
     return { found: true, source };
   }
 
   options.recommend(
     'No sitemap found — add one so agents can discover all public routes. Use the built-in Next.js ' +
-      'path (app/sitemap.ts); ax never generates a sitemap itself. Then reference it from ' +
-      'robots.txt with a "Sitemap:" line.',
+      'path (app/sitemap.ts); ax never generates a sitemap itself. Give each entry a <lastmod> date ' +
+      '(agents use it to judge freshness), then reference it from robots.txt with a "Sitemap:" line.',
   );
   return { found: false };
 }

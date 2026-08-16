@@ -1,6 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { REPUTABLE_AI_CRAWLERS, TRAINING_ONLY_CRAWLERS } from './agent-ua.js';
 import { buildArtifactUrl } from './site-url.js';
 
 // The write side of `robots.txt` (`scaffoldRobots: true`). Two jobs, both deliberately narrow:
@@ -19,22 +20,6 @@ import { buildArtifactUrl } from './site-url.js';
 
 /** Marks the block ax appends, so a reader (and the next run) can tell what came from here. */
 const APPEND_MARKER = '# Added by @ora-ai/ax';
-
-/**
- * Reputable AI agent crawlers named individually. A blanket `User-agent: *` says nothing about
- * whether agent traffic is welcome, so agent-readiness scanners look for explicit per-agent rules —
- * these are the ones whose tokens are stable and publicly documented.
- */
-const AI_CRAWLERS: readonly string[] = [
-  'GPTBot',
-  'ClaudeBot',
-  'Claude-User',
-  'PerplexityBot',
-  'Google-Extended',
-];
-
-/** Crawlers the commented-out example shows how to restrict. Never written uncommented. */
-const TRAINING_CRAWLERS: readonly string[] = ['CCBot', 'Bytespider'];
 
 export type RobotsScaffoldAction = 'created' | 'appended' | 'unchanged' | 'skipped';
 
@@ -187,8 +172,10 @@ function createRobots(
 
 /** The generated file. Everything in it is either factual or explicitly the developer's decision. */
 function robotsSource(pointers: string[]): string {
-  const allowBlocks = AI_CRAWLERS.map((agent) => `User-agent: ${agent}\nAllow: /`).join('\n\n');
-  const restrictExample = TRAINING_CRAWLERS.map(
+  const allowBlocks = REPUTABLE_AI_CRAWLERS.map((agent) => `User-agent: ${agent}\nAllow: /`).join(
+    '\n\n',
+  );
+  const restrictExample = TRAINING_ONLY_CRAWLERS.map(
     (agent) => `# User-agent: ${agent}\n# Disallow: /`,
   ).join('\n#\n');
 

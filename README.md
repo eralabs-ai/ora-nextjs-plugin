@@ -292,8 +292,10 @@ whether you actually have a sitemap. So:
   policy. (Next's `MetadataRoute.Robots` has no field for `Agentmap:` at all, so ax says so and
   leaves the choice to move to you.)
 - **You have neither** → ax writes `public/robots.txt` with `User-agent: *` / `Allow: /`, explicit
-  `Allow` blocks for reputable AI agent crawlers (GPTBot, ClaudeBot, Claude-User, PerplexityBot,
-  Google-Extended), and the pointer lines above.
+  `Allow` blocks for reputable AI agent crawlers — the retrieval and search families across OpenAI
+  (GPTBot, OAI-SearchBot, ChatGPT-User), Anthropic (ClaudeBot, Claude-SearchBot, Claude-User),
+  Google (Google-Extended), Perplexity, Meta, Amazon, and others, kept in one shared corpus so the
+  list never drifts — and the pointer lines above.
 
 The generated file also carries a **commented-out** example of restricting training-only crawlers
 (CCBot, Bytespider). It stays commented out on purpose: whether to block a crawler is a decision
@@ -320,10 +322,10 @@ nothing, and the report keeps saying so.
 writes **`.ora/report.json`** — the machine-readable twin of the CLI output: catalog entries and
 where they were written, detected MCP mounts and the server card path, WebMCP tool sites, presence
 of every detect-and-recommend artifact (robots.txt / sitemap / agents.md / JSON-LD / llms.txt /
-openapi.json), agent-404 status, what each opt-in scaffold wrote or skipped and why, and every
-warning and recommendation verbatim. A coding agent (or CI step) reads one JSON file instead of
-parsing log lines — point your agent at it after a build and let it work through the
-recommendations.
+openapi.json), agent-404 status, what each opt-in scaffold wrote or skipped and why, the byte and
+estimated-token size of every generated artifact, and every warning and recommendation verbatim. A
+coding agent (or CI step) reads one JSON file instead of parsing log lines — point your agent at it
+after a build and let it work through the recommendations.
 
 ### The `ora` section — recommendations in Ora's check language
 
@@ -334,7 +336,17 @@ to close the loop:
 
 ```jsonc
 {
-  "reportVersion": 2,
+  // Byte + estimated-token size of each generated artifact (chars ÷ 4), with an entry flagged when
+  // it exceeds the 100K-char limit an agent would truncate.
+  "sizes": [
+    {
+      "artifact": "ai-catalog.json",
+      "path": "public/.well-known/ai-catalog.json",
+      "bytes": 512,
+      "chars": 512,
+      "tokens": 128,
+    },
+  ],
   "ora": {
     // MCP server for Ora's agent-ready-website skill (tools: list_skills, get_skill)
     "skillMcp": "https://ora.ai/skill/mcp",

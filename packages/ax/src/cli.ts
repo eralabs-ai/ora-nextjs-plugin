@@ -1,13 +1,23 @@
 import { existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 
+import {
+  type ArtifactSize,
+  exceedsTruncationLimit,
+  formatArtifactSize,
+  formatTokens,
+  measureArtifact,
+  measureContent,
+} from './artifact-size.js';
 import { AxConfigError } from './config.js';
 import { generateCatalog, type GenerateCatalogResult } from './generate.js';
 import { ORA_SCAN_API, ORA_SKILL_MCP_URL } from './ora-checks.js';
 import type { BuildReport } from './report.js';
+import type { McpServerCard } from './server-card.js';
 import type { AiCatalog } from './types.js';
 import {
   CATALOG_OUTPUT_PATH,
+  jsonText,
   REPORT_OUTPUT_PATH,
   writeCatalog,
   writeReport,
@@ -215,6 +225,32 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     stdout(`[ax] ✓ wrote ${cardResult.path} (MCP server card)`);
   }
 
+  // Token-aware sizes: report each artifact this build wrote in bytes *and* estimated tokens
+  // (chars ÷ 4), since tokens — not disk size — are what constrain the agent that later reads it.
+  // Measured off the *served* content (the JSON/markdown an agent fetches), not the file on disk,
+  // so a 'route' emission target's JS wrapper never inflates the numbers or trips the size warning.
+  const sizes = measureGeneratedArtifacts(cwd, {
+    catalog,
+    catalogPath: result.path,
+    serverCard: generated.serverCard,
+    serverCardPath,
+    llmsTxtBody: generated.scaffoldedLlmsTxtBody,
+    report: generated.report,
+  });
+  generated.report.sizes = sizes;
+  if (sizes.length > 0) {
+    stdout('[ax] Generated artifact sizes (estimated tokens = chars ÷ 4):');
+    for (const size of sizes) stdout(`[ax]   • ${size.path} — ${formatArtifactSize(size)}`);
+    for (const size of sizes) {
+      if (exceedsTruncationLimit(size.chars)) {
+        stdout(
+          `[ax] ⚠ ${size.path} is ${size.chars.toLocaleString()} chars (${formatTokens(size.tokens)}) — ` +
+            'Claude Code truncates responses over 100K chars.',
+        );
+      }
+    }
+  }
+
   if (recommendations.length > 0) {
     stdout('[ax] Recommendations to improve agent-readiness:');
     for (const recommendation of recommendations) stdout(`[ax]   → ${recommendation}`);
@@ -263,6 +299,74 @@ function printAgentHandoff(
     `[ax]   Point your coding agent at it and connect Ora's skill server (MCP): ${ORA_SKILL_MCP_URL}`,
   );
   stdout(`[ax]   Then scan your deployed site: ${ORA_SCAN_API.scan} {"url": "${domain}"}`);
+}
+
+interface MeasureArtifactsInput {
+  catalog: AiCatalog;
+  /** Absolute path the catalog was written to (a static file or a route handler). */
+  catalogPath: string;
+  serverCard: McpServerCard | undefined;
+  /** Absolute path the server card was written to, if one was written. */
+  serverCardPath: string | undefined;
+  /** The markdown body a scaffolded llms.txt serves, if one was scaffolded this run. */
+  llmsTxtBody: string | undefined;
+  report: BuildReport;
+}
+
+/**
+ * Measures every artifact this build wrote, in the units that constrain the agent that reads it.
+ *
+ * The catalog, server card, and scaffolded llms.txt are sized from their *served* content (the
+ * JSON/markdown an agent fetches), not the file on disk — for a `'route'` emission target the file
+ * is a JS wrapper around the payload, so measuring the file would inflate the numbers and could trip
+ * the truncation warning on a response that's actually well within the limit. Content-served-verbatim
+ * scaffolds (a `created`/`appended` robots.txt, a `created` JSON-LD component) are measured from the
+ * file, since there the file is what ships. A scaffold left unchanged or skipped isn't this build's
+ * output, so it isn't measured.
+ */
+function measureGeneratedArtifacts(cwd: string, input: MeasureArtifactsInput): ArtifactSize[] {
+  const { scaffolds } = input.report;
+  const robots = scaffolds.robotsTxt;
+  const jsonLd = scaffolds.jsonLd;
+  const sizes: ArtifactSize[] = [];
+
+  // Served-content artifacts: measured from the payload, so the numbers match the HTTP response.
+  sizes.push(
+    measureContent(jsonText(input.catalog), 'ai-catalog.json', relative(cwd, input.catalogPath)),
+  );
+  if (input.serverCard !== undefined && input.serverCardPath !== undefined) {
+    sizes.push(
+      measureContent(
+        jsonText(input.serverCard),
+        'mcp-server-card',
+        relative(cwd, input.serverCardPath),
+      ),
+    );
+  }
+  if (input.llmsTxtBody !== undefined && scaffolds.llmsTxt?.path !== undefined) {
+    sizes.push(
+      measureContent(input.llmsTxtBody, 'llms.txt', relative(cwd, scaffolds.llmsTxt.path)),
+    );
+  }
+
+  // Served-verbatim files: the file on disk is exactly what ships, so measure it directly.
+  const fileTargets: Array<{ artifact: string; path: string | undefined }> = [
+    {
+      artifact: 'robots.txt',
+      path: robots?.action === 'created' || robots?.action === 'appended' ? robots.path : undefined,
+    },
+    {
+      artifact: 'organization-json-ld',
+      path: jsonLd?.action === 'created' ? jsonLd.path : undefined,
+    },
+  ];
+  for (const target of fileTargets) {
+    if (target.path === undefined) continue;
+    const size = measureArtifact(cwd, target.path, target.artifact);
+    if (size !== undefined) sizes.push(size);
+  }
+
+  return sizes;
 }
 
 /**

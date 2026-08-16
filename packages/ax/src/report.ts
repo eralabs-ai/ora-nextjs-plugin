@@ -1,3 +1,4 @@
+import type { ArtifactSize } from './artifact-size.js';
 import type { WebMcpToolSite } from './detect-webmcp.js';
 import type { OraCheckStatus } from './ora-checks.js';
 import type { RouterKind } from './router-model.js';
@@ -47,11 +48,9 @@ export interface OraReport {
 }
 
 export interface BuildReport {
-  /**
-   * Bumped on breaking shape changes, so readers can gate on it. `2` added the `ora` and
-   * `scaffolds` sections.
-   */
-  reportVersion: 2;
+  // No version field yet: the shape is still moving and nothing external consumes it until the
+  // package is published. Add `reportVersion: 1` at first publish, and bump it only on a change that
+  // would break an existing reader.
   /** ISO 8601 timestamp of this run. */
   generatedAt: string;
   /** Resolved site origin, when one was determined (config / env var / Vercel). */
@@ -95,6 +94,13 @@ export interface BuildReport {
   };
   /** What the opt-in source-tree scaffolds wrote, appended, or skipped this run. */
   scaffolds: ReportScaffolds;
+  /**
+   * Byte and estimated-token size of each artifact this build generated. Tokens (`chars / 4`) are
+   * the unit that constrains the agent that later reads the artifact; an entry over the truncation
+   * limit is the one worth acting on. Populated by the CLI once files are written, so it also
+   * records artifacts (the catalog, the server card) the generator returns but does not itself write.
+   */
+  sizes: ArtifactSize[];
   /** Ora's check language: what's already addressed, what a coding agent should act on. */
   ora: OraReport;
   /** Non-fatal build notices, verbatim as printed. */

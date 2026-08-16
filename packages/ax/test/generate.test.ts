@@ -140,11 +140,10 @@ describe('generateCatalog agent-readiness recommendations', () => {
 // The build report is what a coding agent reads instead of the CLI output, and its `ora` section is
 // what makes it actionable: each artifact the plugin knows about, expressed as the Ora checks it
 // contributes to.
-describe('generateCatalog build report (v2)', () => {
-  it('reports version 2 with the Ora handoff section filled in', async () => {
+describe('generateCatalog build report', () => {
+  it('fills in the Ora handoff section', async () => {
     const { report } = await generateCatalog({ cwd: dir });
 
-    expect(report.reportVersion).toBe(2);
     expect(report.ora.skillMcp).toBe('https://ora.ai/skill/mcp');
     expect(report.ora.skillUrl).toContain('agent-ready-website');
     expect(report.ora.scanApi).toEqual({

@@ -59,6 +59,12 @@ export interface DetectLlmsTxtResult {
   source?: string;
   /** Path of a starter route handler scaffolded on *this* run, if any. */
   scaffoldedPath?: string;
+  /**
+   * The markdown body a scaffold serves at `/llms.txt` — the bytes an agent fetches, which for an
+   * App Router route handler differ from the `route.ts` file on disk (the body is wrapped in JS).
+   * Present only when a scaffold was written this run; lets size reporting measure the response.
+   */
+  scaffoldedBody?: string;
 }
 
 /** Cap on routes listed under "Key pages" — an orientation aid, not a sitemap replacement. */
@@ -106,8 +112,10 @@ export function detectLlmsTxt(options: DetectLlmsTxtOptions): DetectLlmsTxtResul
     return { found: false };
   }
 
-  const scaffoldedPath = scaffoldLlmsTxt(options, router);
-  if (scaffoldedPath) return { found: false, scaffoldedPath };
+  const scaffolded = scaffoldLlmsTxt(options, router);
+  if (scaffolded) {
+    return { found: false, scaffoldedPath: scaffolded.path, scaffoldedBody: scaffolded.body };
+  }
 
   // Opted into scaffolding but nothing was written (no app/ dir, or a write error already warned
   // about) — still surface the absent nudge so the signal isn't silently dropped.
@@ -137,27 +145,31 @@ function findLlmsTxtRoute(appDir: string): string | undefined {
  * is caught and warned about rather than failing the build — writing a *helpful extra* file must
  * never be why a build breaks. Returns undefined when the project has no router to scaffold for.
  */
-function scaffoldLlmsTxt(options: DetectLlmsTxtOptions, router: RouterModel): string | undefined {
+function scaffoldLlmsTxt(
+  options: DetectLlmsTxtOptions,
+  router: RouterModel,
+): { path: string; body: string } | undefined {
   if (router.appDir) return scaffoldLlmsTxtRoute(options, router, router.appDir);
   if (router.pagesDir) return scaffoldLlmsTxtStatic(options, router);
   return undefined;
 }
 
-/** Writes a starter App Router `app/llms.txt/route.{ts,js}` handler. */
+/** Writes a starter App Router `app/llms.txt/route.{ts,js}` handler; returns its path + served body. */
 function scaffoldLlmsTxtRoute(
   options: DetectLlmsTxtOptions,
   router: RouterModel,
   appDir: string,
-): string | undefined {
+): { path: string; body: string } | undefined {
   const { cwd, warn } = options;
   const useTypeScript = existsSync(join(cwd, 'tsconfig.json'));
   const routeDir = join(appDir, 'llms.txt');
   const routeFile = join(routeDir, useTypeScript ? 'route.ts' : 'route.js');
+  const body = buildLlmsTxtBody(options, router);
 
   try {
     if (existsSync(routeFile)) return undefined;
     mkdirSync(routeDir, { recursive: true });
-    writeFileSync(routeFile, starterRouteSource(options, router, useTypeScript), 'utf8');
+    writeFileSync(routeFile, starterRouteSource(body, useTypeScript), 'utf8');
   } catch (err) {
     warn(
       `Tried to scaffold a starter llms.txt at ${routeFile} but couldn't (${(err as Error).message}).`,
@@ -166,7 +178,7 @@ function scaffoldLlmsTxtRoute(
   }
 
   warn(scaffoldedNotice(routeFile));
-  return routeFile;
+  return { path: routeFile, body };
 }
 
 /**
@@ -177,15 +189,16 @@ function scaffoldLlmsTxtRoute(
 function scaffoldLlmsTxtStatic(
   options: DetectLlmsTxtOptions,
   router: RouterModel,
-): string | undefined {
+): { path: string; body: string } | undefined {
   const { cwd, warn } = options;
   const publicDir = join(cwd, 'public');
   const filePath = join(publicDir, 'llms.txt');
+  const body = buildLlmsTxtBody(options, router);
 
   try {
     if (existsSync(filePath)) return undefined;
     mkdirSync(publicDir, { recursive: true });
-    writeFileSync(filePath, buildLlmsTxtBody(options, router), 'utf8');
+    writeFileSync(filePath, body, 'utf8');
   } catch (err) {
     warn(
       `Tried to scaffold a starter llms.txt at ${filePath} but couldn't (${(err as Error).message}).`,
@@ -194,7 +207,7 @@ function scaffoldLlmsTxtStatic(
   }
 
   warn(scaffoldedNotice(filePath));
-  return filePath;
+  return { path: filePath, body };
 }
 
 function scaffoldedNotice(path: string): string {
@@ -214,11 +227,7 @@ function scaffoldedNotice(path: string): string {
  * pleasant to edit (this is a file the developer is meant to own), which means every derived value
  * — a package.json description, a route path — has to be escaped against backticks and `${`.
  */
-function starterRouteSource(
-  options: DetectLlmsTxtOptions,
-  router: RouterModel,
-  useTypeScript: boolean,
-): string {
+function starterRouteSource(body: string, useTypeScript: boolean): string {
   const signature = useTypeScript ? 'export function GET(): Response {' : 'export function GET() {';
   return `// Starter llms.txt, scaffolded by ax because no llms.txt was found. This file is yours:
 // edit it freely, ax never overwrites it.
@@ -230,7 +239,7 @@ function starterRouteSource(
 export const dynamic = 'force-static';
 
 ${signature}
-  const body = \`${escapeTemplateLiteral(buildLlmsTxtBody(options, router))}\`;
+  const body = \`${escapeTemplateLiteral(body)}\`;
 
   return new Response(body, { headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
 }

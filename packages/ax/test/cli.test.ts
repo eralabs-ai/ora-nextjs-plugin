@@ -280,7 +280,6 @@ describe('runCli', () => {
     expect(existsSync(reportPath)).toBe(true);
     const report = JSON.parse(readFileSync(reportPath, 'utf8'));
     expect(report).toMatchObject({
-      reportVersion: 2,
       siteUrl: 'https://example.com',
       catalog: {
         path: join(dir, CATALOG_OUTPUT_PATH),
@@ -300,6 +299,68 @@ describe('runCli', () => {
     expect(Array.isArray(report.warnings)).toBe(true);
     expect(report.recommendations.length).toBeGreaterThan(0);
     expect(stdout.some((l) => l.includes('machine-readable build report'))).toBe(true);
+  });
+
+  it('prints token-aware artifact sizes and records them in the report', async () => {
+    writeMcpFixture(dir);
+
+    const code = await runCli(['--report'], { ...io, cwd: dir });
+
+    expect(code).toBe(0);
+    expect(stdout.some((l) => l.includes('Generated artifact sizes'))).toBe(true);
+    expect(stdout.some((l) => /ai-catalog\.json — \d+ B \(~\d+ tokens\)/.test(l))).toBe(true);
+
+    const report = JSON.parse(readFileSync(join(dir, REPORT_OUTPUT_PATH), 'utf8'));
+    const catalogSize = report.sizes.find(
+      (s: { artifact: string }) => s.artifact === 'ai-catalog.json',
+    );
+    expect(catalogSize).toMatchObject({
+      artifact: 'ai-catalog.json',
+      path: CATALOG_OUTPUT_PATH,
+    });
+    expect(catalogSize.chars).toBeGreaterThan(0);
+    expect(catalogSize.tokens).toBe(Math.round(catalogSize.chars / 4));
+    // The MCP fixture also emits a server card, so it is measured too.
+    expect(report.sizes.some((s: { artifact: string }) => s.artifact === 'mcp-server-card')).toBe(
+      true,
+    );
+  });
+
+  it('sizes a scaffolded llms.txt by its served body, not the route.ts wrapper', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(join(dir, 'tsconfig.json'), '{}', 'utf8');
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com', scaffoldLlmsTxt: true };\n",
+      'utf8',
+    );
+    mkdirSync(join(dir, 'app'), { recursive: true });
+
+    const code = await runCli(['--report'], { ...io, cwd: dir });
+    expect(code).toBe(0);
+
+    const routeFile = join(dir, 'app', 'llms.txt', 'route.ts');
+    const routeFileChars = readFileSync(routeFile, 'utf8').length;
+    const report = JSON.parse(readFileSync(join(dir, REPORT_OUTPUT_PATH), 'utf8'));
+    const llmsSize = report.sizes.find((s: { artifact: string }) => s.artifact === 'llms.txt');
+
+    expect(llmsSize).toBeDefined();
+    expect(llmsSize.path).toBe(join('app', 'llms.txt', 'route.ts'));
+    // The served markdown body is smaller than the route.ts file (JS wrapper + JSON-escaped literal).
+    expect(llmsSize.chars).toBeLessThan(routeFileChars);
+    // And it's a valid measurement of real content, not zero.
+    expect(llmsSize.chars).toBeGreaterThan(0);
+  });
+
+  it('does not warn about truncation for a normal, small build', async () => {
+    // The oversize branch is exercised deterministically in the artifact-size unit test; here we
+    // just guard against the warning firing spuriously on a typical (well under 100K) build.
+    writeMcpFixture(dir);
+
+    const code = await runCli([], { ...io, cwd: dir });
+
+    expect(code).toBe(0);
+    expect(stdout.some((l) => l.includes('truncates responses over 100K chars'))).toBe(false);
   });
 
   it('--report=<path> writes to a custom path', async () => {
