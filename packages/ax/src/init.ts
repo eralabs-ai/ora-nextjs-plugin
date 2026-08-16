@@ -258,14 +258,15 @@ function gateableSurfaces(findings: InitFindings): MultiSelectChoice[] {
     surfaces.push({
       value: path,
       label: `MCP server (${path})${mount.tools.length > 0 ? ` — ${mount.tools.join(', ')}` : ''}`,
-      // Default to public: advertise what's there (recall). The user unchecks the auth-walled ones,
-      // and the review-before-publish gate is the backstop before anything is actually written.
-      selected: true,
+      // Start unchecked: the question asks the user to check the *gated* ones, and defaulting to
+      // "open" (recall — advertise what's there) means an empty answer keeps everything open. The
+      // review-before-publish gate is the backstop before anything is actually written.
+      selected: false,
     });
   }
   if (findings.openApiFound) {
     const path = served('/openapi.json');
-    surfaces.push({ value: path, label: `OpenAPI doc (${path})`, selected: true });
+    surfaces.push({ value: path, label: `OpenAPI doc (${path})`, selected: false });
   }
   return surfaces;
 }
@@ -274,11 +275,13 @@ function gateableSurfaces(findings: InitFindings): MultiSelectChoice[] {
 const FLOOR_SUMMARY = '/api/auth/** & /api/webhooks/**';
 
 /**
- * Runs the gating question, phrased around what's *public* (the mental model developers actually
- * have) rather than what's gated. Whatever the user leaves unchecked becomes a gated path in the
- * generated `isGated`; the built-in auth/webhook floor is always composed in (never advertising an
- * auth wall as open is a safety invariant, not a toggle). Prints a plain-language summary of the
- * decision. Returns the answer the config renderer consumes.
+ * Runs the gating question. Everything ax detects is advertised as open by default (recall); the
+ * user checks only the surfaces that sit behind auth, and an empty answer keeps them all open. The
+ * question and the action agree — "check the gated ones" against a list that starts empty — so
+ * there's no inverted-toggle trap (a pre-checked "public" list silently gates a surface the moment
+ * the user types its number to affirm it). The built-in auth/webhook floor is always composed in;
+ * never advertising an auth wall as open is a safety invariant, not a toggle. Prints a
+ * plain-language summary of the decision.
  */
 async function askGating(
   prompter: Prompter,
@@ -288,13 +291,14 @@ async function askGating(
   const surfaces = gateableSurfaces(findings);
   if (surfaces.length === 0) return { floorKept: true, gatedPaths: [] };
 
-  const publicPaths = await prompter.multiSelect(
-    'Which of these can agents use WITHOUT signing in? (unchecked = gated — never advertised as open)',
+  const gatedPaths = await prompter.multiSelect(
+    'These agent surfaces will be advertised as open. Check any that require signing in — they will ' +
+      'be gated and never advertised as open. Press Enter if all are open:',
     surfaces,
   );
-  const gatedPaths = surfaces
+  const publicPaths = surfaces
     .map((surface) => surface.value)
-    .filter((value) => !publicPaths.includes(value));
+    .filter((value) => !gatedPaths.includes(value));
 
   stdout(
     `[ax]   Open (advertised for agents): ${publicPaths.length > 0 ? publicPaths.join(', ') : 'none'}`,

@@ -255,10 +255,10 @@ describe('runInit gated-surface candidates respect basePath', () => {
     const prompter: Prompter = {
       text: async () => 'https://acme.com',
       confirm: async () => false,
-      // Leave nothing public → the mount is gated. (multiSelect now returns the *public* set.)
+      // Check every surface → they're gated. (multiSelect returns the *gated* set; empty = all open.)
       multiSelect: async (_question, choices) => {
         offered.push(...choices);
-        return [];
+        return choices.map((choice) => choice.value);
       },
     };
 
@@ -279,8 +279,8 @@ describe('runInit interactive (scripted answers)', () => {
 
     const prompter = new ScriptedPrompter({
       text: ['https://acme.com'],
-      // Nothing marked public → the detected /mcp mount is gated. The built-in floor is always kept.
-      multiSelect: [[]],
+      // Check the /mcp mount → it's gated. The built-in floor is always kept.
+      multiSelect: [['/mcp']],
       // scaffoldLlmsTxt, JsonLd, Robots, Agent404, report, run-build — all no.
       confirm: [false, false, false, false, false, false],
     });
