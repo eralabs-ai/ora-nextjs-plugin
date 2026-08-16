@@ -4,7 +4,6 @@ import { join, relative, resolve } from 'node:path';
 
 import { findExistingConfig } from './config.js';
 import { generateCatalog } from './generate.js';
-import { defaultIsGated, type GateTarget } from './gating.js';
 import {
   configFileName,
   type ConfigFileTarget,
@@ -135,15 +134,31 @@ export function validateSiteUrl(
   return { ok: true, value: url.origin };
 }
 
-/** A gated-surface candidate the multi-select offers, plus whether it starts selected. */
-interface GateCandidate {
-  value: string;
-  label: string;
-  selected: boolean;
+/** A candidate `siteUrl` default plus a human-readable label for where it was found. */
+interface SiteUrlDefault {
+  value?: string;
+  source?: string;
 }
 
-/** Sentinel value for the built-in floor row in the gated multi-select. */
-const FLOOR_VALUE = '__ax_floor__';
+/**
+ * The `siteUrl` to prefill and where it came from, in the same precedence a build resolves it. The
+ * source label matters: it turns "is this URL right?" from a guess into an informed check ("that's
+ * my NEXT_PUBLIC_SITE_URL — yes"). `.env*` files are already loaded into `process.env` by the
+ * detection pass that runs before this, so reading them here is enough.
+ */
+function detectSiteUrlDefault(flagSiteUrl: string | undefined): SiteUrlDefault {
+  if (flagSiteUrl !== undefined) return { value: flagSiteUrl, source: '--site-url' };
+  const env = (name: string): SiteUrlDefault | undefined => {
+    const value = process.env[name]?.trim();
+    return value ? { value, source: name } : undefined;
+  };
+  const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
+  return (
+    env('SITE_URL') ??
+    env('NEXT_PUBLIC_SITE_URL') ??
+    (vercel ? { value: `https://${vercel}`, source: 'VERCEL_PROJECT_PRODUCTION_URL' } : {})
+  );
+}
 
 interface InitFindings {
   routers: RouterKind[];
@@ -225,52 +240,77 @@ function printFindings(findings: InitFindings, stdout: (line: string) => void): 
 }
 
 /**
- * The gated-surface candidates: the built-in floor (always offered, so it can be deselected) plus
- * every detected surface an `isGated` matcher can name. A surface starts selected only when the
- * built-in floor would already gate it — the wizard proposes what's safe by default and lets the
- * user add the rest, rather than guessing that a detected mount is private.
+ * The advertisable surfaces the gating question is about: each detected MCP mount and an OpenAPI
+ * doc. These — not page routes — are what `isGated` actually governs (whether ax advertises a
+ * surface as open). Empty when the project exposes none, in which case the wizard skips the question
+ * entirely rather than asking about an empty list.
  *
- * A candidate's `value` is the *served* path (basePath prefix included), because that is exactly
- * what a real build passes as `isGated`'s `target.path` (`entryUrlPath` reads it off the
- * basePath-prefixed entry URL). Matching on the raw router pathname instead would make the generated
- * matcher silently miss on any `basePath` app — publishing a surface the user marked gated as open.
+ * Each `value` is the *served* path (basePath prefix included), because that is exactly what a real
+ * build passes as `isGated`'s `target.path` (`entryUrlPath` reads it off the basePath-prefixed entry
+ * URL). Matching on the raw router pathname instead would make the generated matcher silently miss on
+ * any `basePath` app — publishing a surface the user marked gated as open.
  */
-function gateCandidates(findings: InitFindings): GateCandidate[] {
-  const candidates: GateCandidate[] = [
-    {
-      value: FLOOR_VALUE,
-      label: 'Built-in floor: /api/auth/** and /api/webhooks/** (recommended)',
-      selected: true,
-    },
-  ];
+function gateableSurfaces(findings: InitFindings): MultiSelectChoice[] {
   const served = (pathname: string): string => servedPath(findings.basePath, pathname);
-  const preselect = (kind: GateTarget['kind'], path: string): boolean =>
-    defaultIsGated({ kind, path });
+  const surfaces: MultiSelectChoice[] = [];
   for (const mount of findings.mcpMounts) {
     const path = served(mount.pathname);
-    candidates.push({
+    surfaces.push({
       value: path,
       label: `MCP server (${path})${mount.tools.length > 0 ? ` — ${mount.tools.join(', ')}` : ''}`,
-      selected: preselect('mcp', path),
+      // Start unchecked: the question asks the user to check the *gated* ones, and defaulting to
+      // "open" (recall — advertise what's there) means an empty answer keeps everything open. The
+      // review-before-publish gate is the backstop before anything is actually written.
+      selected: false,
     });
   }
   if (findings.openApiFound) {
     const path = served('/openapi.json');
-    candidates.push({
-      value: path,
-      label: `OpenAPI doc (${path})`,
-      selected: preselect('openapi', path),
-    });
+    surfaces.push({ value: path, label: `OpenAPI doc (${path})`, selected: false });
   }
-  return candidates;
+  return surfaces;
 }
 
-/** Turns the multi-select result back into the floor/extra-paths shape the config renderer wants. */
-function toGatingAnswer(selected: string[]): GatingAnswer {
-  return {
-    floorKept: selected.includes(FLOOR_VALUE),
-    gatedPaths: selected.filter((v) => v !== FLOOR_VALUE),
-  };
+/** The built-in floor paths, for the human-readable gating summary. */
+const FLOOR_SUMMARY = '/api/auth/** & /api/webhooks/**';
+
+/**
+ * Runs the gating question. Everything ax detects is advertised as open by default (recall); the
+ * user checks only the surfaces that sit behind auth, and an empty answer keeps them all open. The
+ * question and the action agree — "check the gated ones" against a list that starts empty — so
+ * there's no inverted-toggle trap (a pre-checked "public" list silently gates a surface the moment
+ * the user types its number to affirm it). The built-in auth/webhook floor is always composed in;
+ * never advertising an auth wall as open is a safety invariant, not a toggle. Prints a
+ * plain-language summary of the decision.
+ */
+async function askGating(
+  prompter: Prompter,
+  findings: InitFindings,
+  stdout: (line: string) => void,
+): Promise<GatingAnswer> {
+  const surfaces = gateableSurfaces(findings);
+  if (surfaces.length === 0) return { floorKept: true, gatedPaths: [] };
+
+  const gatedPaths = await prompter.multiSelect(
+    'These agent surfaces will be advertised as open. Check any that require signing in — they will ' +
+      'be gated and never advertised as open. Press Enter if all are open:',
+    surfaces,
+  );
+  const publicPaths = surfaces
+    .map((surface) => surface.value)
+    .filter((value) => !gatedPaths.includes(value));
+
+  stdout(
+    `[ax]   Open (advertised for agents): ${publicPaths.length > 0 ? publicPaths.join(', ') : 'none'}`,
+  );
+  stdout(
+    `[ax]   Gated (never advertised as open): ${
+      gatedPaths.length > 0
+        ? `${gatedPaths.join(', ')}, plus the built-in ${FLOOR_SUMMARY} floor`
+        : `the built-in ${FLOOR_SUMMARY} floor`
+    }`,
+  );
+  return { floorKept: true, gatedPaths };
 }
 
 /**
@@ -280,14 +320,21 @@ function toGatingAnswer(selected: string[]): GatingAnswer {
 async function collectInteractive(
   prompter: Prompter,
   findings: InitFindings,
-  defaultSiteUrl: string | undefined,
+  siteUrlDefault: SiteUrlDefault,
   stdout: (line: string) => void,
 ): Promise<InitAnswers | undefined> {
+  // Tell the user where the prefilled value came from, so "is this right?" is an informed check
+  // rather than a mystery string. The value itself is prefilled as editable input by the prompter.
+  if (siteUrlDefault.value !== undefined && siteUrlDefault.source !== undefined) {
+    stdout(
+      `[ax] Prefilled your site URL from ${siteUrlDefault.source} — press Enter to keep it, or edit.`,
+    );
+  }
   let siteUrl: string | undefined;
   for (let attempt = 0; attempt < 5 && siteUrl === undefined; attempt++) {
     const raw = await prompter.text(
-      "Your site's public production URL (written into the published catalog)",
-      defaultSiteUrl,
+      'Your public production origin — the exact URL agents fetch (written verbatim into your catalog)',
+      siteUrlDefault.value,
     );
     const result = validateSiteUrl(raw);
     if (result.ok) siteUrl = result.value;
@@ -295,12 +342,7 @@ async function collectInteractive(
   }
   if (siteUrl === undefined) return undefined;
 
-  const gating = toGatingAnswer(
-    await prompter.multiSelect(
-      'Which surfaces are gated behind auth? (ax will never advertise these as open)',
-      gateCandidates(findings) as MultiSelectChoice[],
-    ),
-  );
+  const gating = await askGating(prompter, findings, stdout);
 
   // Scaffolds default to yes in the wizard: config defaults are false because a *silent* write into
   // a source tree is invasive, but here the ask itself is the opt-in and the user is present to say
@@ -518,6 +560,7 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
 
   let prompter = io.prompter;
   let close = (): void => {};
+  let closed = false;
   if (prompter === undefined) {
     const created = await createReadlinePrompter();
     prompter = created;
@@ -527,7 +570,7 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
     const answers = await collectInteractive(
       prompter,
       findings,
-      args.siteUrl ?? readSiteUrlFromEnv(),
+      detectSiteUrlDefault(args.siteUrl),
       stdout,
     );
     if (answers === undefined) {
@@ -539,8 +582,23 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
 
     // Offer the first build so the report shows up immediately. Default no — spawning a full
     // `next build` is heavy and should never happen without an explicit yes.
+    const wantBuild = await prompter.confirm(
+      'Run the first build now so you can see the report?',
+      false,
+    );
+
+    // Release the TTY *before* spawning the build: its `postbuild` step is `ax`, which opens its own
+    // readline for the review-before-publish gate. Two readline interfaces reading one stdin
+    // deadlock — the parent (still attached) swallows the keystrokes the child is waiting on — so the
+    // publish prompt would hang forever. Closing here hands stdin cleanly to the child.
+    close();
+    closed = true;
+
     let ranBuild = false;
-    if (await prompter.confirm('Run the first build now so you can see the report?', false)) {
+    if (wantBuild) {
+      stdout(
+        '[ax] Running your build — the review-before-publish gate will show the exact surface and ask before writing.',
+      );
       const spawnBuild = io.spawnBuild ?? defaultSpawnBuild;
       const code = await spawnBuild(cwd);
       ranBuild = code === 0;
@@ -550,7 +608,7 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
     printNextSteps(fileName, answers, ranBuild, stdout);
     return 0;
   } finally {
-    close();
+    if (!closed) close();
   }
 }
 
@@ -571,20 +629,17 @@ function writeConfigAndWire(
 
 function printNextSteps(
   fileName: string,
-  answers: InitAnswers,
+  _answers: InitAnswers,
   ranBuild: boolean,
   stdout: (line: string) => void,
 ): void {
-  stdout('[ax] Done. Next steps:');
-  stdout(`[ax]   1. Review ${fileName} — every field has a comment explaining why it's there.`);
+  // Keep this short: a first-glance recap of what the wizard itself changed. The build's own output
+  // (and .ora/report.json) is where the per-artifact detail lives — no need to restate it here.
+  stdout('[ax] ✓ Setup complete.');
+  stdout(`[ax]   Created ${fileName} (each field commented) and wired the build (see above).`);
   if (!ranBuild) {
     stdout(
-      '[ax]   2. Run your build; the postbuild step generates the catalog and shows the report.',
-    );
-  }
-  if (answers.scaffoldJsonLd) {
-    stdout(
-      '[ax]   • JSON-LD: after the build, add the printed import/element to your layout — ax never edits it for you.',
+      '[ax]   Next: run your build — the postbuild `ax` step publishes the catalog and prints the report.',
     );
   }
 }
