@@ -38,9 +38,12 @@ export async function createReadlinePrompter(): Promise<Prompter & { close(): vo
 
   return {
     async text(question, defaultValue) {
-      const suffix = defaultValue ? ` (${defaultValue})` : '';
-      const answer = (await rl.question(`${question}${suffix}\n> `)).trim();
-      return answer === '' && defaultValue !== undefined ? defaultValue : answer;
+      // Prefill the default as *editable* input (rl.write injects it into the line buffer) rather
+      // than showing it in parentheses: the user sees the value already typed and can press Enter to
+      // accept or edit it in place — clearer than a "(default)" hint they have to retype to change.
+      const answer = rl.question(`${question}\n> `);
+      if (defaultValue) rl.write(defaultValue);
+      return (await answer).trim();
     },
 
     async confirm(question, defaultValue) {

@@ -255,9 +255,10 @@ describe('runInit gated-surface candidates respect basePath', () => {
     const prompter: Prompter = {
       text: async () => 'https://acme.com',
       confirm: async () => false,
+      // Leave nothing public → the mount is gated. (multiSelect now returns the *public* set.)
       multiSelect: async (_question, choices) => {
         offered.push(...choices);
-        return choices.map((choice) => choice.value); // gate everything offered
+        return [];
       },
     };
 
@@ -278,8 +279,8 @@ describe('runInit interactive (scripted answers)', () => {
 
     const prompter = new ScriptedPrompter({
       text: ['https://acme.com'],
-      // Drop the floor, gate the detected /mcp mount.
-      multiSelect: [['/mcp']],
+      // Nothing marked public → the detected /mcp mount is gated. The built-in floor is always kept.
+      multiSelect: [[]],
       // scaffoldLlmsTxt, JsonLd, Robots, Agent404, report, run-build — all no.
       confirm: [false, false, false, false, false, false],
     });
@@ -291,9 +292,40 @@ describe('runInit interactive (scripted answers)', () => {
     expect(source).toContain('siteUrl: "https://acme.com"');
     expect(source).toContain('scaffoldLlmsTxt: false,');
     expect(source).toContain('report: false,');
-    expect(source).toContain('isGated: (target) => ["/mcp"].includes(target.path),');
+    // Gating a surface always composes the built-in floor (floor is never dropped by the wizard).
+    expect(source).toContain(
+      'isGated: (target) => defaultIsGated(target) || ["/mcp"].includes(target.path),',
+    );
+    // The gating summary spells out the decision in plain language.
+    expect(
+      stdout.some((l) => l.includes('Gated (never advertised as open)') && l.includes('/mcp')),
+    ).toBe(true);
     // The findings summary ran before any question.
     expect(stdout.some((l) => l.includes('Scanned your project'))).toBe(true);
+  });
+
+  it('prefills the site URL from an env var and names the source', async () => {
+    writeBareApp(dir);
+    const previous = process.env.NEXT_PUBLIC_SITE_URL;
+    process.env.NEXT_PUBLIC_SITE_URL = 'https://envsite.com';
+    try {
+      // Empty text script → ScriptedPrompter.text returns the prefilled default (the env value).
+      const prompter = new ScriptedPrompter({
+        text: [],
+        confirm: [false, false, false, false, false, false],
+      });
+      const code = await runInit([], { ...io(), prompter });
+      expect(code).toBe(0);
+      expect(
+        stdout.some((l) => l.includes('Prefilled') && l.includes('NEXT_PUBLIC_SITE_URL')),
+      ).toBe(true);
+      expect(readFileSync(join(dir, 'ax.config.ts'), 'utf8')).toContain(
+        'siteUrl: "https://envsite.com"',
+      );
+    } finally {
+      if (previous === undefined) delete process.env.NEXT_PUBLIC_SITE_URL;
+      else process.env.NEXT_PUBLIC_SITE_URL = previous;
+    }
   });
 
   it('re-prompts on an invalid site URL, then accepts a valid one', async () => {

@@ -77,7 +77,8 @@ npx ax init
 
 It runs the same source-tree detection a build does (no `next build` needed), prints what it found,
 then asks **only what the code can't answer** — your production `siteUrl`, which detected surfaces
-are gated behind auth, and which opt-in scaffolds you want. It writes an `ax.config.ts` (or `.js`,
+agents can use without signing in (the rest are gated and never advertised as open), and which
+opt-in scaffolds you want. It writes an `ax.config.ts` (or `.js`,
 matching your project) with a one-line comment on every field, so the config it commits doubles as
 its own documentation, and adds `"postbuild": "ax"` to `package.json` — but only when no `postbuild`
 already exists; if one does, it prints the exact edit to make instead of chaining into a script it
