@@ -90,6 +90,25 @@ export { readSiteMetadata, type SiteMetadata } from './site-metadata.js';
 
 export { runCli, type CliIO } from './cli.js';
 
+export { runInit, validateSiteUrl, type InitIO } from './init.js';
+
+export {
+  renderAxConfig,
+  configFileName,
+  CONFIG_BASENAME,
+  type InitAnswers,
+  type GatingAnswer,
+  type ConfigFileTarget,
+} from './init-config.js';
+
+export {
+  planPostbuildWiring,
+  POSTBUILD_COMMAND,
+  type PostbuildWiring,
+} from './init-package-json.js';
+
+export { createReadlinePrompter, type Prompter, type MultiSelectChoice } from './prompt.js';
+
 export {
   axConfigSchema,
   type AxConfig,
@@ -104,6 +123,7 @@ export {
 
 export {
   loadAxConfig,
+  findExistingConfig,
   AxConfigError,
   type LoadAxConfigResult,
   loadArdConfig,

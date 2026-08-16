@@ -61,10 +61,45 @@ fixture apps in CI.
 
 > **Status:** pre-release, under active development. The detect-and-reference core, WebMCP
 > detection, the agent-aware 404, the opt-in scaffolds, the Ora-mapped build report,
-> review-before-publish, and gated-surface detection (never advertise an auth-walled endpoint as
-> open) are implemented and tested. Before the first public npm release: an end-to-end run against
+> review-before-publish, gated-surface detection (never advertise an auth-walled endpoint as
+> open), and the `ax init` onboarding wizard are implemented and tested. Before the first public npm
+> release: an end-to-end run against
 > Ora's production crawler. Full phased roadmap and every design decision:
 > [`docs-internal/PLAN.md`](./docs-internal/PLAN.md).
+
+## `ax init` — one-command setup
+
+Rather than hand-write `ax.config` and wire the build yourself, run the onboarding wizard:
+
+```sh
+npx ax init
+```
+
+It runs the same source-tree detection a build does (no `next build` needed), prints what it found,
+then asks **only what the code can't answer** — your production `siteUrl`, which detected surfaces
+are gated behind auth, and which opt-in scaffolds you want. It writes an `ax.config.ts` (or `.js`,
+matching your project) with a one-line comment on every field, so the config it commits doubles as
+its own documentation, and adds `"postbuild": "ax"` to `package.json` — but only when no `postbuild`
+already exists; if one does, it prints the exact edit to make instead of chaining into a script it
+doesn't own. It never overwrites an existing `ax.config.*`, and it generates no public artifact
+itself — the first real build is still the moment the [review-before-publish](#the-catalog) gate
+runs, now pre-answered by your choices.
+
+It is a plain command, never a `postinstall` hook — installing the package stays inert. For CI or
+scripting, run it unattended:
+
+```sh
+npx ax init --yes --site-url https://yourdomain.com
+```
+
+`--yes` accepts every default; `siteUrl` has no default (it's written verbatim into your public
+catalog, so it must be given via `--site-url` or a `SITE_URL` / `NEXT_PUBLIC_SITE_URL` env var), and
+the wizard exits non-zero with a clear message if it's missing or a localhost/preview URL.
+
+> **Yes-when-asked, no-when-silent.** The scaffolds default to **off** in `ax.config` but the wizard
+> proposes them **on**. That's one coherent policy, not a contradiction: a _silent_ write into your
+> source tree on an unattended build is invasive, so config defaults are `false`; but in the wizard
+> you're present and the question itself is the opt-in, so the default answer is yes.
 
 ## Design posture
 

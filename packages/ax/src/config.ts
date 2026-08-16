@@ -106,6 +106,19 @@ export async function loadAxConfig(cwd: string): Promise<LoadAxConfigResult> {
 /** @deprecated Renamed to {@link loadAxConfig} along with `ard.config.*` → `ax.config.*`. */
 export const loadArdConfig = loadAxConfig;
 
+/**
+ * Path of an already-present config `loadAxConfig` would honor — an `ax.config.*` first, then a
+ * legacy `ard.config.*` (which `loadAxConfig` still loads). Returns undefined when neither exists.
+ *
+ * The legacy name is included deliberately: `ax init` uses this as its never-overwrite guard, and a
+ * project running on an `ard.config.*` is already configured — writing a fresh `ax.config.*` would
+ * silently shadow it (the `ax.config.*` wins, the legacy file is ignored). So "does a config already
+ * exist" must ask the same question `loadAxConfig` does, not just look for the canonical name.
+ */
+export function findExistingConfig(cwd: string): string | undefined {
+  return findConfigFile(cwd, CONFIG_BASENAME) ?? findConfigFile(cwd, LEGACY_CONFIG_BASENAME);
+}
+
 function withDefaults(config: AxConfig): ResolvedAxConfig {
   return {
     siteUrl: config.siteUrl,
