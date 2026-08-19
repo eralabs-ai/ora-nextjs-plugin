@@ -11,7 +11,7 @@
       {
         "identifier": "urn:air:pages-mcp-fixture.example.com:mcp-server",
         "type": "application/mcp-server-card+json",
-        "url": "https://pages-mcp-fixture.example.com/api/mcp",
+        "url": "https://pages-mcp-fixture.example.com/.well-known/mcp/server-card.json",
         "displayName": "MCP server"
       }
     ],
@@ -27,11 +27,8 @@
         ]
       }
     ],
+    "unreviewedMounts": [],
     "serverCardPath": "public/.well-known/mcp/server-card.json"
-  },
-  "webmcp": {
-    "toolNames": [],
-    "sites": []
   },
   "agent404": {
     "notFoundPresent": false,
@@ -62,9 +59,9 @@
     {
       "artifact": "ai-catalog.json",
       "path": "public/.well-known/ai-catalog.json",
-      "bytes": 484,
-      "chars": 484,
-      "tokens": 121
+      "bytes": 509,
+      "chars": 509,
+      "tokens": 127
     },
     {
       "artifact": "mcp-server-card",
@@ -75,12 +72,6 @@
     }
   ],
   "ora": {
-    "skillMcp": "https://ora.ai/skill/mcp",
-    "skillUrl": "https://ora.ai/.well-known/agent-skills/agent-ready-website/SKILL.md",
-    "scanApi": {
-      "scan": "POST https://ora.ai/api/scan",
-      "score": "GET https://ora.ai/api/score/{domain}"
-    },
     "checks": [
       {
         "id": "ard-catalog",
@@ -141,17 +132,12 @@
         "id": "mcp-server-card",
         "artifact": "mcp-server",
         "status": "addressed"
-      },
-      {
-        "id": "webmcp",
-        "artifact": "webmcp",
-        "status": "actionable"
       }
     ]
   },
   "warnings": [],
   "recommendations": [
-    "No OpenAPI doc found (public/openapi.json) — this is the highest-value artifact for agent discovery, since it lets agents understand and call your API without guessing at routes or schemas. ax never generates one; produce it however your API is defined (many schema/validation libraries can emit OpenAPI from your existing route definitions) and commit the result to public/openapi.json.",
+    "No OpenAPI doc found (public/openapi.json) — an OpenAPI doc lets agents understand and call your API without guessing at routes or schemas. ax never generates one; produce it however your API is defined (many schema/validation libraries can emit OpenAPI from your existing route definitions) and commit the result to public/openapi.json.",
     "No llms.txt found — a short natural-language guide agents read to decide whether your site fits their task, and to find your key pages. Add one at app/llms.txt/route.ts (or public/llms.txt), or set scaffoldLlmsTxt: true in ax.config to have a starter written for you. Pair it with JSON-LD structured data (an Organization block with a sameAs array): llms.txt says what your site is for, JSON-LD identifies it as an entity registries can rank — the two reinforce each other, so add both rather than one alone.",
     "No sitemap found — add one so agents can discover all public routes. Use the built-in Next.js path (app/sitemap.ts); ax never generates a sitemap itself. Give each entry a <lastmod> date (agents use it to judge freshness), then reference it from robots.txt with a \"Sitemap:\" line.",
     "No robots.txt found — add one (app/robots.ts or public/robots.txt) that explicitly Allows the reputable AI agents you want to reach, scoped to specific User-agent groups (never \"User-agent: *\"), plus a \"Sitemap:\" line. Note: Next's MetadataRoute.Robots (app/robots.ts) has no field for the \"Agentmap:\" catalog pointer — put that line in a static public/robots.txt. Set scaffoldRobots: true in ax.config to have one written for you.",

@@ -40,8 +40,7 @@ export type OraArtifact =
   | 'agents.md'
   | 'json-ld'
   | 'openapi.json'
-  | 'mcp-server'
-  | 'webmcp';
+  | 'mcp-server';
 
 export interface OraArtifactChecks {
   artifact: OraArtifact;
@@ -62,20 +61,11 @@ export const ORA_CHECK_MAP: readonly OraArtifactChecks[] = [
   { artifact: 'json-ld', checks: ['json-ld', 'org-schema-completeness'] },
   { artifact: 'openapi.json', checks: ['openapi-spec'] },
   { artifact: 'mcp-server', checks: ['mcp-server', 'mcp-server-card'] },
-  { artifact: 'webmcp', checks: ['webmcp'] },
+  // No 'webmcp' entry for now: WebMCP is still a W3C draft, and steering a coding agent toward a
+  // non-official spec confuses more than it helps — until it is official we don't recommend it,
+  // so the report carries no check for it. Re-add `{ artifact: 'webmcp', checks: ['webmcp'] }`
+  // when the spec lands.
 ];
-
-/** The MCP server that serves Ora's `agent-ready-website` skill (tools: `list_skills`, `get_skill`). */
-export const ORA_SKILL_MCP_URL = 'https://ora.ai/skill/mcp';
-
-/** The same skill as a plain document, for agents that read files rather than speak MCP. */
-export const ORA_SKILL_URL = 'https://ora.ai/.well-known/agent-skills/agent-ready-website/SKILL.md';
-
-/** Ora's scan endpoints — how an agent verifies its work against the deployed site. */
-export const ORA_SCAN_API = {
-  scan: 'POST https://ora.ai/api/scan',
-  score: 'GET https://ora.ai/api/score/{domain}',
-} as const;
 
 /** Whether each mapped artifact was found (or generated) during this build. */
 export type OraArtifactPresence = Record<OraArtifact, boolean>;

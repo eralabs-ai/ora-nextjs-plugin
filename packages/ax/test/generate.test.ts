@@ -141,16 +141,12 @@ describe('generateCatalog agent-readiness recommendations', () => {
 // what makes it actionable: each artifact the plugin knows about, expressed as the Ora checks it
 // contributes to.
 describe('generateCatalog build report', () => {
-  it('fills in the Ora handoff section', async () => {
+  it('fills in the Ora check mapping without any service URLs', async () => {
     const { report } = await generateCatalog({ cwd: dir });
 
-    expect(report.ora.skillMcp).toBe('https://ora.ai/skill/mcp');
-    expect(report.ora.skillUrl).toContain('agent-ready-website');
-    expect(report.ora.scanApi).toEqual({
-      scan: 'POST https://ora.ai/api/scan',
-      score: 'GET https://ora.ai/api/score/{domain}',
-    });
     expect(report.ora.checks.length).toBeGreaterThan(0);
+    // The report describes the site, not a vendor: no skill/scan endpoints are embedded.
+    expect(JSON.stringify(report.ora)).not.toContain('ora.ai');
   });
 
   it('always addresses the catalog checks — every run produces an ai-catalog.json', async () => {
@@ -313,10 +309,10 @@ describe('generateCatalog zero-config artifact detection', () => {
     expect(joined).toContain('No JSON-LD structured data found');
   });
 
-  it('drops a detected entry that isGated marks gated and ax cannot describe', async () => {
-    // A plain MCP mount (no withMcpAuth wrapper) has no derivable auth descriptor, so a gated
-    // decision means "don't advertise it as open" → drop, the old denylist behavior, but now on a
-    // detected (not just config-declared) entry.
+  it('publishes an isGated-gated MCP mount with an auth marker instead of dropping it', async () => {
+    // A gated MCP server's status *is* its description: the entry carries auth.status "unknown"
+    // and the card carries authentication.required, so the surface stays discoverable-as-gated —
+    // and the written card records the decision for the next build.
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
     writeFileSync(
       join(dir, 'ax.config.mjs'),
@@ -333,11 +329,13 @@ describe('generateCatalog zero-config artifact detection', () => {
       'utf8',
     );
 
-    const warnings: string[] = [];
-    const { catalog } = await generateCatalog({ cwd: dir, onWarning: (m) => warnings.push(m) });
+    const { catalog, serverCard, report } = await generateCatalog({ cwd: dir });
 
-    expect(catalog.entries).toEqual([]);
-    expect(warnings.some((w) => w.includes('isGated excluded entry'))).toBe(true);
+    expect(catalog.entries).toHaveLength(1);
+    expect(catalog.entries[0]?.auth).toEqual({ status: 'unknown' });
+    expect(serverCard?.authentication).toEqual({ required: true });
+    // A supplied isGated is a total policy — nothing is ever "unreviewed" under it.
+    expect(report.mcp.unreviewedMounts).toEqual([]);
   });
 
   it('emits a describable gated entry with an auth descriptor rather than dropping it', async () => {
@@ -389,6 +387,121 @@ describe('generateCatalog zero-config artifact detection', () => {
 
     expect(catalog.entries).toHaveLength(1);
     expect(catalog.entries[0]?.auth).toEqual({ status: 'unknown' });
+  });
+
+  it('reads the committed server card as the gating record (authentication.required → gated)', async () => {
+    // The card is the persistence layer: a previous run (ax init or a review-gate answer) recorded
+    // "requires auth", so this run publishes the mount as gated without any config and without
+    // treating it as unreviewed.
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com' };\n",
+      'utf8',
+    );
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      "import { createMcpHandler } from 'mcp-handler';\n" +
+        "const handler = createMcpHandler((server) => { server.tool('roll_dice', 'd', {}, async () => ({})); });\n" +
+        'export { handler as GET };\n',
+      'utf8',
+    );
+    mkdirSync(join(dir, 'public', '.well-known', 'mcp'), { recursive: true });
+    writeFileSync(
+      join(dir, 'public', '.well-known', 'mcp', 'server-card.json'),
+      JSON.stringify({
+        serverUrl: 'https://example.com/mcp',
+        authentication: { required: true },
+      }),
+      'utf8',
+    );
+
+    const { catalog, serverCard, report } = await generateCatalog({ cwd: dir });
+
+    expect(catalog.entries[0]?.auth).toEqual({ status: 'unknown' });
+    expect(serverCard?.authentication).toEqual({ required: true });
+    expect(report.mcp.unreviewedMounts).toEqual([]);
+  });
+
+  it('treats a mount as reviewed-public when the committed card lists it without auth', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com' };\n",
+      'utf8',
+    );
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      "import { createMcpHandler } from 'mcp-handler';\n" +
+        "const handler = createMcpHandler((server) => { server.tool('roll_dice', 'd', {}, async () => ({})); });\n" +
+        'export { handler as GET };\n',
+      'utf8',
+    );
+    mkdirSync(join(dir, 'public', '.well-known', 'mcp'), { recursive: true });
+    writeFileSync(
+      join(dir, 'public', '.well-known', 'mcp', 'server-card.json'),
+      JSON.stringify({ serverUrl: 'https://example.com/mcp' }),
+      'utf8',
+    );
+
+    const { catalog, serverCard, report } = await generateCatalog({ cwd: dir });
+
+    expect(catalog.entries[0]?.auth).toBeUndefined();
+    expect(serverCard?.authentication).toBeUndefined();
+    expect(report.mcp.unreviewedMounts).toEqual([]);
+  });
+
+  it('lists a mount with no config, no auth wrapper, and no card record as unreviewed', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com' };\n",
+      'utf8',
+    );
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      "import { createMcpHandler } from 'mcp-handler';\n" +
+        "const handler = createMcpHandler((server) => { server.tool('roll_dice', 'd', {}, async () => ({})); });\n" +
+        'export { handler as GET };\n',
+      'utf8',
+    );
+
+    const { catalog, report } = await generateCatalog({ cwd: dir });
+
+    // Advertised as open (zero-config default), but flagged for the CLI/report to get a decision.
+    expect(report.mcp.unreviewedMounts).toEqual(['/mcp']);
+    expect(catalog.entries[0]?.auth).toBeUndefined();
+  });
+
+  it('points the mcp catalog entry at the server card, not the raw endpoint', async () => {
+    // The entry's type promises card JSON, and the card is the discovery document — so when a card
+    // is emitted, the entry references it.
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com' };\n",
+      'utf8',
+    );
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      "import { createMcpHandler } from 'mcp-handler';\n" +
+        "const handler = createMcpHandler((server) => { server.tool('roll_dice', 'd', {}, async () => ({})); });\n" +
+        'export { handler as GET };\n',
+      'utf8',
+    );
+
+    const { catalog, serverCard } = await generateCatalog({ cwd: dir });
+
+    expect(serverCard?.serverUrl).toBe('https://example.com/mcp');
+    expect(catalog.entries[0]?.url).toBe('https://example.com/.well-known/mcp/server-card.json');
   });
 
   it('passes a data-only entry through gating untouched (no URL path to match)', async () => {

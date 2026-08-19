@@ -252,10 +252,10 @@ describe('runCli', () => {
     expect(stdout.some((l) => l.includes('MCP server card'))).toBe(true);
   });
 
-  it('writes neither entry nor server card for a gated MCP mount', async () => {
-    // Gating must govern the well-known server card too, not just the catalog entry — the card is
-    // how agents discover an MCP server, so advertising a gated mount's card as open is the exact
-    // precision failure gating exists to prevent.
+  it('writes a gated MCP mount with auth markers on both the entry and the server card', async () => {
+    // A gated server is published *as gated*, never dropped and never advertised as open: the
+    // entry carries auth.status "unknown" and the card authentication.required — and that written
+    // card is what records the decision for future builds.
     writeMcpFixture(dir);
     writeFileSync(
       join(dir, 'ax.config.mjs'),
@@ -267,8 +267,10 @@ describe('runCli', () => {
 
     expect(code).toBe(0);
     const catalog = JSON.parse(readFileSync(join(dir, CATALOG_OUTPUT_PATH), 'utf8'));
-    expect(catalog.entries).toEqual([]);
-    expect(existsSync(join(dir, SERVER_CARD_OUTPUT_PATH))).toBe(false);
+    expect(catalog.entries).toHaveLength(1);
+    expect(catalog.entries[0].auth).toEqual({ status: 'unknown' });
+    const card = JSON.parse(readFileSync(join(dir, SERVER_CARD_OUTPUT_PATH), 'utf8'));
+    expect(card.authentication).toEqual({ required: true });
   });
 
   it('writes no server card when there is no MCP mount', async () => {
@@ -309,7 +311,6 @@ describe('runCli', () => {
         mounts: [{ pathname: '/mcp', tools: ['roll_dice'] }],
         serverCardPath: join(dir, SERVER_CARD_OUTPUT_PATH),
       },
-      webmcp: { toolNames: [], sites: [] },
     });
     // Every detect-and-recommend artifact reports presence; this fixture has none of them.
     expect(report.artifacts.robotsTxt).toEqual({ found: false });
@@ -468,6 +469,63 @@ describe('runCli review-before-publish gate', () => {
     expect(stdout.some((l) => l.includes('Aborted'))).toBe(true);
   });
 
+  it('asks about an unreviewed MCP mount at the gate and records "requires login" in the card', async () => {
+    // No card on disk and no isGated → the mount has never been reviewed. The interactive gate
+    // shows the route tree, asks per server, and the answer lands in the card it writes — so the
+    // question is asked once, not per build.
+    writeMcpFixture(dir);
+
+    const questions: string[] = [];
+    const code = await runCli([], {
+      ...noConfirmIo,
+      cwd: dir,
+      confirm: async (question: string) => {
+        questions.push(question);
+        // "Is the MCP server at /mcp public…?" → no (requires login); "Publish this catalog?" → yes.
+        return !question.includes('public');
+      },
+    });
+
+    expect(code).toBe(0);
+    expect(questions.some((q) => q.includes('/mcp') && q.includes('public'))).toBe(true);
+    expect(stdout.some((l) => l.includes('no gating decision on record'))).toBe(true);
+    expect(stdout.some((l) => l.includes('⚙ roll_dice'))).toBe(true);
+    const card = JSON.parse(readFileSync(join(dir, SERVER_CARD_OUTPUT_PATH), 'utf8'));
+    expect(card.authentication).toEqual({ required: true });
+    const catalog = JSON.parse(readFileSync(join(dir, CATALOG_OUTPUT_PATH), 'utf8'));
+    expect(catalog.entries[0].auth).toEqual({ status: 'unknown' });
+
+    // Second run: the committed card is the record — the gating question is not asked again.
+    questions.length = 0;
+    expect(
+      await runCli([], {
+        ...noConfirmIo,
+        cwd: dir,
+        confirm: async (question: string) => {
+          questions.push(question);
+          return true;
+        },
+      }),
+    ).toBe(0);
+    expect(questions.some((q) => q.includes('public'))).toBe(false);
+    // And the gated decision survives the rebuild.
+    const rebuilt = JSON.parse(readFileSync(join(dir, SERVER_CARD_OUTPUT_PATH), 'utf8'));
+    expect(rebuilt.authentication).toEqual({ required: true });
+  });
+
+  it('warns (instead of asking) about an unreviewed mount under --yes, and notes it in the report', async () => {
+    writeMcpFixture(dir);
+
+    const code = await runCli(['--yes', '--report'], { ...io, cwd: dir });
+
+    expect(code).toBe(0);
+    expect(
+      stdout.some((l) => l.includes('no gating decision on record') && l.includes('/mcp')),
+    ).toBe(true);
+    const report = JSON.parse(readFileSync(join(dir, '.ora', 'report.json'), 'utf8'));
+    expect(report.mcp.unreviewedMounts).toEqual(['/mcp']);
+  });
+
   it('--dry-run prints the exposure summary and writes nothing', async () => {
     writeMcpFixture(dir);
 
@@ -486,9 +544,10 @@ describe('runCli review-before-publish gate', () => {
     await runCli(['--yes'], { ...io, cwd: dir });
 
     const output = stdout.join('\n');
-    expect(output).toContain('About to expose');
-    expect(output).toContain('urn:air:example.com:mcp-server');
-    expect(output).toContain('MCP server card → https://example.com/mcp');
+    expect(output).toContain('About to expose 1 catalog entry:');
+    // One short line: the friendly name and the server it points at — no URN or media type.
+    expect(output).toContain('• MCP server card → https://example.com/mcp');
+    expect(output).not.toContain('urn:air:example.com:mcp-server (');
   });
 });
 
@@ -496,15 +555,30 @@ describe('runCli review-before-publish gate', () => {
 // that will do the remaining work: where the machine-readable report is, where the skill server is,
 // and how to verify the result against the deployed site.
 describe('runCli agent handoff footer', () => {
-  it('points at the written report, the skill server, and the scan endpoint', async () => {
+  it('points at the written report with a copy-paste agent prompt — no vendor pitch', async () => {
     writeMcpFixture(dir);
 
     await runCli(['--report'], { ...io, cwd: dir });
 
     const output = stdout.join('\n');
-    expect(output).toContain(`Agent handoff: ${join(dir, REPORT_OUTPUT_PATH)}`);
-    expect(output).toContain("Ora's skill server (MCP): https://ora.ai/skill/mcp");
-    expect(output).toContain('POST https://ora.ai/api/scan {"url": "https://example.com"}');
+    expect(output).toContain(`Find your report at: ${join(dir, REPORT_OUTPUT_PATH)}`);
+    expect(output).toContain('Prompt for your coding agent (copy-paste):');
+    expect(output).toContain(`Read ${join(dir, REPORT_OUTPUT_PATH)} and work through every check`);
+    expect(output).not.toContain('ora.ai');
+  });
+
+  it('suppresses the terminal recommendation list when the report carries it', async () => {
+    writeMcpFixture(dir);
+
+    await runCli(['--report'], { ...io, cwd: dir });
+    const withReport = stdout.join('\n');
+    expect(withReport).not.toContain('Recommendations to improve agent-readiness:');
+
+    // Without a report, the recommendations still print — they'd otherwise be lost entirely.
+    stdout.length = 0;
+    rmSync(join(dir, CATALOG_OUTPUT_PATH), { force: true });
+    await runCli([], { ...io, cwd: dir });
+    expect(stdout.join('\n')).toContain('Recommendations to improve agent-readiness:');
   });
 
   it('says how to get the report when this run did not write one', async () => {
@@ -512,17 +586,7 @@ describe('runCli agent handoff footer', () => {
 
     await runCli([], { ...io, cwd: dir });
 
-    const output = stdout.join('\n');
-    expect(output).toContain('Agent handoff:');
-    expect(output).toContain('re-run with --report');
-  });
-
-  it('falls back to a placeholder domain when no site URL resolved', async () => {
-    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
-
-    await runCli([], { ...io, cwd: dir });
-
-    expect(stdout.join('\n')).toContain('{"url": "https://<your-domain>"}');
+    expect(stdout.join('\n')).toContain('re-run with --report');
   });
 
   it('prints nothing for a site that already has every artifact ax knows about', async () => {
@@ -536,7 +600,7 @@ describe('runCli agent handoff footer', () => {
       [],
     );
     // Nothing left to hand off — a build with no remaining work doesn't get a to-do list.
-    expect(stdout.join('\n')).not.toContain('Agent handoff');
+    expect(stdout.join('\n')).not.toContain('Find your report at');
   });
 });
 

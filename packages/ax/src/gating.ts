@@ -46,7 +46,8 @@ export interface GateTarget {
 /**
  * A whole-artifact gating predicate the developer supplies via `ax.config` `isGated`. Returns
  * `true` when the target is behind auth (must not be advertised as an open surface). Boolean and
- * whole-artifact for v1 — no per-tool gating.
+ * whole-artifact: auth is declared per server in the MCP conventions, so gating is per surface,
+ * never per tool.
  */
 export type IsGated = (target: GateTarget) => boolean;
 

@@ -60,9 +60,6 @@ export {
 export {
   buildOraChecks,
   ORA_CHECK_MAP,
-  ORA_SCAN_API,
-  ORA_SKILL_MCP_URL,
-  ORA_SKILL_URL,
   type OraArtifact,
   type OraArtifactChecks,
   type OraArtifactPresence,
@@ -97,7 +94,6 @@ export {
   configFileName,
   CONFIG_BASENAME,
   type InitAnswers,
-  type GatingAnswer,
   type ConfigFileTarget,
 } from './init-config.js';
 

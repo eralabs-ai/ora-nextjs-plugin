@@ -18,7 +18,6 @@ function answers(overrides: Partial<InitAnswers> = {}): InitAnswers {
     scaffoldRobots: true,
     scaffoldAgent404: true,
     report: true,
-    gating: { floorKept: true, gatedPaths: [] },
     ...overrides,
   };
 }
@@ -53,35 +52,10 @@ describe('renderAxConfig', () => {
     }
   });
 
-  it('omits isGated when only the built-in floor is kept (the floor is the default)', () => {
-    const source = renderAxConfig(answers({ gating: { floorKept: true, gatedPaths: [] } }), TS);
+  it('never writes isGated — the gating decision lives in the server card, not the config', () => {
+    const source = renderAxConfig(answers(), TS);
     expect(source).not.toContain('isGated');
     expect(source).not.toContain('defaultIsGated');
-  });
-
-  it('composes defaultIsGated when the floor is kept and extra paths are gated', () => {
-    const source = renderAxConfig(
-      answers({ gating: { floorKept: true, gatedPaths: ['/mcp', '/openapi.json'] } }),
-      TS,
-    );
-    expect(source).toContain("import { defaultIsGated, type AxConfig } from '@ora-ai/ax';");
-    expect(source).toContain(
-      'isGated: (target) => defaultIsGated(target) || ["/mcp", "/openapi.json"].includes(target.path),',
-    );
-  });
-
-  it('gates only the listed paths when the floor is dropped', () => {
-    const source = renderAxConfig(
-      answers({ gating: { floorKept: false, gatedPaths: ['/mcp'] } }),
-      TS,
-    );
-    expect(source).not.toContain('defaultIsGated');
-    expect(source).toContain('isGated: (target) => ["/mcp"].includes(target.path),');
-  });
-
-  it('writes an explicit gate-nothing matcher when the floor is dropped with no paths', () => {
-    const source = renderAxConfig(answers({ gating: { floorKept: false, gatedPaths: [] } }), TS);
-    expect(source).toContain('isGated: () => false,');
   });
 
   it('emits ESM JavaScript with a JSDoc type when the project is ESM JS', () => {
@@ -91,21 +65,14 @@ describe('renderAxConfig', () => {
     expect(source).not.toContain(': AxConfig');
   });
 
-  it('emits CommonJS JavaScript with require for defaultIsGated when needed', () => {
-    const source = renderAxConfig(answers({ gating: { floorKept: true, gatedPaths: ['/mcp'] } }), {
-      language: 'js',
-      moduleSystem: 'cjs',
-    });
-    expect(source).toContain("const { defaultIsGated } = require('@ora-ai/ax');");
+  it('emits CommonJS JavaScript with module.exports', () => {
+    const source = renderAxConfig(answers(), { language: 'js', moduleSystem: 'cjs' });
+    expect(source).toContain("/** @type {import('@ora-ai/ax').AxConfig} */");
     expect(source).toContain('module.exports = config;');
   });
 
   it('produces a config object that passes the AxConfig schema (minus the erased type import)', () => {
-    // Mirror what jiti would hand back: the field object, with isGated as a real function.
-    const source = renderAxConfig(
-      answers({ scaffoldRobots: false, gating: { floorKept: true, gatedPaths: ['/mcp'] } }),
-      TS,
-    );
+    const source = renderAxConfig(answers({ scaffoldRobots: false }), TS);
     // Sanity-parse the rendered scalar answers back into an object and validate the data fields.
     const object = {
       siteUrl: 'https://example.com',
@@ -114,7 +81,6 @@ describe('renderAxConfig', () => {
       scaffoldRobots: false,
       scaffoldAgent404: true,
       report: true,
-      isGated: (t: { path: string }) => t.path === '/mcp',
     };
     expect(source).toContain('scaffoldRobots: false,');
     expect(validateAxConfig(object).valid).toBe(true);

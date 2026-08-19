@@ -68,7 +68,7 @@ describe('generateCatalog zero-config detection against the fixture corpus', () 
     );
     expect(entry).toMatchObject({
       type: 'application/mcp-server-card+json',
-      url: 'https://mcp-adapter-fixture.example.com/mcp',
+      url: 'https://mcp-adapter-fixture.example.com/.well-known/mcp/server-card.json',
       capabilities: ['roll_dice'],
     });
   });
@@ -94,7 +94,7 @@ describe('generateCatalog zero-config detection against the fixture corpus', () 
     );
     expect(entry).toMatchObject({
       type: 'application/mcp-server-card+json',
-      url: 'https://mcp-gated-fixture.example.com/mcp',
+      url: 'https://mcp-gated-fixture.example.com/.well-known/mcp/server-card.json',
       auth: { status: 'unknown' },
     });
     expect(serverCard?.authentication).toEqual({
@@ -298,7 +298,7 @@ describe('generateCatalog against the Pages Router fixtures', () => {
     );
     expect(entry).toMatchObject({
       type: 'application/mcp-server-card+json',
-      url: 'https://pages-mcp-fixture.example.com/api/mcp',
+      url: 'https://pages-mcp-fixture.example.com/.well-known/mcp/server-card.json',
       capabilities: ['roll_dice'],
     });
     expect(serverCard).toMatchObject({
@@ -311,13 +311,15 @@ describe('generateCatalog against the Pages Router fixtures', () => {
     expect(recommendations.some((r) => r.includes('No pages/404.tsx found'))).toBe(true);
   });
 
-  it('attributes a declarative WebMCP form to its Pages Router page URL (entry + report site)', async () => {
+  it('attributes a declarative WebMCP form to its Pages Router page URL (catalog entry)', async () => {
     const { catalog, webMcpToolNames, report } = await generateCatalog({
       cwd: `${fixturesDir}pages-webmcp-declarative`,
     });
     expect(validateCatalogArd(catalog).valid).toBe(true);
     expect(webMcpToolNames).toEqual(['subscribe_newsletter']);
 
+    // The entry URL is the Pages Router page URL `/` — proving resolveUrlForFile handles the
+    // file-is-the-route rule, not just the App Router `page.*` shape.
     const entry = catalog.entries.find(
       (e) => e.identifier === 'urn:air:pages-webmcp-fixture.example.com:webmcp',
     );
@@ -326,15 +328,9 @@ describe('generateCatalog against the Pages Router fixtures', () => {
       url: 'https://pages-webmcp-fixture.example.com/',
       capabilities: ['subscribe_newsletter'],
     });
-    // The report records the declarative site attributed to the Pages Router page URL `/` — proving
-    // resolveUrlForFile handles the file-is-the-route rule, not just the App Router `page.*` shape.
-    expect(report.webmcp.sites).toContainEqual(
-      expect.objectContaining({
-        kind: 'declarative',
-        names: ['subscribe_newsletter'],
-        pagePathname: '/',
-      }),
-    );
+    // The report carries no webmcp section: the spec is still a draft, so the report doesn't
+    // steer agents toward it (see report.ts).
+    expect('webmcp' in report).toBe(false);
   });
 
   it('scans both routers for the hybrid fixture and unions their routes', async () => {

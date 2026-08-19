@@ -7,7 +7,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runCli } from '../src/cli.js';
 import { loadAxConfig } from '../src/config.js';
 import { runInit, validateSiteUrl } from '../src/init.js';
-import type { MultiSelectChoice, Prompter } from '../src/prompt.js';
+import {
+  isMultiSelectChoice,
+  type MultiSelectChoice,
+  type MultiSelectRow,
+  type Prompter,
+} from '../src/prompt.js';
 import { CATALOG_OUTPUT_PATH } from '../src/write.js';
 
 /** A prompter driven by scripted answers, so the wizard runs with no TTY. */
@@ -28,10 +33,13 @@ class ScriptedPrompter implements Prompter {
   async confirm(_question: string, defaultValue: boolean): Promise<boolean> {
     return this.scripted.confirm?.[this.ci++] ?? defaultValue;
   }
-  async multiSelect(_question: string, choices: MultiSelectChoice[]): Promise<string[]> {
+  async multiSelect(_question: string, rows: MultiSelectRow[]): Promise<string[]> {
     return (
       this.scripted.multiSelect?.[this.mi++] ??
-      choices.filter((choice) => choice.selected).map((choice) => choice.value)
+      rows
+        .filter(isMultiSelectChoice)
+        .filter((choice) => choice.selected)
+        .map((choice) => choice.value)
     );
   }
 }
@@ -245,8 +253,8 @@ describe('runInit package.json wiring edge cases', () => {
   });
 });
 
-describe('runInit gated-surface candidates respect basePath', () => {
-  it('offers and writes the basePath-prefixed served path, matching runtime target.path', async () => {
+describe('runInit gating respects basePath', () => {
+  it('shows the basePath-prefixed served path and writes the card with the prefixed serverUrl', async () => {
     writeBareApp(dir);
     writeFileSync(join(dir, 'next.config.mjs'), "export default { basePath: '/app' };\n", 'utf8');
     addMcpMount(dir);
@@ -255,32 +263,35 @@ describe('runInit gated-surface candidates respect basePath', () => {
     const prompter: Prompter = {
       text: async () => 'https://acme.com',
       confirm: async () => false,
-      // Check every surface → they're gated. (multiSelect returns the *gated* set; empty = all open.)
-      multiSelect: async (_question, choices) => {
-        offered.push(...choices);
-        return choices.map((choice) => choice.value);
+      // Select nothing as public → the server is gated.
+      multiSelect: async (_question, rows) => {
+        offered.push(...rows.filter(isMultiSelectChoice));
+        return [];
       },
     };
 
     expect(await runInit([], { ...io(), prompter })).toBe(0);
 
-    // The MCP candidate is offered as the basePath-prefixed served path, not the raw router path.
-    expect(offered.some((c) => c.value === '/app/mcp')).toBe(true);
-    expect(offered.some((c) => c.value === '/mcp')).toBe(false);
-    // And that prefixed path is what lands in the generated isGated matcher.
-    expect(readFileSync(join(dir, 'ax.config.ts'), 'utf8')).toContain('"/app/mcp"');
+    // The label shows the served (basePath-prefixed) path — what an agent would actually fetch.
+    expect(offered.some((c) => c.label.includes('/app/mcp'))).toBe(true);
+    // The gated decision lands in the server card, with the prefixed serverUrl.
+    const card = JSON.parse(
+      readFileSync(join(dir, 'public', '.well-known', 'mcp', 'server-card.json'), 'utf8'),
+    );
+    expect(card.serverUrl).toBe('https://acme.com/app/mcp');
+    expect(card.authentication).toEqual({ required: true });
   });
 });
 
 describe('runInit interactive (scripted answers)', () => {
-  it('captures the answers: gated MCP mount, scaffolds off, into the generated config', async () => {
+  it('records a gated MCP server in the card, never in the config, with the tree shown first', async () => {
     writeBareApp(dir);
     addMcpMount(dir);
 
     const prompter = new ScriptedPrompter({
       text: ['https://acme.com'],
-      // Check the /mcp mount → it's gated. The built-in floor is always kept.
-      multiSelect: [['/mcp']],
+      // Select nothing as public → the server is gated. The built-in floor always applies anyway.
+      multiSelect: [[]],
       // scaffoldLlmsTxt, JsonLd, Robots, Agent404, report, run-build — all no.
       confirm: [false, false, false, false, false, false],
     });
@@ -292,32 +303,134 @@ describe('runInit interactive (scripted answers)', () => {
     expect(source).toContain('siteUrl: "https://acme.com"');
     expect(source).toContain('scaffoldLlmsTxt: false,');
     expect(source).toContain('report: false,');
-    // Gating a surface always composes the built-in floor (floor is never dropped by the wizard).
-    expect(source).toContain(
-      'isGated: (target) => defaultIsGated(target) || ["/mcp"].includes(target.path),',
+    // The gating decision is persisted in the server card — the config carries no isGated.
+    expect(source).not.toContain('isGated');
+    const card = JSON.parse(
+      readFileSync(join(dir, 'public', '.well-known', 'mcp', 'server-card.json'), 'utf8'),
     );
+    expect(card.serverUrl).toBe('https://acme.com/mcp');
+    expect(card.authentication).toEqual({ required: true });
+    expect(card.tools).toEqual([{ name: 'roll_dice' }]);
     // The gating summary spells out the decision in plain language.
     expect(
-      stdout.some((l) => l.includes('Requires login (not advertised)') && l.includes('/mcp')),
+      stdout.some(
+        (l) => l.includes('Requires login (not advertised as open)') && l.includes('/mcp'),
+      ),
     ).toBe(true);
-    // The findings summary ran before any question.
+    // The findings summary ran before any question. Interactively the route tree is not printed
+    // here — it renders *as* the gating prompt (checkbox on the server node), so it would appear
+    // twice otherwise. (The rows are asserted in the tree-prompt test below.)
     expect(stdout.some((l) => l.includes('Scanned your project'))).toBe(true);
+    expect(stdout.some((l) => l.includes('Route ('))).toBe(false);
   });
 
-  it('prefills the site URL from an env var and names the source', async () => {
+  it('offers one choice per MCP server with its tools as leaves in the label', async () => {
+    writeBareApp(dir);
+    const routeDir = join(dir, 'app', 'api', 'mcp');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      `import { createMcpHandler } from 'mcp-handler';\n` +
+        `const handler = createMcpHandler((server) => {\n` +
+        `  server.tool('search_flights', 'd', {}, async () => ({}));\n` +
+        `  server.tool('pay', 'd', {}, async () => ({}));\n` +
+        `});\n` +
+        `export { handler as GET };\n`,
+      'utf8',
+    );
+
+    const offeredRows: MultiSelectRow[] = [];
+    const prompter: Prompter = {
+      text: async () => 'https://acme.com',
+      confirm: async () => false,
+      // Accept the pre-selection (a plain mount starts public).
+      multiSelect: async (_question, rows) => {
+        offeredRows.push(...rows);
+        return rows
+          .filter(isMultiSelectChoice)
+          .filter((choice) => choice.selected)
+          .map((choice) => choice.value);
+      },
+    };
+
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+
+    // The prompt is the route tree: the server node is the one selectable row, its tools (and the
+    // other routes) render as display-only rows around it.
+    const offered = offeredRows.filter(isMultiSelectChoice);
+    expect(offered).toHaveLength(1);
+    expect(offered[0]?.value).toBe('/api/mcp');
+    expect(offered[0]?.selected).toBe(true);
+    expect(offered[0]?.label).toContain('ƒ /api/mcp');
+    const displayTexts = offeredRows.flatMap((row) => ('text' in row ? [row.text] : []));
+    expect(displayTexts.some((t) => t.includes('⚙ search_flights'))).toBe(true);
+    expect(displayTexts.some((t) => t.includes('⚙ pay'))).toBe(true);
+    expect(displayTexts.some((t) => t.includes('○ /'))).toBe(true);
+    // Accepted as public → the card records it with no authentication block.
+    const card = JSON.parse(
+      readFileSync(join(dir, 'public', '.well-known', 'mcp', 'server-card.json'), 'utf8'),
+    );
+    expect(card.authentication).toBeUndefined();
+    expect(
+      stdout.some((l) => l.includes('Public (advertised to agents)') && l.includes('/api/mcp')),
+    ).toBe(true);
+  });
+
+  it('pre-deselects a withMcpAuth-wrapped mount (its code already demands auth)', async () => {
+    writeBareApp(dir);
+    const routeDir = join(dir, 'app', 'api', 'mcp');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      `import { createMcpHandler, withMcpAuth } from 'mcp-handler';\n` +
+        `const handler = createMcpHandler((server) => { server.tool('search', 'd', {}, async () => ({})); });\n` +
+        `const auth = withMcpAuth(handler, async () => undefined);\n` +
+        `export { auth as GET };\n`,
+      'utf8',
+    );
+
+    const offered: MultiSelectChoice[] = [];
+    const prompter: Prompter = {
+      text: async () => 'https://acme.com',
+      confirm: async () => false,
+      multiSelect: async (_question, rows) => {
+        const choices = rows.filter(isMultiSelectChoice);
+        offered.push(...choices);
+        return choices.filter((choice) => choice.selected).map((choice) => choice.value);
+      },
+    };
+
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+    expect(offered.find((c) => c.value === '/api/mcp')?.selected).toBe(false);
+    const card = JSON.parse(
+      readFileSync(join(dir, 'public', '.well-known', 'mcp', 'server-card.json'), 'utf8'),
+    );
+    expect(card.authentication).toEqual({ required: true });
+  });
+
+  it('prefills the site URL from an env var, naming the source in the one-line question', async () => {
     writeBareApp(dir);
     const previous = process.env.NEXT_PUBLIC_SITE_URL;
     process.env.NEXT_PUBLIC_SITE_URL = 'https://envsite.com';
     try {
-      // Empty text script → ScriptedPrompter.text returns the prefilled default (the env value).
-      const prompter = new ScriptedPrompter({
-        text: [],
-        confirm: [false, false, false, false, false, false],
-      });
+      const questions: string[] = [];
+      const prompter: Prompter = {
+        // Accept the prefilled default, capturing the question text.
+        text: async (question, defaultValue) => {
+          questions.push(question);
+          return defaultValue ?? '';
+        },
+        confirm: async () => false,
+        multiSelect: async () => [],
+      };
       const code = await runInit([], { ...io(), prompter });
       expect(code).toBe(0);
       expect(
-        stdout.some((l) => l.includes('Prefilled') && l.includes('NEXT_PUBLIC_SITE_URL')),
+        questions.some(
+          (q) =>
+            q.includes('prefilled from NEXT_PUBLIC_SITE_URL') &&
+            q.includes('press Enter to approve'),
+        ),
       ).toBe(true);
       expect(readFileSync(join(dir, 'ax.config.ts'), 'utf8')).toContain(
         'siteUrl: "https://envsite.com"',
@@ -401,10 +514,10 @@ describe('runInit round-trip', () => {
     writeBareApp(dir);
     addMcpMount(dir);
 
-    // Press Enter at gating (nothing marked as requiring login) → no isGated written.
+    // Press Enter at gating (accept the pre-selection: roll_dice looks public, so it stays
+    // selected) → nothing gated → no isGated written.
     const prompter = new ScriptedPrompter({
       text: ['https://acme.com'],
-      multiSelect: [[]],
       confirm: [false, false, false, false, false, false],
     });
     expect(await runInit([], { ...io(), prompter })).toBe(0);

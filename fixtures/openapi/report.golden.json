@@ -19,11 +19,8 @@
     "target": "static"
   },
   "mcp": {
-    "mounts": []
-  },
-  "webmcp": {
-    "toolNames": [],
-    "sites": []
+    "mounts": [],
+    "unreviewedMounts": []
   },
   "agent404": {
     "notFoundPresent": false,
@@ -61,12 +58,6 @@
     }
   ],
   "ora": {
-    "skillMcp": "https://ora.ai/skill/mcp",
-    "skillUrl": "https://ora.ai/.well-known/agent-skills/agent-ready-website/SKILL.md",
-    "scanApi": {
-      "scan": "POST https://ora.ai/api/scan",
-      "score": "GET https://ora.ai/api/score/{domain}"
-    },
     "checks": [
       {
         "id": "ard-catalog",
@@ -126,11 +117,6 @@
       {
         "id": "mcp-server-card",
         "artifact": "mcp-server",
-        "status": "actionable"
-      },
-      {
-        "id": "webmcp",
-        "artifact": "webmcp",
         "status": "actionable"
       }
     ]

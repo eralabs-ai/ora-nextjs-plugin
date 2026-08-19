@@ -46,12 +46,11 @@ One run — offline, deterministic, about a second — then:
 ```
 [ax] ✓ wrote public/.well-known/ai-catalog.json
 [ax] ⚠ Scaffolded a starter llms.txt at app/llms.txt/route.ts — ax filled in what it can derive…
-[ax] Recommendations to improve agent-readiness:
-[ax]   → No OpenAPI doc found (public/openapi.json) — this is the highest-value artifact for…
 [ax] ✓ wrote .ora/report.json (machine-readable build report)
-[ax] Agent handoff: .ora/report.json maps every recommendation to Ora's agent-readiness checks.
-[ax]   Point your coding agent at it and connect Ora's skill server (MCP): https://ora.ai/skill/mcp
-[ax]   Then scan your deployed site: POST https://ora.ai/api/scan {"url": "https://yourdomain.com"}
+[ax] Find your report at: .ora/report.json
+[ax] Prompt for your coding agent (copy-paste):
+[ax]   Read .ora/report.json and work through every check marked "actionable": create or improve
+[ax]   those artifacts to make this site more agent-ready…
 ```
 
 No network calls and no AI at build time — every byte is derived from your source tree. Three
@@ -220,9 +219,13 @@ const config: AxConfig = {
   // so it is never advertised as an open surface. Replaces the old denylist/allowlist pair — a
   // single matcher subsumes both: return `false` to re-include a path the floor would gate. A
   // gated artifact ax can describe (a detected withMcpAuth / OpenAPI securitySchemes) is emitted
-  // with a secret-free `auth` descriptor; one it can't describe is dropped, not published. With no
-  // isGated, a built-in floor gates `/api/auth/**` and `/api/webhooks/**`; supplying isGated
-  // replaces that floor wholesale, so compose `defaultIsGated` to keep it:
+  // with a secret-free `auth` descriptor; one it can't describe is dropped, not published — except
+  // an MCP server, whose gated status *is* its description: it is always published with the auth
+  // marker, never dropped. Usually you don't need this field for MCP at all: the gating answer
+  // from `ax init` (or a build's review gate) is recorded in the committed server card, and only a
+  // server with no recorded decision is asked about. With no isGated, a built-in floor gates
+  // `/api/auth/**` and `/api/webhooks/**`; supplying isGated replaces that floor wholesale, so
+  // compose `defaultIsGated` to keep it:
   isGated: (target) => defaultIsGated(target) && target.path !== '/api/auth/status',
   // Hand-declared entries — e.g. docs/skills pointers zero-config detection can't guess at. An
   // `identifier` matching a detected entry overrides/extends it field-by-field (never replaces it
@@ -257,9 +260,9 @@ The CLI detects **in-page WebMCP tools** (the W3C Web Machine Learning CG draft 
 register tools a browser-resident agent can call) in both styles:
 
 - **Declarative** — `<form toolname="..." tooldescription="...">`. Markup survives into
-  server-rendered HTML, so these are also visible to HTML-reading scanners (including Ora's
-  `webmcp` check). Tools on statically-addressable App Router pages become `text/html` catalog
-  entries whose `capabilities` carry the tool names.
+  server-rendered HTML, so these are also visible to HTML-reading scanners. Tools on
+  statically-addressable App Router pages become `text/html` catalog entries whose `capabilities`
+  carry the tool names.
 - **Imperative** — `document.modelContext.registerTool()` / `provideContext()` in `'use client'`
   components, and the `useWebMCP()` hook (`@mcp-b/react-webmcp` / `usewebmcp`). These are
   runtime-only with no spec-defined manifest, so they are surfaced in the build summary and

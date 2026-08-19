@@ -1,5 +1,4 @@
 import type { ArtifactSize } from './artifact-size.js';
-import type { WebMcpToolSite } from './detect-webmcp.js';
 import type { OraCheckStatus } from './ora-checks.js';
 import type { RouterKind } from './router-model.js';
 import type { JsonLdScaffoldResult } from './scaffold-json-ld.js';
@@ -32,17 +31,11 @@ export interface ReportScaffolds {
 }
 
 /**
- * The Ora-facing section: where to get the agent-readiness skill, how to verify a deployed site,
- * and how this build's findings map onto Ora's named checks. This is what makes the report a
- * handoff rather than a log — an agent reads `checks`, works the `actionable` ones, then re-scans.
+ * How this build's findings map onto Ora's named agent-readiness checks. This is what makes the
+ * report a handoff rather than a log — an agent reads `checks` and works the `actionable` ones.
+ * Deliberately just the mapping: no service URLs, so the report describes the site, not a vendor.
  */
 export interface OraReport {
-  /** MCP server serving Ora's `agent-ready-website` skill (tools: `list_skills`, `get_skill`). */
-  skillMcp: string;
-  /** The same skill as a document, for agents that read files rather than speak MCP. */
-  skillUrl: string;
-  /** Ora's scan endpoints, as `METHOD url` strings. */
-  scanApi: { scan: string; score: string };
   /** One entry per Ora check this build can speak to. See ora-checks.ts for the mapping. */
   checks: OraCheckStatus[];
 }
@@ -71,12 +64,18 @@ export interface BuildReport {
     mounts: Array<{ pathname: string; tools: string[] }>;
     /** Path the well-known server card was written to, when one was emitted. */
     serverCardPath?: string;
+    /**
+     * Served paths of detected mounts with no gating decision on record (no config `isGated`, no
+     * detected auth wrapper, not covered by a previously written server card). Advertised as open
+     * this run; an interactive build asks about them at the review gate, and a coding agent reading
+     * this report should get a decision recorded (run an interactive build, or gate via `isGated`).
+     */
+    unreviewedMounts: string[];
   };
-  webmcp: {
-    /** Distinct, browser-reachable in-page tool names. */
-    toolNames: string[];
-    sites: WebMcpToolSite[];
-  };
+  // No `webmcp` section for now: WebMCP is still a W3C draft, and pointing a coding agent at a
+  // non-official spec confuses more than it helps — until it is an official spec we don't
+  // recommend it, so the report doesn't surface it. Detection itself still runs (existing in-page
+  // tools become catalog entries and CLI notices); re-add the section here when the spec lands.
   /** Presence of the discovery/access artifacts the plugin detects-and-recommends. */
   artifacts: {
     robotsTxt: ReportArtifact;
