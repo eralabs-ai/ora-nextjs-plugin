@@ -3,9 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
   buildOraChecks,
   ORA_CHECK_MAP,
-  ORA_SCAN_API,
-  ORA_SKILL_MCP_URL,
-  ORA_SKILL_URL,
   type OraArtifact,
   type OraArtifactPresence,
 } from '../src/ora-checks.js';
@@ -51,17 +48,6 @@ describe('ORA_CHECK_MAP', () => {
       'mcp-server',
       'webmcp',
     ]);
-  });
-
-  it('publishes the Ora endpoints an agent needs to close the loop', () => {
-    expect(ORA_SKILL_MCP_URL).toBe('https://ora.ai/skill/mcp');
-    expect(ORA_SKILL_URL).toBe(
-      'https://ora.ai/.well-known/agent-skills/agent-ready-website/SKILL.md',
-    );
-    expect(ORA_SCAN_API).toEqual({
-      scan: 'POST https://ora.ai/api/scan',
-      score: 'GET https://ora.ai/api/score/{domain}',
-    });
   });
 });
 

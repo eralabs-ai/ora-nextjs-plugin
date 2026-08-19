@@ -545,9 +545,10 @@ describe('runCli review-before-publish gate', () => {
     await runCli(['--yes'], { ...io, cwd: dir });
 
     const output = stdout.join('\n');
-    expect(output).toContain('About to expose');
-    expect(output).toContain('urn:air:example.com:mcp-server');
-    expect(output).toContain('MCP server card → https://example.com/mcp');
+    expect(output).toContain('About to expose 1 catalog entry:');
+    // One short line: the friendly name and the server it points at — no URN or media type.
+    expect(output).toContain('• MCP server card → https://example.com/mcp');
+    expect(output).not.toContain('urn:air:example.com:mcp-server (');
   });
 });
 

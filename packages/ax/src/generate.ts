@@ -17,13 +17,7 @@ import { defaultIsGated, resolveGating, type GateTarget, type IsGated } from './
 import { loadProjectEnv } from './load-project-env.js';
 import { buildMarkdownAlternateRecommendation } from './markdown-alternate.js';
 import { loadNextConfig } from './next-config.js';
-import {
-  buildOraChecks,
-  ORA_SCAN_API,
-  ORA_SKILL_MCP_URL,
-  ORA_SKILL_URL,
-  type OraArtifact,
-} from './ora-checks.js';
+import { buildOraChecks, type OraArtifact } from './ora-checks.js';
 import type { BuildReport, ReportArtifact, ReportScaffolds } from './report.js';
 import { buildRouterModel } from './router-model.js';
 import type { JsonLdScaffoldResult } from './scaffold-json-ld.js';
@@ -512,9 +506,6 @@ export async function generateCatalog(
     // paths and can read the scaffolded files back), so the generator leaves it empty.
     sizes: [],
     ora: {
-      skillMcp: ORA_SKILL_MCP_URL,
-      skillUrl: ORA_SKILL_URL,
-      scanApi: { ...ORA_SCAN_API },
       checks: buildOraChecks(
         {
           // The catalog is the one artifact every run produces, so its checks are always addressed.

@@ -32,17 +32,11 @@ export interface ReportScaffolds {
 }
 
 /**
- * The Ora-facing section: where to get the agent-readiness skill, how to verify a deployed site,
- * and how this build's findings map onto Ora's named checks. This is what makes the report a
- * handoff rather than a log — an agent reads `checks`, works the `actionable` ones, then re-scans.
+ * How this build's findings map onto Ora's named agent-readiness checks. This is what makes the
+ * report a handoff rather than a log — an agent reads `checks` and works the `actionable` ones.
+ * Deliberately just the mapping: no service URLs, so the report describes the site, not a vendor.
  */
 export interface OraReport {
-  /** MCP server serving Ora's `agent-ready-website` skill (tools: `list_skills`, `get_skill`). */
-  skillMcp: string;
-  /** The same skill as a document, for agents that read files rather than speak MCP. */
-  skillUrl: string;
-  /** Ora's scan endpoints, as `METHOD url` strings. */
-  scanApi: { scan: string; score: string };
   /** One entry per Ora check this build can speak to. See ora-checks.ts for the mapping. */
   checks: OraCheckStatus[];
 }

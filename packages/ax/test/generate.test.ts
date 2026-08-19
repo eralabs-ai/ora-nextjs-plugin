@@ -141,16 +141,12 @@ describe('generateCatalog agent-readiness recommendations', () => {
 // what makes it actionable: each artifact the plugin knows about, expressed as the Ora checks it
 // contributes to.
 describe('generateCatalog build report', () => {
-  it('fills in the Ora handoff section', async () => {
+  it('fills in the Ora check mapping without any service URLs', async () => {
     const { report } = await generateCatalog({ cwd: dir });
 
-    expect(report.ora.skillMcp).toBe('https://ora.ai/skill/mcp');
-    expect(report.ora.skillUrl).toContain('agent-ready-website');
-    expect(report.ora.scanApi).toEqual({
-      scan: 'POST https://ora.ai/api/scan',
-      score: 'GET https://ora.ai/api/score/{domain}',
-    });
     expect(report.ora.checks.length).toBeGreaterThan(0);
+    // The report describes the site, not a vendor: no skill/scan endpoints are embedded.
+    expect(JSON.stringify(report.ora)).not.toContain('ora.ai');
   });
 
   it('always addresses the catalog checks — every run produces an ai-catalog.json', async () => {

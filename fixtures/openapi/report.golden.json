@@ -62,12 +62,6 @@
     }
   ],
   "ora": {
-    "skillMcp": "https://ora.ai/skill/mcp",
-    "skillUrl": "https://ora.ai/.well-known/agent-skills/agent-ready-website/SKILL.md",
-    "scanApi": {
-      "scan": "POST https://ora.ai/api/scan",
-      "score": "GET https://ora.ai/api/score/{domain}"
-    },
     "checks": [
       {
         "id": "ard-catalog",

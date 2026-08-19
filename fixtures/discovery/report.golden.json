@@ -58,12 +58,6 @@
     }
   ],
   "ora": {
-    "skillMcp": "https://ora.ai/skill/mcp",
-    "skillUrl": "https://ora.ai/.well-known/agent-skills/agent-ready-website/SKILL.md",
-    "scanApi": {
-      "scan": "POST https://ora.ai/api/scan",
-      "score": "GET https://ora.ai/api/score/{domain}"
-    },
     "checks": [
       {
         "id": "ard-catalog",
@@ -134,7 +128,7 @@
   },
   "warnings": [],
   "recommendations": [
-    "No OpenAPI doc found (public/openapi.json) — this is the highest-value artifact for agent discovery, since it lets agents understand and call your API without guessing at routes or schemas. ax never generates one; produce it however your API is defined (many schema/validation libraries can emit OpenAPI from your existing route definitions) and commit the result to public/openapi.json.",
+    "No OpenAPI doc found (public/openapi.json) — an OpenAPI doc lets agents understand and call your API without guessing at routes or schemas. ax never generates one; produce it however your API is defined (many schema/validation libraries can emit OpenAPI from your existing route definitions) and commit the result to public/openapi.json.",
     "No llms.txt found — a short natural-language guide agents read to decide whether your site fits their task, and to find your key pages. Add one at app/llms.txt/route.ts (or public/llms.txt), or set scaffoldLlmsTxt: true in ax.config to have a starter written for you. Pair it with JSON-LD structured data (an Organization block with a sameAs array): llms.txt says what your site is for, JSON-LD identifies it as an entity registries can rank — the two reinforce each other, so add both rather than one alone.",
     "sitemap detected (app/sitemap.ts) — make sure robots.txt references it with a \"Sitemap:\" line, that it lists all public routes, and that each entry carries a <lastmod> date so agents can judge how fresh a page is before fetching it.",
     "robots.txt detected (public/robots.txt) — confirm it explicitly Allows the AI agents you want to reach (scoped to specific User-agent groups, never \"User-agent: *\"), and that it references your sitemap (\"Sitemap:\") and catalog (\"Agentmap:\").",

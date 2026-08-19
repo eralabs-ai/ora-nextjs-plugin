@@ -168,7 +168,19 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
 
   const { catalog, emit, serverCard } = generated;
 
-  for (const warning of warnings) stdout(`[ax] ⚠ ${warning}`);
+  // Machine-readable report: CLI flag wins over ax.config's `report`; both default to off. Resolved
+  // up front because it also decides how chatty the terminal is — a report run records the full
+  // warning and recommendation text in the file, so the log gets counts and pointers, not prose.
+  const reportTarget =
+    args.report ?? (generated.reportTarget === false ? undefined : generated.reportTarget);
+
+  if (reportTarget === undefined) {
+    for (const warning of warnings) stdout(`[ax] ⚠ ${warning}`);
+  } else if (warnings.length > 0) {
+    stdout(
+      `[ax] ⚠ ${warnings.length} warning${warnings.length === 1 ? '' : 's'} — recorded in the report`,
+    );
+  }
 
   const interactive =
     io.confirm !== undefined || (process.stdout.isTTY === true && !process.env.CI);
@@ -294,12 +306,6 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
       }
     }
   }
-
-  // Machine-readable report: CLI flag wins over ax.config's `report`; both default to off. The
-  // written catalog/server-card paths are patched in first, so the report also records where
-  // everything landed.
-  const reportTarget =
-    args.report ?? (generated.reportTarget === false ? undefined : generated.reportTarget);
 
   // Recommendations print to the terminal only when no report is being written — a report run
   // carries every recommendation in the file the handoff line points at, so repeating the whole
@@ -501,10 +507,11 @@ function measureGeneratedArtifacts(cwd: string, input: MeasureArtifactsInput): A
 
 /**
  * The "about to expose" summary: every artifact this run would publish, so the surface is visible
- * before it's written (and before the confirmation gate). Each entry shows its identifier, type,
- * where it points, and — the point of the auth work — whether it carries an auth descriptor, so a
- * gated surface reads as gated rather than silently open. Purely informational; it never decides
- * anything.
+ * before it's written (and before the confirmation gate). One short line per entry — a friendly
+ * name, where it points, and whether it requires auth (the point of the gating work: a gated
+ * surface reads as gated rather than silently open). The MCP entry folds its server card in: one
+ * line naming the card and pointing at the server it describes, not the URN + media type + card
+ * URL spelled out. Purely informational; it never decides anything.
  */
 function printExposureSummary(
   catalog: AiCatalog,
@@ -516,13 +523,19 @@ function printExposureSummary(
     `[ax] About to expose ${entries.length} catalog ${entries.length === 1 ? 'entry' : 'entries'}:`,
   );
   for (const entry of entries) {
-    const where = typeof entry.url === 'string' ? entry.url : '(inline data)';
-    const auth = entry.auth ? ` [auth: ${entry.auth.status}]` : '';
-    stdout(`[ax]   • ${entry.identifier} (${entry.type}) → ${where}${auth}`);
-  }
-  if (generated.serverCard) {
-    const gated = generated.serverCard.authentication ? ' (gated)' : '';
-    stdout(`[ax]   • MCP server card → ${generated.serverCard.serverUrl}${gated}`);
+    const isMcp = entry.type === 'application/mcp-server-card+json';
+    const label =
+      isMcp && generated.serverCard !== undefined
+        ? 'MCP server card'
+        : (entry.displayName ?? entry.identifier);
+    const where =
+      isMcp && generated.serverCard !== undefined
+        ? generated.serverCard.serverUrl
+        : typeof entry.url === 'string'
+          ? entry.url
+          : '(inline data)';
+    const auth = entry.auth !== undefined && entry.auth.status !== 'none' ? ' (requires auth)' : '';
+    stdout(`[ax]   • ${label} → ${where}${auth}`);
   }
 }
 

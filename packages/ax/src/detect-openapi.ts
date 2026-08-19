@@ -34,16 +34,15 @@ interface OpenApiDocShape {
   components?: OpenApiComponentsShape;
 }
 
-// An OpenAPI doc is the single highest-density artifact for agent discovery: it lets agents
-// understand and call an API's routes, request/response schemas, and auth requirements without
-// guessing. The plugin never builds one — converting route handlers or schemas to OpenAPI is a
-// library's job — so when none is present it points at the conventional path to commit one to.
+// An OpenAPI doc lets agents understand and call an API's routes, request/response schemas, and
+// auth requirements without guessing. The plugin never builds one — converting route handlers or
+// schemas to OpenAPI is a library's job — so when none is present it points at the conventional
+// path to commit one to.
 const OPENAPI_ABSENT_RECOMMENDATION =
-  'No OpenAPI doc found (public/openapi.json) — this is the highest-value artifact for agent ' +
-  'discovery, since it lets agents understand and call your API without guessing at routes or ' +
-  'schemas. ax never generates one; produce it however your API is defined (many ' +
-  'schema/validation libraries can emit OpenAPI from your existing route definitions) and commit ' +
-  'the result to public/openapi.json.';
+  'No OpenAPI doc found (public/openapi.json) — an OpenAPI doc lets agents understand and call ' +
+  'your API without guessing at routes or schemas. ax never generates one; produce it however ' +
+  'your API is defined (many schema/validation libraries can emit OpenAPI from your existing ' +
+  'route definitions) and commit the result to public/openapi.json.';
 
 /**
  * Detect-and-reference for a static `public/openapi.json`. Never synthesizes
