@@ -1170,9 +1170,12 @@ review gate sees the wizard's `siteUrl`). No new dependencies.
 **For Phase 9/10:** the wizard is where markdown-twin *intent* should be captured once twins exist —
 add a scaffold-style question and render a new `ax.config` field in `src/init-config.ts`'s
 `renderAxConfig` (its field list is the single place to extend, with the same yes-when-asked policy).
-The generated `isGated` the wizard writes is already the matcher Phase 9's Tier-2 twin derivation must
-consult ("never derive a twin from a route `isGated` matches"), so no new gating surface is needed
-there — the wizard and the twin generator read the same predicate.
+(Stale note, corrected 2026-08-19: the wizard no longer writes `isGated` — since PR #20, MCP server
+gating is per-server and persisted in the committed server card, read back via
+`src/server-card-record.ts` / `resolveMcpMountGating`. For page/route paths — the surface Tier-2's
+"never derive a twin from a gated route" guard needs — use `resolveGating(config.isGated)` from
+`src/gating.ts`, which applies the built-in `/api/auth/**` + `/api/webhooks/**` floor unless the
+user supplied their own matcher. Still no new gating surface needed.)
 
 ---
 
@@ -1193,14 +1196,14 @@ in a fork of generated output.
 The whole design is one question — *where does the markdown come from?* — answered as a ladder of
 decreasing certainty, so precision-over-recall maps onto it directly:
 
-- [ ] **Tier 1 — reference/derive from markdown-shaped sources (no build output needed).** Detect
+- [x] **Tier 1 — reference/derive from markdown-shaped sources (no build output needed).** Detect
       routes whose content already lives as markdown in the repo: `app/**/page.mdx`, existing
       markdown route handlers, stray `public/*.md`. Map route → source. For MDX, emit the twin
       only when the file is *mostly markdown* (guard: fraction of lines that are imports/exports/
       JSX blocks below a threshold — strip those, keep the markdown); otherwise recommend instead
       of guessing. Highest fidelity — the markdown is the source, not a reconstruction — and it
       covers the docs-site audience with zero conversion machinery.
-- [ ] **Tier 2 — derive from the build output for prerendered routes.** After `next build`, every
+- [x] **Tier 2 — derive from the build output for prerendered routes.** After `next build`, every
       statically prerendered route's final HTML exists in the build output (App Router:
       `.next/server/app/**.html` — **verify the location per supported Next minor and cover it in
       the Phase 5.2 canary job; this is a semi-stable internal**). Pipeline per route: locate the
@@ -1214,31 +1217,31 @@ decreasing certainty, so precision-over-recall maps onto it directly:
       would be a beautifully-converted login page, the exact artifact auth-gate audits exist to
       catch); assert an even code-fence count post-conversion. Every skip is recorded in the
       report **with its reason** — the skip list is itself the "what to do next" guidance.
-- [ ] **Tier 3 — dynamic/SSR routes: refuse.** No build-time HTML exists, so no twin, no guessing
+- [x] **Tier 3 — dynamic/SSR routes: refuse.** No build-time HTML exists, so no twin, no guessing
       (same policy as dynamic segments in llms.txt and the agent-404). The manifest records "no
       markdown target"; the CLI recommends what the developer could do (add a markdown source, or
       prerender the route).
 
 ### 9.2 Twin output & metadata
 
-- [ ] Twins are written as **static files in `public/`**: route `/docs/getting-started` →
+- [x] Twins are written as **static files in `public/`**: route `/docs/getting-started` →
       `public/docs/getting-started.md`; the root route → `public/index.md` (which also satisfies
       Ora's `markdown-url-fallback` homepage probe). *Why static files:* the `.md`-URL twin then
       works with **zero runtime** — Next serves `public/` as-is — so one of the three retrieval
       mechanisms (`.md` URL / Accept header / agent UA) passes before any middleware ships, and
       the middleware (Phase 10) becomes an upgrade, not a requirement. Same emission path and
       deploy-verification story as the catalog.
-- [ ] Every twin opens with **YAML frontmatter** carrying the four keys the agreed audit criteria
+- [x] Every twin opens with **YAML frontmatter** carrying the four keys the agreed audit criteria
       check for, all derivable at build time: `title` (page `<title>`/first H1), `description`
       (meta description when present), `canonical_url` (siteUrl + route — the attribution link
       back to the HTML page), `last_updated` (build time — truthful: twins are exactly as fresh as
       the build). Plus a `generated-by: @ora-ai/ax` marker so humans and tools know not to
       hand-edit.
-- [ ] Twins never become catalog entries (the per-route-entry prohibition stands — nobody indexes
+- [x] Twins never become catalog entries (the per-route-entry prohibition stands — nobody indexes
       per-page entries); they surface via the scaffolded `llms.txt` (Machine-readable resources
       section), the `<link rel="alternate" type="text/markdown">` recommendation (Phase 7), and
       the manifest (9.4).
-- [ ] **Review gate extension:** twins change the site's public surface, so the first run that
+- [x] **Review gate extension:** twins change the site's public surface, so the first run that
       would write them extends the Phase 2.3 "about to expose" summary with the twin count + sample
       paths, behind the same `--yes` / interactive confirm.
 
@@ -1249,7 +1252,7 @@ wall, status-code lying of exactly the kind agents are built to distrust (the 20
 is legitimate only for 404s, which have no honest next step; a 401 has one). The policy, split by
 who can implement it:
 
-- [ ] **Generated `/auth.md` (build-side, this phase):** one markdown document derived from the
+- [x] **Generated `/auth.md` (build-side, this phase):** one markdown document derived from the
       auth detection Phase 2.8 already does — the gated surfaces (paths + kind), the auth scheme
       per surface (from the `EntryAuth` descriptors: oauth2 endpoints / api_key / unknown), the
       `resourceMetadataPath` cross-link when `withMcpAuth` declared one, and where a human obtains
@@ -1258,21 +1261,21 @@ who can implement it:
       *Why one doc instead of N gated twins:* it aggregates what agents actually need (how do I
       get access?), it's fully derivable, and Ora's agent-simulation checks already look for
       auth-docs artifacts. One honest, derivable artifact doing the job N invented ones would.
-- [ ] **Recommendation (advisory, this phase):** for detected gated routes, recommend keeping the
+- [x] **Recommendation (advisory, this phase):** for detected gated routes, recommend keeping the
       honest 401/403 status and adding a `WWW-Authenticate` header + a body/`Link` pointer to
       `/auth.md` — the gated cousin of the agent-404. Route-handler *behavior* is the developer's
       code, so this stays a recommendation (with the report carrying it), never a rewrite.
 
 ### 9.4 The serving manifest (the piece Phase 10 consumes)
 
-- [ ] Generate a **manifest data module** (pattern proven by `app/not-found-agent-data.*`):
+- [x] Generate a **manifest data module** (pattern proven by `app/not-found-agent-data.*`):
       regenerated every run, importable by user middleware, containing — the route table
       (static routes only), which routes have markdown twins (and the twin path), which paths are
       gated (from `isGated` results), and where the discovery artifacts actually live
       (basePath-aware). This is what makes our middleware **never rewrite blind** — the specific
       middleware weakness the strategy sync identified (a Next.js middleware alone cannot check a
       rewrite target exists).
-- [ ] **Build-ordering wrinkle (design decision needed at implementation time):** `middleware.ts`
+- [x] **Build-ordering wrinkle (design decision needed at implementation time):** `middleware.ts`
       is compiled *during* `next build`, but ax runs *post*build — so a manifest generated
       postbuild is consumed by the *next* build (one-build staleness). The manifest is derived
       from the **source tree** (router model + config), not from build output, so the fix is
@@ -1287,13 +1290,28 @@ who can implement it:
 - **Twins default-on vs opt-in.** Leaning **default-on behind the existing first-publish review
   gate** (the confirmation makes default-on safe, and it's the stronger product statement — the
   wizard asks anyway); but every scaffold precedent is opt-in. Product call, deliberately not
-  derivable. _pending_
+  derivable. **Resolved 2026-08-19: default-on behind the review gate.** Twins are generated
+  artifacts, not scaffolds, so the scaffold opt-in precedent doesn't bind them; the review gate is
+  the consent ceremony. Config gets a `markdownTwins` switch (default `true`) so opting *out* is
+  one line.
 - **HTML→markdown converter dependency** (Tier 2 only; Tier 1 needs none). A turndown-class
   library would be the first non-trivial CLI dependency beyond ajv/jiti. Options: smallest
   maintained converter vs. a minimal internal one (headings/paragraphs/lists/links/code — refuse
   exotic HTML rather than mis-convert it, consistent with the tier ladder). Tier 1 + manifest can
-  ship first and defer this. _pending_
-- **Tier-1 MDX "mostly markdown" threshold.** Pick empirically against fixtures. _pending_
+  ship first and defer this. **Resolved 2026-08-19: take the dependency — `turndown` (+ GFM
+  plugin for tables), CLI-side only, never in the runtime/middleware import graph.** Checked
+  `@vercel/agent-readability` first: it ships no converter at all (negotiation only), confirming
+  there is nothing lighter to borrow and that generating the markdown is exactly ax's
+  differentiation.
+- **Tier-1 MDX "mostly markdown" threshold.** Pick empirically against fixtures.
+  **Resolved 2026-08-19: start at ≤25% non-markdown lines** (imports/exports/JSX-block lines over
+  non-blank lines), tuned against the `mdx-content` fixture; component-heavy pages get a
+  recommendation instead of a twin.
+- **9.4 manifest ordering (resolved 2026-08-19): `ax manifest` prebuild subcommand.** The manifest
+  is source-tree+config-derived, so a fast `ax manifest` subcommand regenerates it before
+  `next build` compiles middleware; `ax init` wires it as `prebuild` (same never-overwrite rules
+  as the `postbuild` wiring). The full postbuild run also refreshes it, so unwired projects
+  converge with one-build staleness.
 
 **Fixtures:** an `mdx-content` fixture (Tier 1), a prerendered-pages fixture with `<main>`
 (Tier 2 happy path), a JS-shell page (Tier 2 skip: too little text), a gated route (Tier 2 skip:
@@ -1303,6 +1321,36 @@ the Phase 7 born-passing assertions.
 **Done when:** Tier 1 + manifest + `/auth.md` ship with the review-gate extension and fixtures;
 Tier 2 ships behind the converter decision; every generated twin passes the born-passing suite;
 the report's skip list names a reason for every twin-less route.
+
+**✓ shipped (2026-08-19).** All three tiers plus `/auth.md`, the serving manifest, and `ax
+manifest` in one PR (the converter decision resolved same-day, so Tier 2 didn't need to trail).
+Modules: `src/markdown-artifact.ts` (frontmatter + generated-by marker + fence counting, the
+shared generated-markdown contract), `src/mdx-twin.ts` (Tier 1 line-based stripping, ≤25% guard),
+`src/html-twin.ts` (Tier 2: domino parse → `<main>`/`<article>` region → turndown+GFM, all four
+refusals), `src/markdown-twins.ts` (the ladder orchestrator: user-owned detection via the marker,
+stale-twin sweep, dynamic-route tally; plans are pure, applied by the CLI only after the review
+gate), `src/auth-md.ts`, `src/manifest.ts` (+ `ax manifest` in cli.ts, `prebuild` wiring +
+`markdownTwins` question in the wizard). Report gained a `markdownTwins` section (written /
+user-owned / skipped-with-reason / deleted / authMd); llms.txt starter links twins + the auth
+guide; `buildMarkdownAlternateRecommendation` now receives real twin paths. Fixtures
+`markdown-twins` (all Tier-2 paths + user-owned + gated + dynamic) and `mdx-content` (@next/mdx,
+both threshold outcomes); twin snapshots live in `fixtures/*/twins.golden/` (normalized
+`last_updated`, written/verified by the report-snapshot script) and the born-passing suite asserts
+the frontmatter/fence contract on both synthetic output and every committed snapshot.
+
+Deviations, each with its reason:
+- **Tier-2 HTML is located by walking `<distDir>/server/{app,pages}` for `.html`** (route groups
+  dropped, `index` collapsing) rather than parsing `app-path-routes-manifest.json` — the walk
+  covers both routers with one code path and degrades to "nothing prerendered" when the semi-stable
+  layout shifts; the Phase 5.2 canary still owns version drift.
+- **A gated route's twin skip is decided by `resolveGating(config.isGated)` with a new `'page'`
+  GateTarget kind** — the Phase 8 note claiming the wizard's written `isGated` would be the
+  matcher was stale (see the correction there); the wizard writes no isGated since PR #20.
+- **Turning `markdownTwins` off does not delete previously generated files** — deleting public/
+  content on a config flip is not a decision to make silently; the stale sweep only runs while the
+  feature is on.
+- **The manifest module is refresh-if-present on full runs** (created only by `ax manifest` / the
+  wizard's opt-in wiring), so a plain build never introduces a new source-tree file silently.
 
 ---
 

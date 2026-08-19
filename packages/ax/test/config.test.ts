@@ -30,6 +30,7 @@ describe('loadAxConfig', () => {
       scaffoldAgent404: false,
       scaffoldRobots: false,
       scaffoldJsonLd: false,
+      markdownTwins: true,
       report: false,
       entries: [],
     });

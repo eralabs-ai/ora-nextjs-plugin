@@ -33,8 +33,16 @@ export function resolvePagePathname(
   const rel = relative(appDir, absolutePath);
   const base = rel.split(/[/\\]/).pop() ?? '';
   if (!PAGE_FILE_RE.test(base)) return undefined;
-  const segments = pathSegments(join(rel, '..'));
+  return resolveStaticSegments(rel);
+}
 
+/**
+ * The URL a page file's directory serves at, from its path relative to the app dir. Route groups
+ * contribute no segment; a dynamic/parallel/private/intercepting segment makes the URL statically
+ * unknowable, so this returns undefined rather than guess.
+ */
+function resolveStaticSegments(relPageFile: string): string | undefined {
+  const segments = pathSegments(join(relPageFile, '..'));
   const resolved: string[] = [];
   for (const segment of segments) {
     if (segment === '.' || segment === '') continue;
@@ -43,6 +51,30 @@ export function resolvePagePathname(
     resolved.push(segment);
   }
   return `/${resolved.join('/')}`;
+}
+
+/** An App Router MDX/markdown page (`page.mdx` / `page.md`) paired with the route it serves. */
+export interface MdxPageFile {
+  /** Absolute path of the page source. */
+  file: string;
+  route: string;
+}
+
+/**
+ * Every `page.mdx` / `page.md` under the app dir whose route is statically addressable, sorted by
+ * route. Deliberately separate from {@link listStaticPageRoutes}: whether an MDX page actually
+ * routes depends on `next.config` `pageExtensions` (which the synchronous router model never
+ * loads), so callers that know the configured extensions — markdown-twin derivation — filter on
+ * them, and the general route list never over-claims a route that Next.js may not serve.
+ */
+export function listMdxPageFiles(appDir: string): MdxPageFile[] {
+  const pages: MdxPageFile[] = [];
+  for (const file of walkFiles(appDir, (name) => /^page\.mdx?$/.test(name))) {
+    const rel = relative(appDir, file.absolutePath);
+    const route = resolveStaticSegments(rel);
+    if (route !== undefined) pages.push({ file: file.absolutePath, route });
+  }
+  return pages.sort((a, b) => a.route.localeCompare(b.route));
 }
 
 /**

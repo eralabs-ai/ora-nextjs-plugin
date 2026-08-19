@@ -462,7 +462,7 @@ describe('runInit interactive (scripted answers)', () => {
     let built = 0;
     const prompter = new ScriptedPrompter({
       text: ['https://acme.com'],
-      confirm: [true, true, true, true, true, true], // last = run build
+      confirm: [true, true, true, true, true, true, true, true], // last = run build
     });
 
     const code = await runInit([], {
@@ -549,5 +549,41 @@ describe('ax init via runCli subcommand', () => {
     });
     expect(code).toBe(0);
     expect(existsSync(join(dir, 'ax.config.ts'))).toBe(true);
+  });
+});
+
+describe('runInit markdown twins + serving-manifest wiring', () => {
+  it('--yes writes markdownTwins, wires prebuild before build, and creates the manifest module', async () => {
+    writeBareApp(dir);
+    const code = await runInit(['--yes', '--site-url', 'https://acme.com'], io());
+    expect(code).toBe(0);
+    expect(readFileSync(join(dir, 'ax.config.ts'), 'utf8')).toContain('markdownTwins: true,');
+    const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+    expect(pkg.scripts.prebuild).toBe('ax manifest');
+    expect(pkg.scripts.postbuild).toBe('ax');
+    // prebuild reads before build, postbuild after it — the three tell the story in order.
+    expect(Object.keys(pkg.scripts)).toEqual(['prebuild', 'build', 'postbuild']);
+    expect(existsSync(join(dir, 'ax-manifest.ts'))).toBe(true);
+    expect(readFileSync(join(dir, 'ax-manifest.ts'), 'utf8')).toContain('export const axManifest');
+  });
+
+  it('declining the twin and manifest questions writes markdownTwins: false and wires no prebuild', async () => {
+    writeBareApp(dir);
+    // Confirm order: 4 scaffolds, markdownTwins, report, wireManifest, build offer.
+    const prompter = new ScriptedPrompter({
+      text: ['https://acme.com'],
+      confirm: [true, true, true, true, false, true, false, false],
+    });
+    const code = await runInit([], { ...io(), prompter });
+    expect(code).toBe(0);
+    expect(readFileSync(join(dir, 'ax.config.ts'), 'utf8')).toContain('markdownTwins: false,');
+    const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+    expect(pkg.scripts.prebuild).toBeUndefined();
+    expect(existsSync(join(dir, 'ax-manifest.ts'))).toBe(false);
+    expect(existsSync(join(dir, 'ax-manifest.js'))).toBe(false);
   });
 });

@@ -20,3 +20,7 @@ spec/ard/conformance/
 # JSON.stringify on each `reports:regen`) — reformatting them would drift from what that script
 # writes and break the next regen's diff.
 fixtures/**/report.golden.json
+
+# Twin snapshots are byte-exact copies of what ax generates (normalized timestamps only) — a
+# reformat would diverge them from the generated output the snapshot script diffs against.
+fixtures/**/twins.golden/

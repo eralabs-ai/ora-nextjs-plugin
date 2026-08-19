@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 
 import { manageAgent404 } from './agent-404.js';
+import { buildAuthMd, type AuthMdPlan } from './auth-md.js';
 import { loadAxConfig } from './config.js';
 import { detectAgentsMd } from './detect-agents-md.js';
 import { detectJsonLd } from './detect-json-ld.js';
@@ -16,6 +17,7 @@ import { applyEntryOverrides, entryUrlPath } from './entries.js';
 import { defaultIsGated, resolveGating, type GateTarget, type IsGated } from './gating.js';
 import { loadProjectEnv } from './load-project-env.js';
 import { buildMarkdownAlternateRecommendation } from './markdown-alternate.js';
+import { planMarkdownTwins, type MarkdownTwinPlan } from './markdown-twins.js';
 import { loadNextConfig } from './next-config.js';
 import { buildOraChecks, type OraArtifact } from './ora-checks.js';
 import type { BuildReport, ReportArtifact, ReportScaffolds } from './report.js';
@@ -76,6 +78,13 @@ export interface GenerateCatalogResult {
    * this rather than the `route.ts` file on disk, so the reported tokens match what an agent fetches.
    */
   scaffoldedLlmsTxtBody?: string;
+  /**
+   * This build's markdown-twin plan — computed here (pure, so the review gate can show it), applied
+   * by the CLI only after the gate, alongside the catalog write.
+   */
+  twinPlan: MarkdownTwinPlan;
+  /** The generated `/auth.md`, when gated surfaces exist. Written by the CLI with the twins. */
+  authMdPlan?: AuthMdPlan;
 }
 
 /** Presence-shape shared by the detect-and-recommend detectors (`{found, source?}`). */
@@ -345,6 +354,33 @@ export async function generateCatalog(
 
   const openApi = openApiArtifact(cwd);
 
+  // Plan this build's markdown twins — pure computation, applied by the CLI only after the review
+  // gate. Runs before the llms.txt detector so a scaffolded starter can already link the twins and
+  // the auth guide this same run writes.
+  const twinPlan = await planMarkdownTwins({
+    cwd,
+    router,
+    isGated: gating,
+    basePath,
+    ...(nextConfig.config.distDir !== undefined ? { distDir: nextConfig.config.distDir } : {}),
+    ...(nextConfig.config.pageExtensions !== undefined
+      ? { pageExtensions: nextConfig.config.pageExtensions }
+      : {}),
+    siteUrl,
+    enabled: config.markdownTwins,
+    warn,
+    recommend,
+  });
+
+  // Whether a generated /auth.md is (very likely) being written this run — decided from the same
+  // pre-gating signals the final `buildAuthMd` reads, because the llms.txt scaffold runs before
+  // entry gating resolves. A config-declared gated entry that only materializes later would just
+  // mean the one-time starter misses the link; the auth guide itself is still written.
+  const authMdLikely =
+    config.markdownTwins &&
+    (mcpMounts.some((mount) => mount.auth !== undefined) ||
+      (openApiEntry?.auth !== undefined && openApiEntry.auth.status !== 'none'));
+
   const llmsTxtResult = detectLlmsTxt({
     cwd,
     siteUrl,
@@ -354,9 +390,15 @@ export async function generateCatalog(
     scaffold: config.scaffoldLlmsTxt,
     site,
     router,
-    // Only what this build actually found: the starter's "Machine-readable resources" section is a
-    // list of live artifacts, so a link to something that doesn't exist would be worse than none.
-    resources: { openApi: openApi.found, mcpPathnames: mcpMounts.map((mount) => mount.pathname) },
+    // Only what this build actually found (or writes this same run — the twins and auth guide land
+    // with the catalog): the starter's "Machine-readable resources" section is a list of live
+    // artifacts, so a link to something that doesn't exist would be worse than none.
+    resources: {
+      openApi: openApi.found,
+      mcpPathnames: mcpMounts.map((mount) => mount.pathname),
+      twinPaths: twinPlan.servedPaths,
+      authMd: authMdLikely,
+    },
   });
   if (llmsTxtResult.entry) inferredEntries.push(llmsTxtResult.entry);
 
@@ -415,13 +457,33 @@ export async function generateCatalog(
   });
   for (const message of buildDiscoveryRecommendations({ siteUrl, basePath })) recommend(message);
 
-  // Markdown-twin alternate link. ax does not generate markdown twins yet, and nothing names them,
-  // so `twinPaths` is empty today and this adds nothing to a current build — the recommendation
-  // lands the moment there is a twin for a `<link rel="alternate">` to point at.
+  // The generated /auth.md (gated-surface guide), from the final published surface: gated MCP
+  // mounts plus entries carrying an auth descriptor. Undefined when nothing is gated — an auth
+  // guide with nothing to say would itself be noise.
+  const authMdPlan = config.markdownTwins
+    ? buildAuthMd({
+        mounts: mcpMounts,
+        entries,
+        siteUrl,
+        basePath,
+        siteDisplayName: site.displayName,
+      })
+    : undefined;
+  if (authMdPlan !== undefined) {
+    recommend(
+      'Gated routes should keep their honest 401/403 status and point agents at the auth guide: ' +
+        'add a WWW-Authenticate header and a Link (or body) pointer to ' +
+        `${authMdPlan.servedPath} in your gated route handlers. A 200 "this is gated" page is a ` +
+        'soft auth wall agents are built to distrust; ax generates the guide but never rewrites ' +
+        'your handlers.',
+    );
+  }
+
+  // Markdown-twin alternate link: fires only once twins exist for the tag to point at.
   for (const message of buildMarkdownAlternateRecommendation({
     siteUrl,
     basePath,
-    twinPaths: [],
+    twinPaths: twinPlan.servedPaths,
   })) {
     recommend(message);
   }
@@ -501,6 +563,27 @@ export async function generateCatalog(
       openapi: openApi,
     },
     scaffolds,
+    // Planned values; the CLI reconciles `written`/`deleted`/`authMd` after it applies the plan
+    // (post-review-gate), the same way it patches in the catalog path.
+    markdownTwins: {
+      enabled: twinPlan.enabled,
+      written: twinPlan.writes.map((twin) => ({
+        route: twin.route,
+        path: relative(cwd, twin.filePath),
+        tier: twin.tier,
+        source: twin.source,
+      })),
+      userOwned: twinPlan.userOwned.map((twin) => ({
+        route: twin.route,
+        source: twin.sourcePath,
+      })),
+      skipped: twinPlan.skips,
+      dynamicRouteCount: twinPlan.dynamicRouteCount,
+      deleted: [],
+      ...(authMdPlan !== undefined
+        ? { authMd: { path: join('public', 'auth.md'), surfaceCount: authMdPlan.surfaceCount } }
+        : {}),
+    },
     // Filled in by the CLI once artifacts are on disk (it knows the written catalog / server-card
     // paths and can read the scaffolded files back), so the generator leaves it empty.
     sizes: [],
@@ -530,6 +613,8 @@ export async function generateCatalog(
     webMcpToolNames: webMcp.toolNames,
     report,
     reportTarget: config.report,
+    twinPlan,
+    ...(authMdPlan !== undefined ? { authMdPlan } : {}),
     ...(serverCard ? { serverCard } : {}),
     ...(llmsTxtResult.scaffoldedBody !== undefined
       ? { scaffoldedLlmsTxtBody: llmsTxtResult.scaffoldedBody }

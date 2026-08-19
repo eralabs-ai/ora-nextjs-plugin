@@ -22,6 +22,18 @@ coverage/
 fixtures/**/public/.well-known/ai-catalog.json
 fixtures/**/public/.well-known/mcp/server-card.json
 
+# Markdown twins + the auth guide ax's postbuild step generates in fixtures — build output. The
+# tracked artifacts are the normalized snapshots under fixtures/*/twins.golden/. Scoped to the
+# exact generated paths so hand-authored fixture markdown (markdown-twins/public/hand.md,
+# discovery/public/agents.md) stays committed; a newly generated file that isn't listed here shows
+# up as untracked, which is the prompt to snapshot and list it.
+fixtures/markdown-twins/public/index.md
+fixtures/markdown-twins/public/guides/
+fixtures/mdx-content/public/index.md
+fixtures/mdx-content/public/guide.md
+fixtures/discovery/public/index.md
+fixtures/*/public/auth.md
+
 # The machine-readable build report ax writes when a fixture's postbuild runs `ax --report`. Build
 # output — the tracked artifact is the normalized golden (fixtures/*/report.golden.json), which the
 # report-snapshot layer diffs each freshly-built report against. The report itself embeds absolute

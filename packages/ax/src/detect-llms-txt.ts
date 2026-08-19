@@ -14,6 +14,14 @@ export interface LlmsTxtResources {
   openApi?: boolean;
   /** Pathnames of detected `mcp-handler` mounts (e.g. `/mcp`). */
   mcpPathnames?: string[];
+  /**
+   * Served paths of the markdown twins this run produces or found (e.g. `/docs.md`). Twins never
+   * become catalog entries (nobody indexes per-page entries) — the scaffolded llms.txt is one of
+   * the places they surface instead.
+   */
+  twinPaths?: string[];
+  /** Whether a generated `/auth.md` (the gated-surface guide) is being written this run. */
+  authMd?: boolean;
 }
 
 export interface DetectLlmsTxtOptions {
@@ -307,6 +315,21 @@ function buildResourceLinks(options: DetectLlmsTxtOptions): string[] {
     links.push(
       `- [MCP server](${absoluteOrServed(options, pathname)}) — callable tools over the Model ` +
         'Context Protocol',
+    );
+  }
+  if (options.resources?.authMd === true) {
+    links.push(
+      `- [Authentication guide](${absoluteOrServed(options, '/auth.md')}) — how to obtain ` +
+        'access to the gated surfaces',
+    );
+  }
+  // Markdown twins are per-page, so they're capped like "Key pages" — an orientation aid, not an
+  // index. Twin paths arrive already basePath-prefixed (they come from the twin plan's served paths).
+  const twinPaths = options.resources?.twinPaths ?? [];
+  for (const twinPath of twinPaths.slice(0, MAX_KEY_PAGES)) {
+    links.push(
+      `- [${twinPath}](${absoluteOrServed(options, twinPath, true)}) — markdown version of ` +
+        `${twinPath.replace(/(?:\/index)?\.md$/, '') || '/'}`,
     );
   }
   return links;

@@ -55,6 +55,20 @@
     }
   },
   "scaffolds": {},
+  "markdownTwins": {
+    "enabled": true,
+    "written": [],
+    "userOwned": [],
+    "skipped": [
+      {
+        "route": "/",
+        "reason": "too-little-text",
+        "detail": "The prerendered HTML carries under 200 characters of text — a JS-shell page, whose twin would be an empty page presented as content."
+      }
+    ],
+    "dynamicRouteCount": 0,
+    "deleted": []
+  },
   "sizes": [
     {
       "artifact": "ai-catalog.json",

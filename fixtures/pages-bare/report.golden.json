@@ -41,6 +41,25 @@
     }
   },
   "scaffolds": {},
+  "markdownTwins": {
+    "enabled": true,
+    "written": [],
+    "userOwned": [],
+    "skipped": [
+      {
+        "route": "/",
+        "reason": "too-little-text",
+        "detail": "The prerendered HTML carries under 200 characters of text — a JS-shell page, whose twin would be an empty page presented as content."
+      },
+      {
+        "route": "/about",
+        "reason": "too-little-text",
+        "detail": "The prerendered HTML carries under 200 characters of text — a JS-shell page, whose twin would be an empty page presented as content."
+      }
+    ],
+    "dynamicRouteCount": 1,
+    "deleted": []
+  },
   "sizes": [
     {
       "artifact": "ai-catalog.json",
@@ -117,6 +136,7 @@
   "warnings": [],
   "recommendations": [
     "No OpenAPI doc found (public/openapi.json) — an OpenAPI doc lets agents understand and call your API without guessing at routes or schemas. ax never generates one; produce it however your API is defined (many schema/validation libraries can emit OpenAPI from your existing route definitions) and commit the result to public/openapi.json.",
+    "1 page file has dynamic URL segments, so no markdown twins exist for them (no build-time HTML, and ax never guesses URLs). To give those pages a markdown representation, add a markdown source per page or prerender representative routes.",
     "No llms.txt found — a short natural-language guide agents read to decide whether your site fits their task, and to find your key pages. Add one at app/llms.txt/route.ts (or public/llms.txt), or set scaffoldLlmsTxt: true in ax.config to have a starter written for you. Pair it with JSON-LD structured data (an Organization block with a sameAs array): llms.txt says what your site is for, JSON-LD identifies it as an entity registries can rank — the two reinforce each other, so add both rather than one alone.",
     "No sitemap found — add one so agents can discover all public routes. Use the built-in Next.js path (app/sitemap.ts); ax never generates a sitemap itself. Give each entry a <lastmod> date (agents use it to judge freshness), then reference it from robots.txt with a \"Sitemap:\" line.",
     "No robots.txt found — add one (app/robots.ts or public/robots.txt) that explicitly Allows the reputable AI agents you want to reach, scoped to specific User-agent groups (never \"User-agent: *\"), plus a \"Sitemap:\" line. Note: Next's MetadataRoute.Robots (app/robots.ts) has no field for the \"Agentmap:\" catalog pointer — put that line in a static public/robots.txt. Set scaffoldRobots: true in ax.config to have one written for you.",

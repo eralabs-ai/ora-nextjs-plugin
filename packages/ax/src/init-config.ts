@@ -27,6 +27,7 @@ export interface InitAnswers {
   scaffoldJsonLd: boolean;
   scaffoldRobots: boolean;
   scaffoldAgent404: boolean;
+  markdownTwins: boolean;
   report: boolean;
 }
 
@@ -79,6 +80,12 @@ export function renderAxConfig(answers: InitAnswers, target: ConfigFileTarget): 
         'routes and discovery artifacts, so a wrong URL is a signpost instead of a dead end.',
       'scaffoldAgent404',
       String(answers.scaffoldAgent404),
+    ),
+    field(
+      'Generate markdown twins of your prerendered pages (route /docs → /docs.md) plus /auth.md ' +
+        'when surfaces are gated. Regenerated every build — generated output, never yours to edit.',
+      'markdownTwins',
+      String(answers.markdownTwins),
     ),
     field(
       'Write .ora/report.json — the machine-readable build report your coding agent reads to work ' +

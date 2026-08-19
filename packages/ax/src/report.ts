@@ -1,4 +1,5 @@
 import type { ArtifactSize } from './artifact-size.js';
+import type { TwinSkipReason, TwinTier } from './markdown-twins.js';
 import type { OraCheckStatus } from './ora-checks.js';
 import type { RouterKind } from './router-model.js';
 import type { JsonLdScaffoldResult } from './scaffold-json-ld.js';
@@ -28,6 +29,30 @@ export interface ReportScaffolds {
   llmsTxt?: { path: string };
   robotsTxt?: RobotsScaffoldResult;
   jsonLd?: JsonLdScaffoldResult;
+}
+
+/**
+ * What the markdown-twin pass did (and, more importantly, *refused to do and why*): one entry per
+ * twin written or already covered by a user-authored source, and one per route skipped with the
+ * reason and its next step. The skip list is the actionable half — an agent working the report
+ * reads it as "these pages have no markdown representation yet, and here is what would give them
+ * one". The terminal only carries counts; the prose lives here.
+ */
+export interface ReportMarkdownTwins {
+  /** `ax.config` `markdownTwins`, resolved (default `true`). */
+  enabled: boolean;
+  /** Twins written this run: which route, where it landed, and which tier derived it. */
+  written: Array<{ route: string; path: string; tier: TwinTier; source: 'mdx' | 'prerender' }>;
+  /** Routes already covered by a user-authored markdown source ax never touches. */
+  userOwned: Array<{ route: string; source: string }>;
+  /** Routes with no twin, each with its reason code and a human-actionable sentence. */
+  skipped: Array<{ route: string; reason: TwinSkipReason; detail: string }>;
+  /** Count of page files with dynamic URL segments — no statically knowable twin target. */
+  dynamicRouteCount: number;
+  /** Stale generated twins removed this run (their route no longer exists or qualifies). */
+  deleted: string[];
+  /** The generated auth guide, when gated surfaces exist. */
+  authMd?: { path: string; surfaceCount: number };
 }
 
 /**
@@ -93,6 +118,8 @@ export interface BuildReport {
   };
   /** What the opt-in source-tree scaffolds wrote, appended, or skipped this run. */
   scaffolds: ReportScaffolds;
+  /** The markdown-twin pass: what was written, what was refused and why (see the type). */
+  markdownTwins: ReportMarkdownTwins;
   /**
    * Byte and estimated-token size of each artifact this build generated. Tokens (`chars / 4`) are
    * the unit that constrains the agent that later reads the artifact; an entry over the truncation
