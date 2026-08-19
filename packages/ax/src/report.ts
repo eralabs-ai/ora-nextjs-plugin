@@ -71,6 +71,13 @@ export interface BuildReport {
     mounts: Array<{ pathname: string; tools: string[] }>;
     /** Path the well-known server card was written to, when one was emitted. */
     serverCardPath?: string;
+    /**
+     * Served paths of detected mounts with no gating decision on record (no config `isGated`, no
+     * detected auth wrapper, not covered by a previously written server card). Advertised as open
+     * this run; an interactive build asks about them at the review gate, and a coding agent reading
+     * this report should get a decision recorded (run an interactive build, or gate via `isGated`).
+     */
+    unreviewedMounts: string[];
   };
   webmcp: {
     /** Distinct, browser-reachable in-page tool names. */

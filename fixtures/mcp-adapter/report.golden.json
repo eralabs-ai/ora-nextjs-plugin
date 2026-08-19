@@ -11,7 +11,7 @@
       {
         "identifier": "urn:air:mcp-adapter-fixture.example.com:mcp-server",
         "type": "application/mcp-server-card+json",
-        "url": "https://mcp-adapter-fixture.example.com/mcp",
+        "url": "https://mcp-adapter-fixture.example.com/.well-known/mcp/server-card.json",
         "displayName": "MCP server"
       }
     ],
@@ -27,6 +27,7 @@
         ]
       }
     ],
+    "unreviewedMounts": [],
     "serverCardPath": "public/.well-known/mcp/server-card.json"
   },
   "webmcp": {
@@ -62,9 +63,9 @@
     {
       "artifact": "ai-catalog.json",
       "path": "public/.well-known/ai-catalog.json",
-      "bytes": 488,
-      "chars": 488,
-      "tokens": 122
+      "bytes": 517,
+      "chars": 517,
+      "tokens": 129
     },
     {
       "artifact": "mcp-server-card",

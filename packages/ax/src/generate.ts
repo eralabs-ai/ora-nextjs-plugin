@@ -6,14 +6,14 @@ import { loadAxConfig } from './config.js';
 import { detectAgentsMd } from './detect-agents-md.js';
 import { detectJsonLd } from './detect-json-ld.js';
 import { detectLlmsTxt } from './detect-llms-txt.js';
-import { buildMcpEntries, detectMcpMounts } from './detect-mcp.js';
+import { buildMcpEntries, detectMcpMounts, type McpMount } from './detect-mcp.js';
 import { detectOpenApi } from './detect-openapi.js';
 import { detectRobots } from './detect-robots.js';
 import { detectSitemap } from './detect-sitemap.js';
 import { detectWebMcp } from './detect-webmcp.js';
 import { buildDiscoveryRecommendations } from './discovery.js';
 import { applyEntryOverrides, entryUrlPath } from './entries.js';
-import { resolveGating, type GateTarget } from './gating.js';
+import { defaultIsGated, resolveGating, type GateTarget, type IsGated } from './gating.js';
 import { loadProjectEnv } from './load-project-env.js';
 import { buildMarkdownAlternateRecommendation } from './markdown-alternate.js';
 import { loadNextConfig } from './next-config.js';
@@ -29,8 +29,15 @@ import { buildRouterModel } from './router-model.js';
 import type { JsonLdScaffoldResult } from './scaffold-json-ld.js';
 import { SPEC_VERSION } from './schema.js';
 import { buildMcpServerCard, type McpServerCard } from './server-card.js';
+import { readServerCardRecord } from './server-card-record.js';
 import { readSiteMetadata } from './site-metadata.js';
-import { hostnameFromUrl, readSiteUrlFromEnv, resolveSiteUrl, servedPath } from './site-url.js';
+import {
+  buildArtifactUrl,
+  hostnameFromUrl,
+  readSiteUrlFromEnv,
+  resolveSiteUrl,
+  servedPath,
+} from './site-url.js';
 import type { AiCatalog, CatalogEntry, EntryAuth } from './types.js';
 import type { EmissionTarget } from './write.js';
 
@@ -98,25 +105,61 @@ function gateKindForEntry(entry: CatalogEntry): GateTarget['kind'] {
 }
 
 /**
- * The per-tool gating verdict for an MCP surface. The matcher is asked once about the mount itself
- * (`tool` unset) and once per detected tool. The surface is *fully* gated when the mount is gated
- * outright or when every one of its tools is — a server whose tools are all auth-walled is an
- * auth-walled server, whatever its bare endpoint returns. Otherwise the surface stays open and
- * `publicTools` is what may be advertised; gated tools are withheld, never listed as open.
+ * Resolves each MCP mount's gated status and attaches the auth descriptor it implies. Auth is
+ * declared per *server* in the MCP conventions, so this is a whole-mount decision, resolved in
+ * precedence order:
+ *   1. A developer-supplied `isGated` owns the whole policy (as everywhere else).
+ *   2. Otherwise: the built-in floor, a detected `withMcpAuth` wrapper, or the decision the
+ *      previously written server card records (`authentication.required`) — the committed card is
+ *      the persistence layer for the user's answer from `ax init` or a build's review gate.
+ * A gated mount is never dropped: "requires auth" *is* its description, so it's published with
+ * `auth.status "unknown"` and its card carries `authentication.required` — more discoverable than
+ * hiding it, and the write is what records the decision for the next build.
+ *
+ * A mount matched by none of the sources is *unreviewed*: advertised as open (the zero-config
+ * default) but returned in `unreviewed` so the CLI can ask interactively or warn in CI.
  */
-function gateMcpTools(
-  isGated: (target: GateTarget) => boolean,
-  path: string,
-  tools: readonly string[],
-): { fullyGated: boolean; publicTools: string[] } {
-  const base: GateTarget = {
-    kind: 'mcp',
-    path,
-    ...(tools.length > 0 ? { tools: [...tools] } : {}),
-  };
-  if (isGated(base)) return { fullyGated: true, publicTools: [] };
-  const publicTools = tools.filter((tool) => !isGated({ ...base, tool }));
-  return { fullyGated: tools.length > 0 && publicTools.length === 0, publicTools };
+function resolveMcpMountGating(options: {
+  mounts: McpMount[];
+  isGated: IsGated | undefined;
+  basePath: string;
+  siteUrl: string | undefined;
+  cwd: string;
+}): { mounts: McpMount[]; unreviewed: string[] } {
+  const { mounts, isGated, basePath, siteUrl, cwd } = options;
+  if (mounts.length === 0) return { mounts, unreviewed: [] };
+
+  const record = readServerCardRecord(cwd);
+  const unreviewed: string[] = [];
+
+  const resolved = mounts.map((mount) => {
+    const path = servedPath(basePath, mount.pathname);
+    const target: GateTarget = {
+      kind: 'mcp',
+      path,
+      ...(mount.capabilities.length > 0 ? { tools: mount.capabilities } : {}),
+    };
+    const serverUrl = siteUrl ? buildArtifactUrl(siteUrl, basePath, mount.pathname) : undefined;
+    const recorded =
+      record !== undefined && serverUrl !== undefined && record.serverUrl === serverUrl
+        ? record
+        : undefined;
+
+    let gated: boolean;
+    if (isGated !== undefined) {
+      gated = isGated(target);
+    } else {
+      gated = defaultIsGated(target) || mount.auth !== undefined || recorded?.authRequired === true;
+      const reviewed = defaultIsGated(target) || mount.auth !== undefined || recorded !== undefined;
+      if (!reviewed) unreviewed.push(path);
+    }
+
+    return gated && mount.auth === undefined
+      ? { ...mount, auth: { status: 'unknown' as const } }
+      : mount;
+  });
+
+  return { mounts: resolved, unreviewed };
 }
 
 /**
@@ -127,7 +170,9 @@ function gateMcpTools(
  *     explicit config wins: the descriptor is downgraded to `unknown` and the disagreement warned.
  *   - An entry ax *can't* describe (no descriptor) that `isGated` marks gated is dropped — never
  *     advertised as an open surface. This is the safety net the default floor (`/api/auth/**`,
- *     `/api/webhooks/**`) relies on.
+ *     `/api/webhooks/**`) relies on. MCP entries never reach this branch: a gated mount's status
+ *     *is* its description, so `resolveMcpMountGating` attaches `auth.status "unknown"` upstream
+ *     and the entry publishes as gated rather than disappearing.
  *   - Everything else is published unchanged. `isGated` is never consulted to assert "open": an
  *     entry it returns `false` for just keeps whatever descriptor it already had (usually none).
  * Entries with no URL path (spec allows `data`-only) have nothing to match, so they pass through.
@@ -139,7 +184,7 @@ function applyGating(
 ): CatalogEntry[] {
   const kept: CatalogEntry[] = [];
 
-  for (let entry of entries) {
+  for (const entry of entries) {
     const path = entryUrlPath(entry);
     const derived: EntryAuth | undefined = entry.auth;
 
@@ -148,32 +193,12 @@ function applyGating(
       continue;
     }
 
-    const kind = gateKindForEntry(entry);
-    const tools = Array.isArray(entry.capabilities) ? (entry.capabilities as string[]) : undefined;
-
-    let gated: boolean;
-    if (kind === 'mcp' && tools !== undefined && tools.length > 0) {
-      // MCP surfaces are gated per tool, not just per mount: a partly-gated server stays published
-      // with only its public tools advertised, and an all-tools-gated one counts as fully gated.
-      const verdict = gateMcpTools(isGated, path, tools);
-      gated = verdict.fullyGated;
-      if (!gated && verdict.publicTools.length < tools.length) {
-        const withheld = tools.filter((tool) => !verdict.publicTools.includes(tool));
-        warn(
-          `isGated withheld ${withheld.length} tool${withheld.length === 1 ? '' : 's'} on ` +
-            `"${entry.identifier}" (${path}): ${withheld.join(', ')} — they require login, so ` +
-            'they are not advertised in the entry capabilities.',
-        );
-        entry = { ...entry, capabilities: verdict.publicTools };
-      }
-    } else {
-      const target: GateTarget = {
-        kind,
-        path,
-        ...(tools !== undefined ? { tools } : {}),
-      };
-      gated = isGated(target);
-    }
+    const target: GateTarget = {
+      kind: gateKindForEntry(entry),
+      path,
+      ...(Array.isArray(entry.capabilities) ? { tools: entry.capabilities as string[] } : {}),
+    };
+    const gated = isGated(target);
 
     if (derived !== undefined) {
       if (gated && derived.status === 'none') {
@@ -300,30 +325,26 @@ export async function generateCatalog(
     detectedDomain: site.domain,
   });
 
-  // Scan route handlers for MCP mounts once, then feed the same mounts to both the catalog entry and
-  // the well-known server card (agents discover MCP via the card, not the entry — see server-card.ts).
-  const mcpMounts = detectMcpMounts({ cwd, warn, router });
+  // Scan route handlers for MCP mounts once, resolve each mount's gated status (config isGated,
+  // the built-in floor, a detected withMcpAuth wrapper, or the decision the previously written
+  // server card records), then feed the same resolved mounts to both the catalog entry and the
+  // well-known server card. A gated mount is published everywhere *with* its auth marker — the
+  // entry carries auth.status "unknown" and the card carries authentication.required — never
+  // dropped: the committed card is the persistence layer for the gating decision, so it must
+  // exist to record it.
+  const gating = resolveGating(config.isGated);
+  const detectedMounts = detectMcpMounts({ cwd, warn, router });
+  const { mounts: mcpMounts, unreviewed: unreviewedMcpMounts } = resolveMcpMountGating({
+    mounts: detectedMounts,
+    isGated: config.isGated,
+    basePath,
+    siteUrl,
+    cwd,
+  });
   const inferredEntries: CatalogEntry[] = [
     ...buildMcpEntries({ mounts: mcpMounts, siteUrl, basePath, warn }),
   ];
-
-  // Gating governs the server card too, not just catalog entries: the card is how agents actually
-  // discover an MCP server, so advertising a gated mount's card as open is the same
-  // precision-over-recall failure `applyGating` prevents for entries. Keep a mount's card only when
-  // it isn't gated, or when we can describe its auth honestly (a detected withMcpAuth descriptor).
-  // The gate `path` is the served (basePath-prefixed) pathname, matching what `applyGating` derives
-  // from the entry URL, so a mount is judged identically here and there.
-  const gating = resolveGating(config.isGated);
-  const cardMounts = mcpMounts.flatMap((mount) => {
-    const verdict = gateMcpTools(gating, servedPath(basePath, mount.pathname), mount.capabilities);
-    // A fully gated mount keeps its card only when its auth can be described honestly — and then
-    // with all tools listed, since the whole card already says authentication is required. An open
-    // mount's card advertises only the public tools; individually gated ones are withheld here the
-    // same way `applyGating` withholds them from the entry capabilities.
-    if (verdict.fullyGated) return mount.auth !== undefined ? [mount] : [];
-    return [{ ...mount, capabilities: verdict.publicTools }];
-  });
-  const serverCard = buildMcpServerCard({ mounts: cardMounts, siteUrl, basePath, site, recommend });
+  const serverCard = buildMcpServerCard({ mounts: mcpMounts, siteUrl, basePath, site, recommend });
 
   const openApiEntry = detectOpenApi({ cwd, siteUrl, basePath, warn, recommend });
   if (openApiEntry) inferredEntries.push(openApiEntry);
@@ -358,6 +379,19 @@ export async function generateCatalog(
   // descriptor or is dropped, and both are worth recording in the build output/report.
   const { entries: overridden } = applyEntryOverrides(inferredEntries, config.entries);
   const entries = applyGating(overridden, gating, warn);
+
+  // Reference the server card from the catalog: the mcp entry's type promises card JSON, and the
+  // card — not the raw endpoint — is the discovery document agents read, so when a card is emitted
+  // the entry points at it. Rewritten only *after* gating, which must match on the mount's own
+  // served path, never the card's.
+  if (serverCard !== undefined && siteUrl !== undefined) {
+    const cardUrl = buildArtifactUrl(siteUrl, basePath, '/.well-known/mcp/server-card.json');
+    for (const entry of entries) {
+      if (entry.type === 'application/mcp-server-card+json' && entry.url === serverCard.serverUrl) {
+        entry.url = cardUrl;
+      }
+    }
+  }
 
   // Detect-and-recommend for the discovery/access artifacts that affect agent-readiness. These
   // never add catalog entries and never fail a build — they only surface advisory recommendations.
@@ -454,6 +488,7 @@ export async function generateCatalog(
     },
     mcp: {
       mounts: mcpMounts.map((mount) => ({ pathname: mount.pathname, tools: mount.capabilities })),
+      unreviewedMounts: unreviewedMcpMounts,
     },
     webmcp: { toolNames: webMcp.toolNames, sites: webMcp.sites },
     agent404: {

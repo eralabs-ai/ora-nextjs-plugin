@@ -10,10 +10,13 @@ import {
   measureContent,
 } from './artifact-size.js';
 import { AxConfigError, findExistingConfig } from './config.js';
+import { entryUrlPath } from './entries.js';
 import { generateCatalog, type GenerateCatalogResult } from './generate.js';
 import { runInit } from './init.js';
 import { ORA_SCAN_API, ORA_SKILL_MCP_URL } from './ora-checks.js';
 import type { BuildReport } from './report.js';
+import { renderRouteTree } from './route-tree.js';
+import { buildRouterModel } from './router-model.js';
 import type { McpServerCard } from './server-card.js';
 import type { AiCatalog } from './types.js';
 import {
@@ -169,6 +172,28 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
 
   for (const warning of warnings) stdout(`[ax] ⚠ ${warning}`);
 
+  const interactive =
+    io.confirm !== undefined || (process.stdout.isTTY === true && !process.env.CI);
+
+  // MCP gating decisions live in the committed server card; a detected mount that neither the card
+  // nor config covers has never been reviewed. Interactively, ask now — the answer lands in the
+  // card this run writes, so the question is asked once, not per build. Headless (--yes / CI) or
+  // --dry-run, warn and publish it as open (the zero-config default); the report's
+  // `mcp.unreviewedMounts` carries the action item for a coding agent.
+  const unreviewedMounts = generated.report.mcp.unreviewedMounts;
+  if (unreviewedMounts.length > 0) {
+    if (interactive && !args.yes && !args.dryRun) {
+      await reviewUnreviewedMounts(cwd, generated, unreviewedMounts, io.confirm, stdout);
+    } else {
+      const plural = unreviewedMounts.length !== 1;
+      stdout(
+        `[ax] ⚠ MCP server${plural ? 's' : ''} at ${unreviewedMounts.join(', ')} ` +
+          `ha${plural ? 've' : 's'} no gating decision on record — advertised as open. Run an ` +
+          'interactive build (or `ax init`) to record whether login is required.',
+      );
+    }
+  }
+
   // Review before publish: show the full surface this run would expose, then gate the first
   // publish. A catalog already committed at the target path means this isn't a first run, so
   // re-runs stay unattended; a fresh publish must be confirmed — interactively, or with --yes
@@ -182,8 +207,6 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   }
 
   const firstPublish = !existsSync(join(cwd, CATALOG_OUTPUT_PATH));
-  const interactive =
-    io.confirm !== undefined || (process.stdout.isTTY === true && !process.env.CI);
 
   // A first interactive run with no config at all (neither ax.config.* nor a legacy ard.config.*):
   // suggest the wizard, which wires the build and captures the judgment (siteUrl, gating, scaffolds)
@@ -295,6 +318,87 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
 
   printAgentHandoff(generated.report, reportPath, stdout);
   return 0;
+}
+
+/**
+ * The review-gate gating question for mounts with no decision on record. Shows the route tree (the
+ * same layout `ax init` prints — this *is* the init experience arriving late, for the user who
+ * added an MCP server after setup) and asks per server, since auth is declared per server in the
+ * MCP conventions. A "requires login" answer is applied to this run's artifacts via
+ * `markMountGated`; either answer is persisted by the server card written right after, so the
+ * question never repeats — unless no single card can be written (several mounts), in which case
+ * the mounts stay listed as unreviewed in the report.
+ */
+async function reviewUnreviewedMounts(
+  cwd: string,
+  generated: GenerateCatalogResult,
+  unreviewedMounts: string[],
+  injectedConfirm: ((question: string) => Promise<boolean>) | undefined,
+  stdout: (line: string) => void,
+): Promise<void> {
+  const confirm = injectedConfirm ?? defaultConfirm;
+  const plural = unreviewedMounts.length !== 1;
+  stdout(
+    `[ax] Detected ${plural ? '' : 'an '}MCP server${plural ? 's' : ''} with no gating decision ` +
+      'on record:',
+  );
+  stdout('[ax]');
+  const router = buildRouterModel(cwd);
+  const apiRoutePaths = [
+    ...new Set(
+      router
+        .listApiEndpoints()
+        .map((endpoint) => endpoint.url)
+        .filter((url): url is string => url !== undefined),
+    ),
+  ].sort();
+  const lines = renderRouteTree({
+    routers: generated.report.routers,
+    pageRoutes: router.listPageRoutes(),
+    apiRoutePaths,
+    basePath: generated.report.basePath,
+    mounts: generated.report.mcp.mounts.map((mount) => ({
+      pathname: mount.pathname,
+      tools: mount.tools,
+    })),
+  });
+  for (const line of lines) stdout(`[ax] ${line}`.trimEnd());
+  stdout('[ax]');
+
+  for (const path of unreviewedMounts) {
+    const isPublic = await confirm(
+      `Is the MCP server at ${path} public — agents can use it without logging in?`,
+    );
+    if (!isPublic) markMountGated(generated, path);
+  }
+
+  // The card written below records the answers, so these mounts are reviewed from the next build
+  // on. With no single card to write (several mounts), the decisions apply this run only and the
+  // report keeps carrying the mounts as unreviewed.
+  if (generated.serverCard !== undefined) generated.report.mcp.unreviewedMounts = [];
+}
+
+/**
+ * Applies a "requires login" answer from the review gate to this run's artifacts: the catalog
+ * entry gets the secret-free auth descriptor and the server card the `authentication` block — the
+ * same shape a detected `withMcpAuth` wrapper or a recorded card would have produced. The card
+ * write is what persists the decision.
+ */
+function markMountGated(generated: GenerateCatalogResult, path: string): void {
+  const { serverCard } = generated;
+  const cardMountPath =
+    serverCard !== undefined ? new URL(serverCard.serverUrl).pathname : undefined;
+  if (serverCard !== undefined && cardMountPath === path) {
+    serverCard.authentication = { required: true };
+  }
+  for (const entry of generated.catalog.entries) {
+    if (entry.type !== 'application/mcp-server-card+json') continue;
+    const entryPath = entryUrlPath(entry);
+    // A single-mount entry references the card (not the mount), so match either identity.
+    const referencesCard =
+      cardMountPath === path && entryPath !== undefined && entryPath.endsWith('/server-card.json');
+    if (entryPath === path || referencesCard) entry.auth = { status: 'unknown' };
+  }
 }
 
 /**

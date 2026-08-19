@@ -68,7 +68,7 @@ describe('generateCatalog zero-config detection against the fixture corpus', () 
     );
     expect(entry).toMatchObject({
       type: 'application/mcp-server-card+json',
-      url: 'https://mcp-adapter-fixture.example.com/mcp',
+      url: 'https://mcp-adapter-fixture.example.com/.well-known/mcp/server-card.json',
       capabilities: ['roll_dice'],
     });
   });
@@ -94,7 +94,7 @@ describe('generateCatalog zero-config detection against the fixture corpus', () 
     );
     expect(entry).toMatchObject({
       type: 'application/mcp-server-card+json',
-      url: 'https://mcp-gated-fixture.example.com/mcp',
+      url: 'https://mcp-gated-fixture.example.com/.well-known/mcp/server-card.json',
       auth: { status: 'unknown' },
     });
     expect(serverCard?.authentication).toEqual({
@@ -298,7 +298,7 @@ describe('generateCatalog against the Pages Router fixtures', () => {
     );
     expect(entry).toMatchObject({
       type: 'application/mcp-server-card+json',
-      url: 'https://pages-mcp-fixture.example.com/api/mcp',
+      url: 'https://pages-mcp-fixture.example.com/.well-known/mcp/server-card.json',
       capabilities: ['roll_dice'],
     });
     expect(serverCard).toMatchObject({

@@ -252,10 +252,10 @@ describe('runCli', () => {
     expect(stdout.some((l) => l.includes('MCP server card'))).toBe(true);
   });
 
-  it('writes neither entry nor server card for a gated MCP mount', async () => {
-    // Gating must govern the well-known server card too, not just the catalog entry — the card is
-    // how agents discover an MCP server, so advertising a gated mount's card as open is the exact
-    // precision failure gating exists to prevent.
+  it('writes a gated MCP mount with auth markers on both the entry and the server card', async () => {
+    // A gated server is published *as gated*, never dropped and never advertised as open: the
+    // entry carries auth.status "unknown" and the card authentication.required — and that written
+    // card is what records the decision for future builds.
     writeMcpFixture(dir);
     writeFileSync(
       join(dir, 'ax.config.mjs'),
@@ -267,8 +267,10 @@ describe('runCli', () => {
 
     expect(code).toBe(0);
     const catalog = JSON.parse(readFileSync(join(dir, CATALOG_OUTPUT_PATH), 'utf8'));
-    expect(catalog.entries).toEqual([]);
-    expect(existsSync(join(dir, SERVER_CARD_OUTPUT_PATH))).toBe(false);
+    expect(catalog.entries).toHaveLength(1);
+    expect(catalog.entries[0].auth).toEqual({ status: 'unknown' });
+    const card = JSON.parse(readFileSync(join(dir, SERVER_CARD_OUTPUT_PATH), 'utf8'));
+    expect(card.authentication).toEqual({ required: true });
   });
 
   it('writes no server card when there is no MCP mount', async () => {
@@ -466,6 +468,63 @@ describe('runCli review-before-publish gate', () => {
     expect(code).toBe(1);
     expect(existsSync(join(dir, CATALOG_OUTPUT_PATH))).toBe(false);
     expect(stdout.some((l) => l.includes('Aborted'))).toBe(true);
+  });
+
+  it('asks about an unreviewed MCP mount at the gate and records "requires login" in the card', async () => {
+    // No card on disk and no isGated → the mount has never been reviewed. The interactive gate
+    // shows the route tree, asks per server, and the answer lands in the card it writes — so the
+    // question is asked once, not per build.
+    writeMcpFixture(dir);
+
+    const questions: string[] = [];
+    const code = await runCli([], {
+      ...noConfirmIo,
+      cwd: dir,
+      confirm: async (question: string) => {
+        questions.push(question);
+        // "Is the MCP server at /mcp public…?" → no (requires login); "Publish this catalog?" → yes.
+        return !question.includes('public');
+      },
+    });
+
+    expect(code).toBe(0);
+    expect(questions.some((q) => q.includes('/mcp') && q.includes('public'))).toBe(true);
+    expect(stdout.some((l) => l.includes('no gating decision on record'))).toBe(true);
+    expect(stdout.some((l) => l.includes('⚙ roll_dice'))).toBe(true);
+    const card = JSON.parse(readFileSync(join(dir, SERVER_CARD_OUTPUT_PATH), 'utf8'));
+    expect(card.authentication).toEqual({ required: true });
+    const catalog = JSON.parse(readFileSync(join(dir, CATALOG_OUTPUT_PATH), 'utf8'));
+    expect(catalog.entries[0].auth).toEqual({ status: 'unknown' });
+
+    // Second run: the committed card is the record — the gating question is not asked again.
+    questions.length = 0;
+    expect(
+      await runCli([], {
+        ...noConfirmIo,
+        cwd: dir,
+        confirm: async (question: string) => {
+          questions.push(question);
+          return true;
+        },
+      }),
+    ).toBe(0);
+    expect(questions.some((q) => q.includes('public'))).toBe(false);
+    // And the gated decision survives the rebuild.
+    const rebuilt = JSON.parse(readFileSync(join(dir, SERVER_CARD_OUTPUT_PATH), 'utf8'));
+    expect(rebuilt.authentication).toEqual({ required: true });
+  });
+
+  it('warns (instead of asking) about an unreviewed mount under --yes, and notes it in the report', async () => {
+    writeMcpFixture(dir);
+
+    const code = await runCli(['--yes', '--report'], { ...io, cwd: dir });
+
+    expect(code).toBe(0);
+    expect(
+      stdout.some((l) => l.includes('no gating decision on record') && l.includes('/mcp')),
+    ).toBe(true);
+    const report = JSON.parse(readFileSync(join(dir, '.ora', 'report.json'), 'utf8'));
+    expect(report.mcp.unreviewedMounts).toEqual(['/mcp']);
   });
 
   it('--dry-run prints the exposure summary and writes nothing', async () => {

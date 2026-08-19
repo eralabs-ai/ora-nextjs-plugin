@@ -3,19 +3,22 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 
 import { findExistingConfig } from './config.js';
-import { detectMcpMounts } from './detect-mcp.js';
+import { detectMcpMounts, type McpMount } from './detect-mcp.js';
 import { generateCatalog } from './generate.js';
 import {
   configFileName,
   type ConfigFileTarget,
-  type GatingAnswer,
   type InitAnswers,
   renderAxConfig,
 } from './init-config.js';
 import { planPostbuildWiring, POSTBUILD_COMMAND } from './init-package-json.js';
 import { createReadlinePrompter, type MultiSelectChoice, type Prompter } from './prompt.js';
+import { renderRouteTree } from './route-tree.js';
 import { buildRouterModel, type RouterKind } from './router-model.js';
+import { buildMcpServerCard } from './server-card.js';
+import { readSiteMetadata } from './site-metadata.js';
 import { readSiteUrlFromEnv, servedPath } from './site-url.js';
+import { writeServerCard } from './write.js';
 
 export interface InitIO {
   cwd?: string;
@@ -168,11 +171,12 @@ interface InitFindings {
   /** Every API route that resolves to a stable URL (MCP mounts included), for the route tree. */
   apiRoutePaths: string[];
   /**
-   * `next.config` `basePath` (`''` when unset). Gated-surface candidates are prefixed with it, so
-   * the `isGated` the wizard writes matches the basePath-prefixed `target.path` a real build passes.
+   * `next.config` `basePath` (`''` when unset). Every displayed path is prefixed with it, so what
+   * the tree and the gating question show is exactly the served path a real build gates on.
    */
   basePath: string;
-  mcpMounts: { pathname: string; tools: string[]; authDetected: boolean }[];
+  /** Detected mounts, kept whole: the gating card is built from these after the answers land. */
+  mcpMounts: McpMount[];
   openApiFound: boolean;
   webMcpToolNames: string[];
   /** Presence of each detect-and-recommend artifact, for the findings summary. */
@@ -198,8 +202,8 @@ async function gatherFindings(cwd: string): Promise<InitFindings> {
   const { report } = generated;
   const router = buildRouterModel(cwd);
   // Re-run the mount scan directly (cheap — the router model is shared) because the report's mount
-  // list carries no auth posture, and the wizard's pre-selection heuristic needs to know which
-  // mounts are already wrapped in withMcpAuth.
+  // list carries no auth posture, and both the pre-selection heuristic and the gating card need
+  // the whole mounts (withMcpAuth detection, source file, resource-metadata path).
   const mounts = detectMcpMounts({ cwd, warn: () => {}, router });
   const apiRoutePaths = [
     ...new Set(
@@ -214,11 +218,7 @@ async function gatherFindings(cwd: string): Promise<InitFindings> {
     pageRoutes: router.listPageRoutes(),
     apiRoutePaths,
     basePath: report.basePath,
-    mcpMounts: mounts.map((mount) => ({
-      pathname: mount.pathname,
-      tools: mount.capabilities,
-      authDetected: mount.auth !== undefined,
-    })),
+    mcpMounts: mounts,
     openApiFound: report.artifacts.openapi.found,
     webMcpToolNames: generated.webMcpToolNames,
     artifacts: {
@@ -232,83 +232,39 @@ async function gatherFindings(cwd: string): Promise<InitFindings> {
   };
 }
 
-/** One row of the route-tree summary: a served path, its kind marker, and any MCP tool children. */
-interface RouteTreeNode {
-  path: string;
-  marker: '○' | 'ƒ';
-  note?: string;
-  /** MCP tool names, rendered as selectable sub-routes of their mount. */
-  children: string[];
-}
-
-/**
- * Distills the findings into the route rows the summary tree shows, sorted by path: page routes
- * (○), API route handlers (ƒ), MCP mounts (ƒ, with their tools as children — the sub-routes agents
- * actually call), and a detected OpenAPI doc. Every path is the *served* (basePath-prefixed) one,
- * so what the tree shows is exactly what the gating question later asks about.
- */
-function buildRouteTree(findings: InitFindings): RouteTreeNode[] {
-  const served = (pathname: string): string => servedPath(findings.basePath, pathname);
-  const mcpPaths = new Set(findings.mcpMounts.map((mount) => mount.pathname));
-  const nodes = new Map<string, RouteTreeNode>();
-  for (const route of findings.pageRoutes) {
-    nodes.set(served(route), { path: served(route), marker: '○', children: [] });
-  }
-  for (const route of findings.apiRoutePaths) {
-    if (mcpPaths.has(route)) continue;
-    nodes.set(served(route), { path: served(route), marker: 'ƒ', children: [] });
-  }
-  for (const mount of findings.mcpMounts) {
-    nodes.set(served(mount.pathname), {
-      path: served(mount.pathname),
-      marker: 'ƒ',
-      note: `MCP server${mount.authDetected ? ' · auth detected' : ''}`,
-      children: mount.tools,
-    });
-  }
-  if (findings.openApiFound) {
-    const path = served('/openapi.json');
-    nodes.set(path, { path, marker: '○', note: 'OpenAPI doc', children: [] });
-  }
-  return [...nodes.values()].sort((a, b) => a.path.localeCompare(b.path));
-}
-
-/**
- * Renders the findings as a `next build`-style route tree — the layout developers already read
- * after every build — except MCP servers are broken into their tools as sub-routes, since those
- * (not the mount) are the callable agent surfaces. Returns the lines without the `[ax] ` prefix.
- */
-function renderRouteTree(findings: InitFindings): string[] {
-  const nodes = buildRouteTree(findings);
-  if (nodes.length === 0) return ['No routes detected.'];
-  const width = Math.max(...nodes.map((node) => node.path.length));
-  const lines = [`Route (${findings.routers.length > 0 ? findings.routers.join(' + ') : 'none'})`];
-  nodes.forEach((node, index) => {
-    const connector = index === 0 && nodes.length > 1 ? '┌' : index < nodes.length - 1 ? '├' : '└';
-    const padded = node.note !== undefined ? node.path.padEnd(width + 2) : node.path;
-    lines.push(`${connector} ${node.marker} ${padded}${node.note ?? ''}`.trimEnd());
-    const stem = index < nodes.length - 1 ? '│' : ' ';
-    node.children.forEach((tool, toolIndex) => {
-      const toolConnector = toolIndex < node.children.length - 1 ? '├' : '└';
-      lines.push(`${stem}   ${toolConnector} ⚙ ${tool}`);
-    });
-  });
-  const legend = ['○ page', 'ƒ api route'];
-  if (nodes.some((node) => node.children.length > 0)) legend.push('⚙ MCP tool');
-  lines.push('', legend.join('   '));
-  return lines;
-}
-
 function printFindings(findings: InitFindings, stdout: (line: string) => void): void {
   stdout("[ax] Scanned your project (no build needed) — here's what I found:");
-  stdout('[ax]');
-  for (const line of renderRouteTree(findings)) stdout(`[ax] ${line}`.trimEnd());
-  stdout('[ax]');
+  // The route tree exists to serve the MCP gating decision, so it renders only when there is an
+  // MCP server to decide about; without one, a one-line count carries the same information.
+  if (findings.mcpMounts.length > 0) {
+    stdout('[ax]');
+    const lines = renderRouteTree({
+      routers: findings.routers,
+      pageRoutes: findings.pageRoutes,
+      apiRoutePaths: findings.apiRoutePaths,
+      basePath: findings.basePath,
+      mounts: findings.mcpMounts.map((mount) => ({
+        pathname: mount.pathname,
+        tools: mount.capabilities,
+        authDetected: mount.auth !== undefined,
+      })),
+    });
+    for (const line of lines) stdout(`[ax] ${line}`.trimEnd());
+    stdout('[ax]');
+  } else {
+    const pages = findings.pageRoutes.length;
+    const apis = findings.apiRoutePaths.length;
+    stdout(
+      `[ax]   • Routes: ${pages} page${pages === 1 ? '' : 's'}, ${apis} API route` +
+        `${apis === 1 ? '' : 's'} — no MCP server detected`,
+    );
+  }
   if (findings.webMcpToolNames.length > 0) {
     stdout(`[ax]   • WebMCP tools: ${findings.webMcpToolNames.join(', ')}`);
   }
   const present = [
     findings.artifacts.llmsTxt && 'llms.txt',
+    findings.artifacts.openapi && 'openapi.json',
     findings.artifacts.robotsTxt && 'robots.txt',
     findings.artifacts.sitemap && 'sitemap',
     findings.artifacts.agentsMd && 'agents.md',
@@ -319,191 +275,120 @@ function printFindings(findings: InitFindings, stdout: (line: string) => void): 
   );
 }
 
-/**
- * Name tokens that suggest a surface sits behind a login, for the pre-selection heuristic. Matched
- * against whole tokens (split on separators and camelCase), never substrings, so `author_search`
- * doesn't trip on `auth`.
- */
-const LOGIN_NAME_TOKENS = new Set([
-  'login',
-  'logout',
-  'signin',
-  'signup',
-  'signout',
-  'auth',
-  'oauth',
-  'sso',
-  'session',
-  'sessions',
-  'token',
-  'tokens',
-  'password',
-  'credential',
-  'credentials',
-  'account',
-  'accounts',
-  'admin',
-  'billing',
-  'invoice',
-  'invoices',
-  'subscribe',
-  'subscription',
-  'checkout',
-  'pay',
-  'payment',
-  'payments',
-  'purchase',
-  'profile',
-  'me',
-]);
-
-/** True when a tool/path name looks login-gated (a whole token matches the login vocabulary). */
-export function looksLoginGated(name: string): boolean {
-  return name
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .some((token) => LOGIN_NAME_TOKENS.has(token));
-}
-
-/**
- * The selectable agent surfaces the gating question is about — each detected MCP *tool* (a tool,
- * not its mount, is the callable surface an agent sees, and gating is declared per tool), a
- * tool-less MCP mount as a whole, and an OpenAPI doc. Empty when the project exposes none, in which
- * case the wizard skips the question entirely.
- *
- * Selected means **public**. The pre-selection is a heuristic starting point, not a policy: docs
- * surfaces (an OpenAPI doc) start public — documentation is what agents must be able to read —
- * while a `withMcpAuth`-wrapped mount and tools whose names look login-shaped (login, checkout,
- * pay, account, …) start deselected, since most gated APIs are gated exactly there.
- *
- * Tool values are `path#tool` keys and whole-surface values are the *served* path (basePath prefix
- * included), because that is exactly what the generated matcher rebuilds from `target.path` /
- * `target.tool` when a real build runs.
- */
-function publicSurfaceChoices(findings: InitFindings): MultiSelectChoice[] {
-  const served = (pathname: string): string => servedPath(findings.basePath, pathname);
-  const choices: MultiSelectChoice[] = [];
-  for (const mount of findings.mcpMounts) {
-    const path = served(mount.pathname);
-    if (mount.tools.length === 0) {
-      choices.push({
-        value: path,
-        label: `ƒ ${path} — MCP server${mount.authDetected ? ' (auth detected)' : ''}`,
-        selected: !mount.authDetected,
-      });
-      continue;
-    }
-    for (const tool of mount.tools) {
-      choices.push({
-        value: `${path}#${tool}`,
-        label: `⚙ ${path} › ${tool}${mount.authDetected ? ' (auth detected)' : ''}`,
-        selected: !mount.authDetected && !looksLoginGated(tool),
-      });
-    }
-  }
-  if (findings.openApiFound) {
-    const path = served('/openapi.json');
-    choices.push({ value: path, label: `○ ${path} — OpenAPI doc`, selected: true });
-  }
-  return choices;
-}
-
 /** The built-in floor paths, for the human-readable gating summary. */
 const FLOOR_SUMMARY = '/api/auth/** & /api/webhooks/**';
 
 /**
- * Runs the gating question. The user declares what is **public** — the shorter, safer list, since
- * most real APIs sit behind a login — and everything left unselected is treated as gated: gated
- * whole surfaces land in `gatedPaths`, individually gated tools in `gatedTools`, and a mount whose
- * tools are all gated collapses to its path. Pressing Enter accepts the heuristic pre-selection
- * (everything public except what looks login-gated — see `publicSurfaceChoices`). The built-in
- * auth/webhook floor is always composed in; never advertising an auth wall as open is a safety
- * invariant, not a toggle. Prints a plain-language summary of the decision.
+ * Runs the gating question — per MCP *server*, because auth is declared at the server level in the
+ * MCP conventions (the card's `authentication` block). The tools render as leaves under each
+ * server so the decision is made looking at what it exposes, but they are not separately
+ * selectable. Selected means **public**: pressing Enter with everything selected says "none
+ * require logging in", and an unselected server is published as *requiring auth* (recorded in its
+ * server card), never advertised as open. A `withMcpAuth`-wrapped mount starts deselected — its
+ * own code already demands auth. The built-in auth/webhook floor always applies on top. Returns
+ * the pathnames of the gated mounts.
  */
 async function askGating(
   prompter: Prompter,
   findings: InitFindings,
   stdout: (line: string) => void,
-): Promise<GatingAnswer> {
-  const choices = publicSurfaceChoices(findings);
-  if (choices.length === 0) return { floorKept: true, gatedPaths: [], gatedTools: [] };
+): Promise<Set<string>> {
+  if (findings.mcpMounts.length === 0) return new Set();
+  const served = (pathname: string): string => servedPath(findings.basePath, pathname);
+
+  const choices: MultiSelectChoice[] = findings.mcpMounts.map((mount) => {
+    // Tool leaves are part of the label (indented past the prompter's "  1. [x] " prefix), so the
+    // user decides about the server while looking at exactly what it exposes.
+    const leaves = mount.capabilities
+      .map((tool, i) => `\n         ${i < mount.capabilities.length - 1 ? '├' : '└'} ⚙ ${tool}`)
+      .join('');
+    return {
+      value: mount.pathname,
+      label:
+        `ƒ ${served(mount.pathname)} — MCP server` +
+        `${mount.auth !== undefined ? ' (auth detected)' : ''}${leaves}`,
+      selected: mount.auth === undefined,
+    };
+  });
 
   const preDeselected = choices.filter((choice) => !choice.selected).length;
   const question =
-    "Which of these agent surfaces DON'T require logging in? Press Enter if none require " +
-    'logging in; otherwise select the tools that are publicly available — anything left ' +
-    'unselected is treated as login-gated and never advertised as open.' +
+    "Which of these MCP servers DON'T require logging in? Press Enter if none require logging " +
+    'in; otherwise select only the publicly available ones — an unselected server is published ' +
+    'as requiring auth, never advertised as open.' +
     (preDeselected > 0
-      ? ` (ax pre-deselected ${preDeselected} that look${preDeselected === 1 ? 's' : ''} ` +
-        'login-gated — adjust if that guess is wrong.)'
+      ? ` (ax pre-deselected ${preDeselected} whose code already demands auth.)`
       : '');
   const publicValues = new Set(await prompter.multiSelect(question, choices));
 
-  const gatedPaths: string[] = [];
-  const gatedTools: string[] = [];
-  const publicLabels: string[] = [];
-  const gatedLabels: string[] = [];
-  const served = (pathname: string): string => servedPath(findings.basePath, pathname);
-
-  for (const mount of findings.mcpMounts) {
-    const path = served(mount.pathname);
-    if (mount.tools.length === 0) {
-      if (publicValues.has(path)) publicLabels.push(path);
-      else {
-        gatedPaths.push(path);
-        gatedLabels.push(path);
-      }
-      continue;
-    }
-    const gatedNames = mount.tools.filter((tool) => !publicValues.has(`${path}#${tool}`));
-    if (gatedNames.length === mount.tools.length) {
-      // Nothing on the mount is public → gate the whole surface; a simpler config, same effect.
-      gatedPaths.push(path);
-      gatedLabels.push(`${path} (all tools)`);
-      continue;
-    }
-    for (const tool of mount.tools) {
-      if (gatedNames.includes(tool)) {
-        gatedTools.push(`${path}#${tool}`);
-        gatedLabels.push(`${path} › ${tool}`);
-      } else {
-        publicLabels.push(`${path} › ${tool}`);
-      }
-    }
-  }
-  if (findings.openApiFound) {
-    const path = served('/openapi.json');
-    if (publicValues.has(path)) publicLabels.push(path);
-    else {
-      gatedPaths.push(path);
-      gatedLabels.push(path);
-    }
-  }
-
+  const gated = new Set(
+    findings.mcpMounts.map((mount) => mount.pathname).filter((p) => !publicValues.has(p)),
+  );
+  const publicList = findings.mcpMounts
+    .filter((mount) => !gated.has(mount.pathname))
+    .map((mount) => served(mount.pathname));
+  const gatedList = [...gated].map(served);
   stdout(
-    `[ax]   Public (advertised to agents): ${publicLabels.length > 0 ? publicLabels.join(', ') : 'none'}`,
+    `[ax]   Public (advertised to agents): ${publicList.length > 0 ? publicList.join(', ') : 'none'}`,
   );
   stdout(
     `[ax]   Requires login (not advertised as open): ${
-      gatedLabels.length > 0
-        ? `${gatedLabels.join(', ')}, plus the built-in ${FLOOR_SUMMARY} floor`
+      gatedList.length > 0
+        ? `${gatedList.join(', ')}, plus the built-in ${FLOOR_SUMMARY} floor`
         : `the built-in ${FLOOR_SUMMARY} floor`
     }`,
   );
-  return { floorKept: true, gatedPaths, gatedTools };
+  return gated;
+}
+
+/**
+ * Writes the well-known MCP server card straight from the wizard — the actionable artifact `init`
+ * exists to produce for an app that already has an MCP server, and the *persistence* for the
+ * gating answer: the card's `authentication` block is what the next build reads back, so the
+ * decision is asked once, not on every build. Only a single mount can own the single well-known
+ * path; with several, `buildMcpServerCard` skips with its own recommendation and the build's
+ * review gate asks per run instead.
+ */
+function writeGatingCard(
+  cwd: string,
+  findings: InitFindings,
+  siteUrl: string,
+  gatedMounts: Set<string>,
+  stdout: (line: string) => void,
+): void {
+  if (findings.mcpMounts.length === 0) return;
+  const mounts = findings.mcpMounts.map((mount) =>
+    gatedMounts.has(mount.pathname) && mount.auth === undefined
+      ? { ...mount, auth: { status: 'unknown' as const } }
+      : mount,
+  );
+  const card = buildMcpServerCard({
+    mounts,
+    siteUrl,
+    basePath: findings.basePath,
+    site: readSiteMetadata(cwd),
+    recommend: (message) => stdout(`[ax] ${message}`),
+  });
+  if (card === undefined) return;
+  const { path } = writeServerCard(cwd, card);
+  stdout(
+    `[ax] ✓ wrote ${relative(cwd, path)} (MCP server card` +
+      `${card.authentication !== undefined ? ' — marked as requiring auth' : ''}). Commit it: ` +
+      'it records your gating decision, so builds never re-ask.',
+  );
 }
 
 /**
  * Asks the questions the source tree can't answer, each with a default. Returns undefined only when
- * a required answer (a valid siteUrl) couldn't be obtained after several tries.
+ * a required answer (a valid siteUrl) couldn't be obtained after several tries. The gating answer
+ * comes back separately from the config answers: it lands in the server card, never in ax.config.
  */
 async function collectInteractive(
   prompter: Prompter,
   findings: InitFindings,
   siteUrlDefault: SiteUrlDefault,
   stdout: (line: string) => void,
-): Promise<InitAnswers | undefined> {
+): Promise<{ answers: InitAnswers; gatedMounts: Set<string> } | undefined> {
   // Tell the user where the prefilled value came from, so "is this right?" is an informed check
   // rather than a mystery string. The value itself is prefilled as editable input by the prompter.
   if (siteUrlDefault.value !== undefined && siteUrlDefault.source !== undefined) {
@@ -523,7 +408,7 @@ async function collectInteractive(
   }
   if (siteUrl === undefined) return undefined;
 
-  const gating = await askGating(prompter, findings, stdout);
+  const gatedMounts = await askGating(prompter, findings, stdout);
 
   // Scaffolds default to yes in the wizard: config defaults are false because a *silent* write into
   // a source tree is invasive, but here the ask itself is the opt-in and the user is present to say
@@ -544,13 +429,8 @@ async function collectInteractive(
   const report = await prompter.confirm('Write .ora/report.json (the agent handoff report)?', true);
 
   return {
-    siteUrl,
-    scaffoldLlmsTxt,
-    scaffoldJsonLd,
-    scaffoldRobots,
-    scaffoldAgent404,
-    report,
-    gating,
+    answers: { siteUrl, scaffoldLlmsTxt, scaffoldJsonLd, scaffoldRobots, scaffoldAgent404, report },
+    gatedMounts,
   };
 }
 
@@ -723,8 +603,9 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
       stderr(`[ax] ${validated.reason}`);
       return 1;
     }
-    // Non-interactive applies every default: scaffolds and report on (yes-when-asked), and the
-    // gating floor kept with no extra surfaces (so `isGated` is omitted — the floor is the default).
+    // Non-interactive applies every default: scaffolds and report on (yes-when-asked). No gating
+    // question means no server card is written here — the first build detects the mounts, asks (or
+    // warns in CI) about any without a recorded decision, and writes the card that records it.
     const answers: InitAnswers = {
       siteUrl: validated.value,
       scaffoldLlmsTxt: true,
@@ -732,7 +613,6 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
       scaffoldRobots: true,
       scaffoldAgent404: true,
       report: true,
-      gating: { floorKept: true, gatedPaths: [], gatedTools: [] },
     };
     const fileName = writeConfigAndWire(cwd, answers, stdout);
     printNextSteps(fileName, answers, false, stdout);
@@ -748,18 +628,20 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
     close = () => created.close();
   }
   try {
-    const answers = await collectInteractive(
+    const collected = await collectInteractive(
       prompter,
       findings,
       detectSiteUrlDefault(args.siteUrl),
       stdout,
     );
-    if (answers === undefined) {
+    if (collected === undefined) {
       stderr('[ax] No valid site URL provided — aborting without writing anything.');
       return 1;
     }
+    const { answers, gatedMounts } = collected;
 
     const fileName = writeConfigAndWire(cwd, answers, stdout);
+    writeGatingCard(cwd, findings, answers.siteUrl, gatedMounts, stdout);
 
     // Offer the first build so the report shows up immediately. Default no — spawning a full
     // `next build` is heavy and should never happen without an explicit yes.

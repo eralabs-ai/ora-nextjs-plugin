@@ -98,14 +98,12 @@ export interface AxConfig {
    * (return `false` to re-include a path the built-in floor would gate). A gated artifact is never
    * advertised as an *open* surface — one ax can describe (a detected `withMcpAuth` /
    * `securitySchemes`) is emitted with a secret-free `auth` descriptor; one it can't describe is
-   * dropped rather than published. With no `isGated`, a built-in floor gates `/api/auth/**` and
-   * `/api/webhooks/**` (see {@link import('./gating.js').defaultIsGated}); supplying `isGated`
-   * replaces that floor wholesale, so call `defaultIsGated` from your own matcher to keep it.
-   *
-   * For MCP surfaces the matcher is also asked once per detected tool (`target.tool` set), so
-   * gating can be declared per tool: a gated tool is withheld from the advertised capabilities
-   * while the rest of the server stays open, and a server whose tools are *all* gated counts as
-   * gated outright.
+   * dropped rather than published — except an MCP server, whose gated status *is* its
+   * description: a gated mount is always published with `auth.status "unknown"` and a server card
+   * whose `authentication.required` is true, never dropped. With no `isGated`, a built-in floor
+   * gates `/api/auth/**` and `/api/webhooks/**` (see
+   * {@link import('./gating.js').defaultIsGated}); supplying `isGated` replaces that floor
+   * wholesale, so call `defaultIsGated` from your own matcher to keep it.
    *
    * A function, so it is validated at load time by a `typeof` check rather than the JSON Schema
    * (which has no function type) — see validate-config.ts.

@@ -245,8 +245,8 @@ describe('runInit package.json wiring edge cases', () => {
   });
 });
 
-describe('runInit gated-surface candidates respect basePath', () => {
-  it('offers and writes the basePath-prefixed served path, matching runtime target.path', async () => {
+describe('runInit gating respects basePath', () => {
+  it('shows the basePath-prefixed served path and writes the card with the prefixed serverUrl', async () => {
     writeBareApp(dir);
     writeFileSync(join(dir, 'next.config.mjs'), "export default { basePath: '/app' };\n", 'utf8');
     addMcpMount(dir);
@@ -255,7 +255,7 @@ describe('runInit gated-surface candidates respect basePath', () => {
     const prompter: Prompter = {
       text: async () => 'https://acme.com',
       confirm: async () => false,
-      // Select nothing as public → every surface is gated.
+      // Select nothing as public → the server is gated.
       multiSelect: async (_question, choices) => {
         offered.push(...choices);
         return [];
@@ -264,24 +264,25 @@ describe('runInit gated-surface candidates respect basePath', () => {
 
     expect(await runInit([], { ...io(), prompter })).toBe(0);
 
-    // The MCP tool candidate is offered under the basePath-prefixed served path, not the raw
-    // router path — one selectable choice per tool, keyed `path#tool`.
-    expect(offered.some((c) => c.value === '/app/mcp#roll_dice')).toBe(true);
-    expect(offered.some((c) => c.value === '/mcp#roll_dice')).toBe(false);
-    // With every tool gated the mount collapses to its prefixed path in the generated matcher.
-    expect(readFileSync(join(dir, 'ax.config.ts'), 'utf8')).toContain('"/app/mcp"');
+    // The label shows the served (basePath-prefixed) path — what an agent would actually fetch.
+    expect(offered.some((c) => c.label.includes('/app/mcp'))).toBe(true);
+    // The gated decision lands in the server card, with the prefixed serverUrl.
+    const card = JSON.parse(
+      readFileSync(join(dir, 'public', '.well-known', 'mcp', 'server-card.json'), 'utf8'),
+    );
+    expect(card.serverUrl).toBe('https://acme.com/app/mcp');
+    expect(card.authentication).toEqual({ required: true });
   });
 });
 
 describe('runInit interactive (scripted answers)', () => {
-  it('captures the answers: gated MCP mount, scaffolds off, into the generated config', async () => {
+  it('records a gated MCP server in the card, never in the config, with the tree shown first', async () => {
     writeBareApp(dir);
     addMcpMount(dir);
 
     const prompter = new ScriptedPrompter({
       text: ['https://acme.com'],
-      // Select nothing as public → the mount's only tool is gated, so the whole mount is gated.
-      // The built-in floor is always kept.
+      // Select nothing as public → the server is gated. The built-in floor always applies anyway.
       multiSelect: [[]],
       // scaffoldLlmsTxt, JsonLd, Robots, Agent404, report, run-build — all no.
       confirm: [false, false, false, false, false, false],
@@ -294,27 +295,30 @@ describe('runInit interactive (scripted answers)', () => {
     expect(source).toContain('siteUrl: "https://acme.com"');
     expect(source).toContain('scaffoldLlmsTxt: false,');
     expect(source).toContain('report: false,');
-    // Gating a surface always composes the built-in floor (floor is never dropped by the wizard).
-    expect(source).toContain(
-      'isGated: (target) => defaultIsGated(target) || ["/mcp"].includes(target.path),',
+    // The gating decision is persisted in the server card — the config carries no isGated.
+    expect(source).not.toContain('isGated');
+    const card = JSON.parse(
+      readFileSync(join(dir, 'public', '.well-known', 'mcp', 'server-card.json'), 'utf8'),
     );
+    expect(card.serverUrl).toBe('https://acme.com/mcp');
+    expect(card.authentication).toEqual({ required: true });
+    expect(card.tools).toEqual([{ name: 'roll_dice' }]);
     // The gating summary spells out the decision in plain language.
     expect(
       stdout.some(
         (l) => l.includes('Requires login (not advertised as open)') && l.includes('/mcp'),
       ),
     ).toBe(true);
-    // The findings summary ran before any question, laid out as a route tree with the MCP tool
-    // extracted as a sub-route.
+    // The findings summary ran before any question, laid out as a route tree with the MCP tools
+    // as leaves under their server.
     expect(stdout.some((l) => l.includes('Scanned your project'))).toBe(true);
     expect(stdout.some((l) => l.includes('ƒ /mcp') && l.includes('MCP server'))).toBe(true);
     expect(stdout.some((l) => l.includes('⚙ roll_dice'))).toBe(true);
     expect(stdout.some((l) => l.includes('○ /') && !l.includes('/mcp'))).toBe(true);
   });
 
-  it('writes path#tool gates when a mount is only partly public', async () => {
+  it('offers one choice per MCP server with its tools as leaves in the label', async () => {
     writeBareApp(dir);
-    // A mount with one public-looking and one login-looking tool.
     const routeDir = join(dir, 'app', 'api', 'mcp');
     mkdirSync(routeDir, { recursive: true });
     writeFileSync(
@@ -332,7 +336,7 @@ describe('runInit interactive (scripted answers)', () => {
     const prompter: Prompter = {
       text: async () => 'https://acme.com',
       confirm: async () => false,
-      // Accept the pre-selection: search_flights public, pay pre-deselected by the login heuristic.
+      // Accept the pre-selection (a plain mount starts public).
       multiSelect: async (_question, choices) => {
         offered.push(...choices);
         return choices.filter((choice) => choice.selected).map((choice) => choice.value);
@@ -341,25 +345,23 @@ describe('runInit interactive (scripted answers)', () => {
 
     expect(await runInit([], { ...io(), prompter })).toBe(0);
 
-    // The heuristic pre-selects the public-looking tool and deselects the login-looking one.
-    expect(offered.find((c) => c.value === '/api/mcp#search_flights')?.selected).toBe(true);
-    expect(offered.find((c) => c.value === '/api/mcp#pay')?.selected).toBe(false);
-
-    const source = readFileSync(join(dir, 'ax.config.ts'), 'utf8');
-    // Only the gated tool's path#tool key is written; the mount itself stays open.
-    expect(source).toContain('"/api/mcp#pay"');
-    expect(source).not.toContain('"/api/mcp",');
-    expect(source).toContain(
-      'target.tool === undefined ? target.path : `${target.path}#${target.tool}`',
+    // The server — not its tools — is the selectable unit; the tools render as label leaves.
+    expect(offered).toHaveLength(1);
+    expect(offered[0]?.value).toBe('/api/mcp');
+    expect(offered[0]?.selected).toBe(true);
+    expect(offered[0]?.label).toContain('⚙ search_flights');
+    expect(offered[0]?.label).toContain('⚙ pay');
+    // Accepted as public → the card records it with no authentication block.
+    const card = JSON.parse(
+      readFileSync(join(dir, 'public', '.well-known', 'mcp', 'server-card.json'), 'utf8'),
     );
+    expect(card.authentication).toBeUndefined();
     expect(
-      stdout.some(
-        (l) => l.includes('Public (advertised to agents)') && l.includes('search_flights'),
-      ),
+      stdout.some((l) => l.includes('Public (advertised to agents)') && l.includes('/api/mcp')),
     ).toBe(true);
   });
 
-  it('pre-deselects every tool of a withMcpAuth-wrapped mount (login detected)', async () => {
+  it('pre-deselects a withMcpAuth-wrapped mount (its code already demands auth)', async () => {
     writeBareApp(dir);
     const routeDir = join(dir, 'app', 'api', 'mcp');
     mkdirSync(routeDir, { recursive: true });
@@ -383,9 +385,11 @@ describe('runInit interactive (scripted answers)', () => {
     };
 
     expect(await runInit([], { ...io(), prompter })).toBe(0);
-    // Even a public-looking tool name starts deselected when the mount itself demands auth.
-    expect(offered.find((c) => c.value === '/api/mcp#search')?.selected).toBe(false);
-    expect(readFileSync(join(dir, 'ax.config.ts'), 'utf8')).toContain('"/api/mcp"');
+    expect(offered.find((c) => c.value === '/api/mcp')?.selected).toBe(false);
+    const card = JSON.parse(
+      readFileSync(join(dir, 'public', '.well-known', 'mcp', 'server-card.json'), 'utf8'),
+    );
+    expect(card.authentication).toEqual({ required: true });
   });
 
   it('prefills the site URL from an env var and names the source', async () => {

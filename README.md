@@ -220,11 +220,13 @@ const config: AxConfig = {
   // so it is never advertised as an open surface. Replaces the old denylist/allowlist pair — a
   // single matcher subsumes both: return `false` to re-include a path the floor would gate. A
   // gated artifact ax can describe (a detected withMcpAuth / OpenAPI securitySchemes) is emitted
-  // with a secret-free `auth` descriptor; one it can't describe is dropped, not published. With no
-  // isGated, a built-in floor gates `/api/auth/**` and `/api/webhooks/**`; supplying isGated
-  // replaces that floor wholesale, so compose `defaultIsGated` to keep it. For MCP servers the
-  // matcher is also asked once per tool (`target.tool` set), so a single tool can be gated while
-  // the rest of the server stays open:
+  // with a secret-free `auth` descriptor; one it can't describe is dropped, not published — except
+  // an MCP server, whose gated status *is* its description: it is always published with the auth
+  // marker, never dropped. Usually you don't need this field for MCP at all: the gating answer
+  // from `ax init` (or a build's review gate) is recorded in the committed server card, and only a
+  // server with no recorded decision is asked about. With no isGated, a built-in floor gates
+  // `/api/auth/**` and `/api/webhooks/**`; supplying isGated replaces that floor wholesale, so
+  // compose `defaultIsGated` to keep it:
   isGated: (target) => defaultIsGated(target) && target.path !== '/api/auth/status',
   // Hand-declared entries — e.g. docs/skills pointers zero-config detection can't guess at. An
   // `identifier` matching a detected entry overrides/extends it field-by-field (never replaces it

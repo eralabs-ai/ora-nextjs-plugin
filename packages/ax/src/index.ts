@@ -97,7 +97,6 @@ export {
   configFileName,
   CONFIG_BASENAME,
   type InitAnswers,
-  type GatingAnswer,
   type ConfigFileTarget,
 } from './init-config.js';
 

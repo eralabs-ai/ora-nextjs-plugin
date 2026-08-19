@@ -15,21 +15,12 @@ export interface ConfigFileTarget {
   moduleSystem: 'esm' | 'cjs';
 }
 
-/** The gating intent captured by the wizard's multi-select, ready to render into `isGated`. */
-export interface GatingAnswer {
-  /** Whether to keep the built-in `/api/auth/**` + `/api/webhooks/**` floor. */
-  floorKept: boolean;
-  /** Whole surfaces the user left non-public, as server-relative pathnames (MCP mounts, OpenAPI, …). */
-  gatedPaths: string[];
-  /**
-   * Individual MCP tools the user left non-public, as `path#tool` keys (e.g. `/api/mcp#pay`) — the
-   * same key the rendered matcher rebuilds from `target.path` and `target.tool`. Used when a mount
-   * is only partly public; a mount with *no* public tools collapses into `gatedPaths` instead.
-   */
-  gatedTools: string[];
-}
-
-/** Everything the wizard collected that shapes the config file. */
+/**
+ * Everything the wizard collected that shapes the config file. Deliberately *not* here: the MCP
+ * gating answer — that decision is recorded in the server card the wizard writes
+ * (`authentication.required`), which the next build reads back, so the config never needs an
+ * `isGated` for it (the built-in floor still applies with no `isGated` at all).
+ */
 export interface InitAnswers {
   siteUrl: string;
   scaffoldLlmsTxt: boolean;
@@ -37,7 +28,6 @@ export interface InitAnswers {
   scaffoldRobots: boolean;
   scaffoldAgent404: boolean;
   report: boolean;
-  gating: GatingAnswer;
 }
 
 /** The canonical config basename (matches config.ts's `CONFIG_BASENAME`). */
@@ -46,42 +36,6 @@ export const CONFIG_BASENAME = 'ax.config';
 /** The config filename to write for a given target, e.g. `ax.config.ts`. */
 export function configFileName(target: ConfigFileTarget): string {
   return `${CONFIG_BASENAME}.${target.language}`;
-}
-
-/**
- * Decides how `isGated` should render (or whether to omit it), given the gating answer:
- *   - floor kept + no extra paths → omit entirely; an absent `isGated` already means "the built-in
- *     floor applies", so writing one here would only restate the default.
- *   - floor kept + extra paths → compose `defaultIsGated` with the extra paths.
- *   - floor dropped + extra paths → gate only the extra paths.
- *   - floor dropped + no paths → an explicit "gate nothing", the one case that must be written to
- *     override the default floor.
- */
-function renderIsGated(gating: GatingAnswer): { needsDefaultImport: boolean; line?: string } {
-  const keys = [...gating.gatedPaths, ...gating.gatedTools];
-  const list = `[${keys.map((p) => JSON.stringify(p)).join(', ')}]`;
-  // With tool-level gates, the matcher rebuilds the `path#tool` key for per-tool checks and keeps
-  // matching the bare path for whole-surface ones; with none, the simpler path-only form suffices.
-  const lookup =
-    gating.gatedTools.length > 0
-      ? 'target.tool === undefined ? target.path : `${target.path}#${target.tool}`'
-      : 'target.path';
-  const membership = `${list}.includes(${lookup})`;
-
-  if (gating.floorKept && keys.length === 0) return { needsDefaultImport: false };
-  if (gating.floorKept) {
-    return {
-      needsDefaultImport: true,
-      line: `  isGated: (target) => defaultIsGated(target) || ${membership},`,
-    };
-  }
-  if (keys.length > 0) {
-    return {
-      needsDefaultImport: false,
-      line: `  isGated: (target) => ${membership},`,
-    };
-  }
-  return { needsDefaultImport: false, line: '  isGated: () => false,' };
 }
 
 /** A `key: value,` line preceded by its rationale comment, at two-space indent. */
@@ -95,8 +49,6 @@ function field(comment: string, key: string, value: string): string {
  * project grows.
  */
 export function renderAxConfig(answers: InitAnswers, target: ConfigFileTarget): string {
-  const isGated = renderIsGated(answers.gating);
-
   const fields = [
     field(
       'Your public production origin. Every detected artifact URL is resolved against it and it is ' +
@@ -136,39 +88,16 @@ export function renderAxConfig(answers: InitAnswers, target: ConfigFileTarget): 
     ),
   ];
 
-  if (isGated.line !== undefined) {
-    fields.push(
-      '  // Mark login-gated surfaces' +
-        (answers.gating.gatedTools.length > 0
-          ? ' and individual MCP tools ("path#tool" keys)'
-          : '') +
-        ' so ax never advertises them as an open surface. ' +
-        (answers.gating.floorKept
-          ? 'Composes the built-in /api/auth + /api/webhooks floor.'
-          : 'Replaces the built-in floor wholesale.') +
-        `\n${isGated.line}`,
-    );
-  }
-
   const body = fields.join('\n');
 
   if (target.language === 'ts') {
-    const imports = isGated.needsDefaultImport
-      ? "import { defaultIsGated, type AxConfig } from '@ora-ai/ax';"
-      : "import type { AxConfig } from '@ora-ai/ax';";
-    return `${imports}\n\nconst config: AxConfig = {\n${body}\n};\n\nexport default config;\n`;
+    return `import type { AxConfig } from '@ora-ai/ax';\n\nconst config: AxConfig = {\n${body}\n};\n\nexport default config;\n`;
   }
 
   // JavaScript: no type annotation, but keep the AxConfig JSDoc so editors still complete the shape.
   const jsdoc = "/** @type {import('@ora-ai/ax').AxConfig} */";
   if (target.moduleSystem === 'cjs') {
-    const importLine = isGated.needsDefaultImport
-      ? "const { defaultIsGated } = require('@ora-ai/ax');\n\n"
-      : '';
-    return `${importLine}${jsdoc}\nconst config = {\n${body}\n};\n\nmodule.exports = config;\n`;
+    return `${jsdoc}\nconst config = {\n${body}\n};\n\nmodule.exports = config;\n`;
   }
-  const importLine = isGated.needsDefaultImport
-    ? "import { defaultIsGated } from '@ora-ai/ax';\n\n"
-    : '';
-  return `${importLine}${jsdoc}\nconst config = {\n${body}\n};\n\nexport default config;\n`;
+  return `${jsdoc}\nconst config = {\n${body}\n};\n\nexport default config;\n`;
 }

@@ -19,7 +19,8 @@
     "target": "static"
   },
   "mcp": {
-    "mounts": []
+    "mounts": [],
+    "unreviewedMounts": []
   },
   "webmcp": {
     "toolNames": [
