@@ -134,7 +134,9 @@ function interactiveMultiSelect(
   const renderRegion = (): string[] => {
     let n = -1;
     const body = rows.map((row) => {
-      if (!isMultiSelectChoice(row)) return `      ${row.text}`.trimEnd();
+      // Display rows get exactly the choice prefix's width (` ❯ [x] ` = 7 chars) so tree
+      // connectors line up across selectable and inert rows.
+      if (!isMultiSelectChoice(row)) return `       ${row.text}`.trimEnd();
       n++;
       return `${n === focus ? ' ❯' : '  '} [${selected[n] ? 'x' : ' '}] ${row.label}`;
     });

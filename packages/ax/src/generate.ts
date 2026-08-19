@@ -484,7 +484,6 @@ export async function generateCatalog(
       mounts: mcpMounts.map((mount) => ({ pathname: mount.pathname, tools: mount.capabilities })),
       unreviewedMounts: unreviewedMcpMounts,
     },
-    webmcp: { toolNames: webMcp.toolNames, sites: webMcp.sites },
     agent404: {
       notFoundPresent: agent404.notFoundPresent,
       agentAware: agent404.agentAware,
@@ -517,7 +516,6 @@ export async function generateCatalog(
           'json-ld': jsonLd.found,
           'openapi.json': openApi.found,
           'mcp-server': mcpMounts.length > 0,
-          webmcp: webMcp.toolNames.length > 0,
         },
         oraCheckNotes({ llmsTxtScaffolded: llmsTxtResult.scaffoldedPath, jsonLd: jsonLd.scaffold }),
       ),

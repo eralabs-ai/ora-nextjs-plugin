@@ -431,9 +431,11 @@ function printAgentHandoff(
     return;
   }
   stdout(`[ax] Find your report at: ${reportPath}`);
+  stdout('[ax] Prompt for your coding agent (copy-paste):');
   stdout(
-    '[ax]   Tip: hand your coding agent the report and see if there are any artifacts you can ' +
-      'create to improve agent readiness.',
+    `[ax]   Read ${reportPath} and work through every check marked "actionable": create or ` +
+      'improve those artifacts to make this site more agent-ready (each check may carry a note ' +
+      'with the exact next step), then rebuild and confirm the report marks them addressed.',
   );
 }
 

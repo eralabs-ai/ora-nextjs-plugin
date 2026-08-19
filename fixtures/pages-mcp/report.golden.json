@@ -30,10 +30,6 @@
     "unreviewedMounts": [],
     "serverCardPath": "public/.well-known/mcp/server-card.json"
   },
-  "webmcp": {
-    "toolNames": [],
-    "sites": []
-  },
   "agent404": {
     "notFoundPresent": false,
     "agentAware": false
@@ -136,11 +132,6 @@
         "id": "mcp-server-card",
         "artifact": "mcp-server",
         "status": "addressed"
-      },
-      {
-        "id": "webmcp",
-        "artifact": "webmcp",
-        "status": "actionable"
       }
     ]
   },

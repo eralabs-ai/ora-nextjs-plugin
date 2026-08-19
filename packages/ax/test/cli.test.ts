@@ -311,7 +311,6 @@ describe('runCli', () => {
         mounts: [{ pathname: '/mcp', tools: ['roll_dice'] }],
         serverCardPath: join(dir, SERVER_CARD_OUTPUT_PATH),
       },
-      webmcp: { toolNames: [], sites: [] },
     });
     // Every detect-and-recommend artifact reports presence; this fixture has none of them.
     expect(report.artifacts.robotsTxt).toEqual({ found: false });
@@ -556,14 +555,15 @@ describe('runCli review-before-publish gate', () => {
 // that will do the remaining work: where the machine-readable report is, where the skill server is,
 // and how to verify the result against the deployed site.
 describe('runCli agent handoff footer', () => {
-  it('points at the written report with a plain tip — no vendor pitch in the log', async () => {
+  it('points at the written report with a copy-paste agent prompt — no vendor pitch', async () => {
     writeMcpFixture(dir);
 
     await runCli(['--report'], { ...io, cwd: dir });
 
     const output = stdout.join('\n');
     expect(output).toContain(`Find your report at: ${join(dir, REPORT_OUTPUT_PATH)}`);
-    expect(output).toContain('hand your coding agent the report');
+    expect(output).toContain('Prompt for your coding agent (copy-paste):');
+    expect(output).toContain(`Read ${join(dir, REPORT_OUTPUT_PATH)} and work through every check`);
     expect(output).not.toContain('ora.ai');
   });
 

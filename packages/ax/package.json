@@ -1,6 +1,6 @@
 {
   "name": "@ora-ai/ax",
-  "version": "0.0.0",
+  "version": "0.0.0-init-test.10",
   "description": "Agent Experience (AX) toolkit for Next.js: generate a spec-valid ai-catalog.json, detect WebMCP tools, scaffold agent-aware 404s, and report agent-readiness at build time.",
   "license": "MIT",
   "type": "module",

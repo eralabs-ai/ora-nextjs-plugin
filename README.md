@@ -48,8 +48,9 @@ One run — offline, deterministic, about a second — then:
 [ax] ⚠ Scaffolded a starter llms.txt at app/llms.txt/route.ts — ax filled in what it can derive…
 [ax] ✓ wrote .ora/report.json (machine-readable build report)
 [ax] Find your report at: .ora/report.json
-[ax]   Tip: hand your coding agent the report and see if there are any artifacts you can create
-[ax]   to improve agent readiness.
+[ax] Prompt for your coding agent (copy-paste):
+[ax]   Read .ora/report.json and work through every check marked "actionable": create or improve
+[ax]   those artifacts to make this site more agent-ready…
 ```
 
 No network calls and no AI at build time — every byte is derived from your source tree. Three
@@ -259,9 +260,9 @@ The CLI detects **in-page WebMCP tools** (the W3C Web Machine Learning CG draft 
 register tools a browser-resident agent can call) in both styles:
 
 - **Declarative** — `<form toolname="..." tooldescription="...">`. Markup survives into
-  server-rendered HTML, so these are also visible to HTML-reading scanners (including Ora's
-  `webmcp` check). Tools on statically-addressable App Router pages become `text/html` catalog
-  entries whose `capabilities` carry the tool names.
+  server-rendered HTML, so these are also visible to HTML-reading scanners. Tools on
+  statically-addressable App Router pages become `text/html` catalog entries whose `capabilities`
+  carry the tool names.
 - **Imperative** — `document.modelContext.registerTool()` / `provideContext()` in `'use client'`
   components, and the `useWebMCP()` hook (`@mcp-b/react-webmcp` / `usewebmcp`). These are
   runtime-only with no spec-defined manifest, so they are surfaced in the build summary and

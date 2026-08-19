@@ -22,21 +22,6 @@
     "mounts": [],
     "unreviewedMounts": []
   },
-  "webmcp": {
-    "toolNames": [
-      "subscribe_newsletter"
-    ],
-    "sites": [
-      {
-        "kind": "declarative",
-        "names": [
-          "subscribe_newsletter"
-        ],
-        "pagePathname": "/",
-        "source": "pages/index.tsx"
-      }
-    ]
-  },
   "agent404": {
     "notFoundPresent": false,
     "agentAware": false
@@ -132,11 +117,6 @@
         "id": "mcp-server-card",
         "artifact": "mcp-server",
         "status": "actionable"
-      },
-      {
-        "id": "webmcp",
-        "artifact": "webmcp",
-        "status": "addressed"
       }
     ]
   },

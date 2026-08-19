@@ -15,10 +15,6 @@
     "mounts": [],
     "unreviewedMounts": []
   },
-  "webmcp": {
-    "toolNames": [],
-    "sites": []
-  },
   "agent404": {
     "notFoundPresent": true,
     "agentAware": false,
@@ -114,11 +110,6 @@
       {
         "id": "mcp-server-card",
         "artifact": "mcp-server",
-        "status": "actionable"
-      },
-      {
-        "id": "webmcp",
-        "artifact": "webmcp",
         "status": "actionable"
       }
     ]

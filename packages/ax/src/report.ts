@@ -1,5 +1,4 @@
 import type { ArtifactSize } from './artifact-size.js';
-import type { WebMcpToolSite } from './detect-webmcp.js';
 import type { OraCheckStatus } from './ora-checks.js';
 import type { RouterKind } from './router-model.js';
 import type { JsonLdScaffoldResult } from './scaffold-json-ld.js';
@@ -73,11 +72,10 @@ export interface BuildReport {
      */
     unreviewedMounts: string[];
   };
-  webmcp: {
-    /** Distinct, browser-reachable in-page tool names. */
-    toolNames: string[];
-    sites: WebMcpToolSite[];
-  };
+  // No `webmcp` section for now: WebMCP is still a W3C draft, and pointing a coding agent at a
+  // non-official spec confuses more than it helps — until it is an official spec we don't
+  // recommend it, so the report doesn't surface it. Detection itself still runs (existing in-page
+  // tools become catalog entries and CLI notices); re-add the section here when the spec lands.
   /** Presence of the discovery/access artifacts the plugin detects-and-recommends. */
   artifacts: {
     robotsTxt: ReportArtifact;

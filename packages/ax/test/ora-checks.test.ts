@@ -18,7 +18,6 @@ function nothingPresent(): OraArtifactPresence {
     'json-ld': false,
     'openapi.json': false,
     'mcp-server': false,
-    webmcp: false,
   };
 }
 
@@ -46,7 +45,6 @@ describe('ORA_CHECK_MAP', () => {
       'json-ld',
       'openapi.json',
       'mcp-server',
-      'webmcp',
     ]);
   });
 });
