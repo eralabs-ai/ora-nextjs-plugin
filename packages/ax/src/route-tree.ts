@@ -61,26 +61,50 @@ function buildRouteTree(input: RouteTreeInput): RouteTreeNode[] {
 }
 
 /**
- * Renders the tree as display lines (no `[ax] ` prefix), with a legend for the markers used.
+ * One rendered tree line. An MCP server node line carries its mount's pathname, so a caller can
+ * turn exactly those lines into selectable choices (the gating question puts its checkbox *on* the
+ * server node, inside the tree) while every other line stays display-only.
+ */
+export interface RouteTreeLine {
+  text: string;
+  mountPathname?: string;
+}
+
+/**
+ * Renders the tree as tagged lines (no `[ax] ` prefix), with a legend for the markers used.
  * Returns an empty array when there are no routes at all.
  */
-export function renderRouteTree(input: RouteTreeInput): string[] {
+export function buildRouteTreeLines(input: RouteTreeInput): RouteTreeLine[] {
   const nodes = buildRouteTree(input);
   if (nodes.length === 0) return [];
+  const mountByServedPath = new Map(
+    input.mounts.map((mount) => [servedPath(input.basePath, mount.pathname), mount.pathname]),
+  );
   const width = Math.max(...nodes.map((node) => node.path.length));
-  const lines = [`Route (${input.routers.length > 0 ? input.routers.join(' + ') : 'none'})`];
+  const lines: RouteTreeLine[] = [
+    { text: `Route (${input.routers.length > 0 ? input.routers.join(' + ') : 'none'})` },
+  ];
   nodes.forEach((node, index) => {
     const connector = index === 0 && nodes.length > 1 ? '┌' : index < nodes.length - 1 ? '├' : '└';
     const padded = node.note !== undefined ? node.path.padEnd(width + 2) : node.path;
-    lines.push(`${connector} ${node.marker} ${padded}${node.note ?? ''}`.trimEnd());
+    const mountPathname = mountByServedPath.get(node.path);
+    lines.push({
+      text: `${connector} ${node.marker} ${padded}${node.note ?? ''}`.trimEnd(),
+      ...(mountPathname !== undefined ? { mountPathname } : {}),
+    });
     const stem = index < nodes.length - 1 ? '│' : ' ';
     node.children.forEach((tool, toolIndex) => {
       const toolConnector = toolIndex < node.children.length - 1 ? '├' : '└';
-      lines.push(`${stem}   ${toolConnector} ⚙ ${tool}`);
+      lines.push({ text: `${stem}   ${toolConnector} ⚙ ${tool}` });
     });
   });
   const legend = ['○ page', 'ƒ api route'];
   if (nodes.some((node) => node.children.length > 0)) legend.push('⚙ MCP tool');
-  lines.push('', legend.join('   '));
+  lines.push({ text: '' }, { text: legend.join('   ') });
   return lines;
+}
+
+/** The tree as plain display lines — for contexts with nothing to select. */
+export function renderRouteTree(input: RouteTreeInput): string[] {
+  return buildRouteTreeLines(input).map((line) => line.text);
 }

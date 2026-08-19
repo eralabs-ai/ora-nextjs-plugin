@@ -12,8 +12,8 @@ import {
   renderAxConfig,
 } from './init-config.js';
 import { planPostbuildWiring, POSTBUILD_COMMAND } from './init-package-json.js';
-import { createReadlinePrompter, type MultiSelectChoice, type Prompter } from './prompt.js';
-import { renderRouteTree } from './route-tree.js';
+import { createReadlinePrompter, type MultiSelectRow, type Prompter } from './prompt.js';
+import { buildRouteTreeLines, renderRouteTree, type RouteTreeInput } from './route-tree.js';
 import { buildRouterModel, type RouterKind } from './router-model.js';
 import { buildMcpServerCard } from './server-card.js';
 import { readSiteMetadata } from './site-metadata.js';
@@ -232,25 +232,39 @@ async function gatherFindings(cwd: string): Promise<InitFindings> {
   };
 }
 
-function printFindings(findings: InitFindings, stdout: (line: string) => void): void {
+/** The findings' `RouteTreeInput` — one derivation shared by the plain tree and the gating rows. */
+function findingsTreeInput(findings: InitFindings): RouteTreeInput {
+  return {
+    routers: findings.routers,
+    pageRoutes: findings.pageRoutes,
+    apiRoutePaths: findings.apiRoutePaths,
+    basePath: findings.basePath,
+    mounts: findings.mcpMounts.map((mount) => ({
+      pathname: mount.pathname,
+      tools: mount.capabilities,
+      authDetected: mount.auth !== undefined,
+    })),
+  };
+}
+
+function printFindings(
+  findings: InitFindings,
+  stdout: (line: string) => void,
+  options: { tree: boolean },
+): void {
   stdout("[ax] Scanned your project (no build needed) — here's what I found:");
   // The route tree exists to serve the MCP gating decision, so it renders only when there is an
-  // MCP server to decide about; without one, a one-line count carries the same information.
+  // MCP server to decide about; without one, a one-line count carries the same information. When
+  // the gating question is about to be asked, it renders the tree itself (checkbox on the server
+  // node), so printing it here too would just show the same tree twice.
   if (findings.mcpMounts.length > 0) {
-    stdout('[ax]');
-    const lines = renderRouteTree({
-      routers: findings.routers,
-      pageRoutes: findings.pageRoutes,
-      apiRoutePaths: findings.apiRoutePaths,
-      basePath: findings.basePath,
-      mounts: findings.mcpMounts.map((mount) => ({
-        pathname: mount.pathname,
-        tools: mount.capabilities,
-        authDetected: mount.auth !== undefined,
-      })),
-    });
-    for (const line of lines) stdout(`[ax] ${line}`.trimEnd());
-    stdout('[ax]');
+    if (options.tree) {
+      stdout('[ax]');
+      for (const line of renderRouteTree(findingsTreeInput(findings))) {
+        stdout(`[ax] ${line}`.trimEnd());
+      }
+      stdout('[ax]');
+    }
   } else {
     const pages = findings.pageRoutes.length;
     const apis = findings.apiRoutePaths.length;
@@ -280,13 +294,14 @@ const FLOOR_SUMMARY = '/api/auth/** & /api/webhooks/**';
 
 /**
  * Runs the gating question — per MCP *server*, because auth is declared at the server level in the
- * MCP conventions (the card's `authentication` block). The tools render as leaves under each
- * server so the decision is made looking at what it exposes, but they are not separately
- * selectable. Selected means **public**: pressing Enter with everything selected says "none
- * require logging in", and an unselected server is published as *requiring auth* (recorded in its
- * server card), never advertised as open. A `withMcpAuth`-wrapped mount starts deselected — its
- * own code already demands auth. The built-in auth/webhook floor always applies on top. Returns
- * the pathnames of the gated mounts.
+ * MCP conventions (the card's `authentication` block). The prompt *is* the route tree: the
+ * checkbox sits on each MCP server node, and every other route and tool leaf renders as
+ * display-only context, so the decision is made looking at the app's whole surface in one layout.
+ * Selected means **public**: pressing Enter with everything selected says "none require logging
+ * in", and an unselected server is published as *requiring auth* (recorded in its server card),
+ * never advertised as open. A `withMcpAuth`-wrapped mount starts deselected — its own code already
+ * demands auth. The built-in auth/webhook floor always applies on top. Returns the pathnames of
+ * the gated mounts.
  */
 async function askGating(
   prompter: Prompter,
@@ -296,22 +311,20 @@ async function askGating(
   if (findings.mcpMounts.length === 0) return new Set();
   const served = (pathname: string): string => servedPath(findings.basePath, pathname);
 
-  const choices: MultiSelectChoice[] = findings.mcpMounts.map((mount) => {
-    // Tool leaves are part of the label (indented past the prompter's "  1. [x] " prefix), so the
-    // user decides about the server while looking at exactly what it exposes.
-    const leaves = mount.capabilities
-      .map((tool, i) => `\n         ${i < mount.capabilities.length - 1 ? '├' : '└'} ⚙ ${tool}`)
-      .join('');
-    return {
-      value: mount.pathname,
-      label:
-        `ƒ ${served(mount.pathname)} — MCP server` +
-        `${mount.auth !== undefined ? ' (auth detected)' : ''}${leaves}`,
-      selected: mount.auth === undefined,
-    };
-  });
+  const authDetected = new Map(
+    findings.mcpMounts.map((mount) => [mount.pathname, mount.auth !== undefined]),
+  );
+  const rows: MultiSelectRow[] = buildRouteTreeLines(findingsTreeInput(findings)).map((line) =>
+    line.mountPathname !== undefined
+      ? {
+          value: line.mountPathname,
+          label: line.text,
+          selected: authDetected.get(line.mountPathname) !== true,
+        }
+      : { text: line.text },
+  );
 
-  const preDeselected = choices.filter((choice) => !choice.selected).length;
+  const preDeselected = findings.mcpMounts.filter((mount) => mount.auth !== undefined).length;
   const question =
     "Which of these MCP servers DON'T require logging in? Press Enter if none require logging " +
     'in; otherwise select only the publicly available ones — an unselected server is published ' +
@@ -319,7 +332,7 @@ async function askGating(
     (preDeselected > 0
       ? ` (ax pre-deselected ${preDeselected} whose code already demands auth.)`
       : '');
-  const publicValues = new Set(await prompter.multiSelect(question, choices));
+  const publicValues = new Set(await prompter.multiSelect(question, rows));
 
   const gated = new Set(
     findings.mcpMounts.map((mount) => mount.pathname).filter((p) => !publicValues.has(p)),
@@ -389,6 +402,10 @@ async function collectInteractive(
   siteUrlDefault: SiteUrlDefault,
   stdout: (line: string) => void,
 ): Promise<{ answers: InitAnswers; gatedMounts: Set<string> } | undefined> {
+  // Gating first: its prompt renders the route tree, so it reads as the continuation of the
+  // findings summary the user just saw — decide about the surface while looking at it.
+  const gatedMounts = await askGating(prompter, findings, stdout);
+
   // Tell the user where the prefilled value came from, so "is this right?" is an informed check
   // rather than a mystery string. The value itself is prefilled as editable input by the prompter.
   if (siteUrlDefault.value !== undefined && siteUrlDefault.source !== undefined) {
@@ -407,8 +424,6 @@ async function collectInteractive(
     else stdout(`[ax] ${result.reason}`);
   }
   if (siteUrl === undefined) return undefined;
-
-  const gatedMounts = await askGating(prompter, findings, stdout);
 
   // Scaffolds default to yes in the wizard: config defaults are false because a *silent* write into
   // a source tree is invasive, but here the ask itself is the opt-in and the user is present to say
@@ -573,11 +588,14 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
   }
 
   const findings = await gatherFindings(cwd);
-  printFindings(findings, stdout);
 
   const interactive =
     io.prompter !== undefined ||
     (process.stdin.isTTY === true && process.stdout.isTTY === true && !process.env.CI);
+
+  // On an interactive run the gating question renders the route tree itself (checkbox on the MCP
+  // server node), so the findings summary skips it rather than showing the same tree twice.
+  printFindings(findings, stdout, { tree: args.yes || !interactive });
 
   if (!args.yes && !interactive) {
     stderr(

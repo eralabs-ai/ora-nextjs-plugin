@@ -7,7 +7,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runCli } from '../src/cli.js';
 import { loadAxConfig } from '../src/config.js';
 import { runInit, validateSiteUrl } from '../src/init.js';
-import type { MultiSelectChoice, Prompter } from '../src/prompt.js';
+import {
+  isMultiSelectChoice,
+  type MultiSelectChoice,
+  type MultiSelectRow,
+  type Prompter,
+} from '../src/prompt.js';
 import { CATALOG_OUTPUT_PATH } from '../src/write.js';
 
 /** A prompter driven by scripted answers, so the wizard runs with no TTY. */
@@ -28,10 +33,13 @@ class ScriptedPrompter implements Prompter {
   async confirm(_question: string, defaultValue: boolean): Promise<boolean> {
     return this.scripted.confirm?.[this.ci++] ?? defaultValue;
   }
-  async multiSelect(_question: string, choices: MultiSelectChoice[]): Promise<string[]> {
+  async multiSelect(_question: string, rows: MultiSelectRow[]): Promise<string[]> {
     return (
       this.scripted.multiSelect?.[this.mi++] ??
-      choices.filter((choice) => choice.selected).map((choice) => choice.value)
+      rows
+        .filter(isMultiSelectChoice)
+        .filter((choice) => choice.selected)
+        .map((choice) => choice.value)
     );
   }
 }
@@ -256,8 +264,8 @@ describe('runInit gating respects basePath', () => {
       text: async () => 'https://acme.com',
       confirm: async () => false,
       // Select nothing as public → the server is gated.
-      multiSelect: async (_question, choices) => {
-        offered.push(...choices);
+      multiSelect: async (_question, rows) => {
+        offered.push(...rows.filter(isMultiSelectChoice));
         return [];
       },
     };
@@ -309,12 +317,11 @@ describe('runInit interactive (scripted answers)', () => {
         (l) => l.includes('Requires login (not advertised as open)') && l.includes('/mcp'),
       ),
     ).toBe(true);
-    // The findings summary ran before any question, laid out as a route tree with the MCP tools
-    // as leaves under their server.
+    // The findings summary ran before any question. Interactively the route tree is not printed
+    // here — it renders *as* the gating prompt (checkbox on the server node), so it would appear
+    // twice otherwise. (The rows are asserted in the tree-prompt test below.)
     expect(stdout.some((l) => l.includes('Scanned your project'))).toBe(true);
-    expect(stdout.some((l) => l.includes('ƒ /mcp') && l.includes('MCP server'))).toBe(true);
-    expect(stdout.some((l) => l.includes('⚙ roll_dice'))).toBe(true);
-    expect(stdout.some((l) => l.includes('○ /') && !l.includes('/mcp'))).toBe(true);
+    expect(stdout.some((l) => l.includes('Route ('))).toBe(false);
   });
 
   it('offers one choice per MCP server with its tools as leaves in the label', async () => {
@@ -332,25 +339,33 @@ describe('runInit interactive (scripted answers)', () => {
       'utf8',
     );
 
-    const offered: MultiSelectChoice[] = [];
+    const offeredRows: MultiSelectRow[] = [];
     const prompter: Prompter = {
       text: async () => 'https://acme.com',
       confirm: async () => false,
       // Accept the pre-selection (a plain mount starts public).
-      multiSelect: async (_question, choices) => {
-        offered.push(...choices);
-        return choices.filter((choice) => choice.selected).map((choice) => choice.value);
+      multiSelect: async (_question, rows) => {
+        offeredRows.push(...rows);
+        return rows
+          .filter(isMultiSelectChoice)
+          .filter((choice) => choice.selected)
+          .map((choice) => choice.value);
       },
     };
 
     expect(await runInit([], { ...io(), prompter })).toBe(0);
 
-    // The server — not its tools — is the selectable unit; the tools render as label leaves.
+    // The prompt is the route tree: the server node is the one selectable row, its tools (and the
+    // other routes) render as display-only rows around it.
+    const offered = offeredRows.filter(isMultiSelectChoice);
     expect(offered).toHaveLength(1);
     expect(offered[0]?.value).toBe('/api/mcp');
     expect(offered[0]?.selected).toBe(true);
-    expect(offered[0]?.label).toContain('⚙ search_flights');
-    expect(offered[0]?.label).toContain('⚙ pay');
+    expect(offered[0]?.label).toContain('ƒ /api/mcp');
+    const displayTexts = offeredRows.flatMap((row) => ('text' in row ? [row.text] : []));
+    expect(displayTexts.some((t) => t.includes('⚙ search_flights'))).toBe(true);
+    expect(displayTexts.some((t) => t.includes('⚙ pay'))).toBe(true);
+    expect(displayTexts.some((t) => t.includes('○ /'))).toBe(true);
     // Accepted as public → the card records it with no authentication block.
     const card = JSON.parse(
       readFileSync(join(dir, 'public', '.well-known', 'mcp', 'server-card.json'), 'utf8'),
@@ -378,7 +393,8 @@ describe('runInit interactive (scripted answers)', () => {
     const prompter: Prompter = {
       text: async () => 'https://acme.com',
       confirm: async () => false,
-      multiSelect: async (_question, choices) => {
+      multiSelect: async (_question, rows) => {
+        const choices = rows.filter(isMultiSelectChoice);
         offered.push(...choices);
         return choices.filter((choice) => choice.selected).map((choice) => choice.value);
       },
