@@ -13,7 +13,6 @@ import { AxConfigError, findExistingConfig } from './config.js';
 import { entryUrlPath } from './entries.js';
 import { generateCatalog, type GenerateCatalogResult } from './generate.js';
 import { runInit } from './init.js';
-import { ORA_SCAN_API, ORA_SKILL_MCP_URL } from './ora-checks.js';
 import type { BuildReport } from './report.js';
 import { renderRouteTree } from './route-tree.js';
 import { buildRouterModel } from './router-model.js';
@@ -22,7 +21,6 @@ import type { AiCatalog } from './types.js';
 import {
   CATALOG_OUTPUT_PATH,
   jsonText,
-  REPORT_OUTPUT_PATH,
   writeCatalog,
   writeReport,
   writeServerCard,
@@ -297,16 +295,20 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     }
   }
 
-  if (recommendations.length > 0) {
-    stdout('[ax] Recommendations to improve agent-readiness:');
-    for (const recommendation of recommendations) stdout(`[ax]   → ${recommendation}`);
-  }
-
   // Machine-readable report: CLI flag wins over ax.config's `report`; both default to off. The
   // written catalog/server-card paths are patched in first, so the report also records where
   // everything landed.
   const reportTarget =
     args.report ?? (generated.reportTarget === false ? undefined : generated.reportTarget);
+
+  // Recommendations print to the terminal only when no report is being written — a report run
+  // carries every recommendation in the file the handoff line points at, so repeating the whole
+  // list in the log would just be noise.
+  if (recommendations.length > 0 && reportTarget === undefined) {
+    stdout('[ax] Recommendations to improve agent-readiness:');
+    for (const recommendation of recommendations) stdout(`[ax]   → ${recommendation}`);
+  }
+
   let reportPath: string | undefined;
   if (reportTarget !== undefined) {
     generated.report.catalog.path = result.path;
@@ -355,7 +357,9 @@ async function reviewUnreviewedMounts(
   const lines = renderRouteTree({
     routers: generated.report.routers,
     pageRoutes: router.listPageRoutes(),
-    apiRoutePaths,
+    // Plain API routes are agent-usable only when an OpenAPI doc describes them; without one they
+    // would just be noise in the tree.
+    apiRoutePaths: generated.report.artifacts.openapi.found ? apiRoutePaths : [],
     basePath: generated.report.basePath,
     mounts: generated.report.mcp.mounts.map((mount) => ({
       pathname: mount.pathname,
@@ -402,11 +406,10 @@ function markMountGated(generated: GenerateCatalogResult, path: string): void {
 }
 
 /**
- * The handoff footer. Everything above it is a person reading a build log; this is the pointer for
- * the coding agent that picks up the remaining work — the report that maps each recommendation to
- * an Ora check, the skill server that explains how to close them, and the scan that verifies the
- * result against the deployed site. Printed only when something is still actionable: a build with
- * nothing left to do doesn't need a to-do list.
+ * The handoff footer: where the report landed and what to do with it. Deliberately two plain
+ * lines — the report itself carries the full recommendation detail, so the log only points at it.
+ * Printed only when something is still actionable: a build with nothing left to do doesn't need a
+ * to-do list.
  */
 function printAgentHandoff(
   report: BuildReport,
@@ -415,17 +418,17 @@ function printAgentHandoff(
 ): void {
   if (!report.ora.checks.some((check) => check.status === 'actionable')) return;
 
-  const location =
-    reportPath ?? `${REPORT_OUTPUT_PATH} (not written this run — re-run with --report)`;
-  const domain = report.siteUrl ?? 'https://<your-domain>';
-
+  if (reportPath === undefined) {
+    stdout(
+      '[ax] Tip: re-run with --report to write a machine-readable report your coding agent can work from.',
+    );
+    return;
+  }
+  stdout(`[ax] Find your report at: ${reportPath}`);
   stdout(
-    `[ax] Agent handoff: ${location} maps every recommendation to Ora's agent-readiness checks.`,
+    '[ax]   Tip: hand your coding agent the report and see if there are any artifacts you can ' +
+      'create to improve agent readiness.',
   );
-  stdout(
-    `[ax]   Point your coding agent at it and connect Ora's skill server (MCP): ${ORA_SKILL_MCP_URL}`,
-  );
-  stdout(`[ax]   Then scan your deployed site: ${ORA_SCAN_API.scan} {"url": "${domain}"}`);
 }
 
 interface MeasureArtifactsInput {

@@ -237,7 +237,9 @@ function findingsTreeInput(findings: InitFindings): RouteTreeInput {
   return {
     routers: findings.routers,
     pageRoutes: findings.pageRoutes,
-    apiRoutePaths: findings.apiRoutePaths,
+    // Plain API routes are agent-usable only when an OpenAPI doc describes them — without one,
+    // an agent can't call them, so listing them in the tree would just be noise.
+    apiRoutePaths: findings.openApiFound ? findings.apiRoutePaths : [],
     basePath: findings.basePath,
     mounts: findings.mcpMounts.map((mount) => ({
       pathname: mount.pathname,
@@ -289,9 +291,6 @@ function printFindings(
   );
 }
 
-/** The built-in floor paths, for the human-readable gating summary. */
-const FLOOR_SUMMARY = '/api/auth/** & /api/webhooks/**';
-
 /**
  * Runs the gating question — per MCP *server*, because auth is declared at the server level in the
  * MCP conventions (the card's `authentication` block). The prompt *is* the route tree: the
@@ -326,9 +325,8 @@ async function askGating(
 
   const preDeselected = findings.mcpMounts.filter((mount) => mount.auth !== undefined).length;
   const question =
-    "Which of these MCP servers DON'T require logging in? Press Enter if none require logging " +
-    'in; otherwise select only the publicly available ones — an unselected server is published ' +
-    'as requiring auth, never advertised as open.' +
+    "Select only the PUBLIC MCP servers (those that don't require being logged in) — press " +
+    "Enter if they're all public:" +
     (preDeselected > 0
       ? ` (ax pre-deselected ${preDeselected} whose code already demands auth.)`
       : '');
@@ -344,13 +342,9 @@ async function askGating(
   stdout(
     `[ax]   Public (advertised to agents): ${publicList.length > 0 ? publicList.join(', ') : 'none'}`,
   );
-  stdout(
-    `[ax]   Requires login (not advertised as open): ${
-      gatedList.length > 0
-        ? `${gatedList.join(', ')}, plus the built-in ${FLOOR_SUMMARY} floor`
-        : `the built-in ${FLOOR_SUMMARY} floor`
-    }`,
-  );
+  if (gatedList.length > 0) {
+    stdout(`[ax]   Requires login (not advertised as open): ${gatedList.join(', ')}`);
+  }
   return gated;
 }
 
@@ -406,19 +400,15 @@ async function collectInteractive(
   // findings summary the user just saw — decide about the surface while looking at it.
   const gatedMounts = await askGating(prompter, findings, stdout);
 
-  // Tell the user where the prefilled value came from, so "is this right?" is an informed check
-  // rather than a mystery string. The value itself is prefilled as editable input by the prompter.
-  if (siteUrlDefault.value !== undefined && siteUrlDefault.source !== undefined) {
-    stdout(
-      `[ax] Prefilled your site URL from ${siteUrlDefault.source} — press Enter to keep it, or edit.`,
-    );
-  }
+  // One line: the question names the prefill source inline, so "is this right?" is an informed
+  // check rather than a mystery string. The value itself is prefilled as editable input.
+  const siteUrlQuestion =
+    siteUrlDefault.value !== undefined && siteUrlDefault.source !== undefined
+      ? `Your public production site URL (prefilled from ${siteUrlDefault.source} — press Enter to approve, or edit)`
+      : 'Your public production site URL (e.g. https://yourdomain.com)';
   let siteUrl: string | undefined;
   for (let attempt = 0; attempt < 5 && siteUrl === undefined; attempt++) {
-    const raw = await prompter.text(
-      'Your public production origin — the exact URL agents fetch (written verbatim into your catalog)',
-      siteUrlDefault.value,
-    );
+    const raw = await prompter.text(siteUrlQuestion, siteUrlDefault.value);
     const result = validateSiteUrl(raw);
     if (result.ok) siteUrl = result.value;
     else stdout(`[ax] ${result.reason}`);

@@ -46,12 +46,10 @@ One run — offline, deterministic, about a second — then:
 ```
 [ax] ✓ wrote public/.well-known/ai-catalog.json
 [ax] ⚠ Scaffolded a starter llms.txt at app/llms.txt/route.ts — ax filled in what it can derive…
-[ax] Recommendations to improve agent-readiness:
-[ax]   → No OpenAPI doc found (public/openapi.json) — this is the highest-value artifact for…
 [ax] ✓ wrote .ora/report.json (machine-readable build report)
-[ax] Agent handoff: .ora/report.json maps every recommendation to Ora's agent-readiness checks.
-[ax]   Point your coding agent at it and connect Ora's skill server (MCP): https://ora.ai/skill/mcp
-[ax]   Then scan your deployed site: POST https://ora.ai/api/scan {"url": "https://yourdomain.com"}
+[ax] Find your report at: .ora/report.json
+[ax]   Tip: hand your coding agent the report and see if there are any artifacts you can create
+[ax]   to improve agent readiness.
 ```
 
 No network calls and no AI at build time — every byte is derived from your source tree. Three

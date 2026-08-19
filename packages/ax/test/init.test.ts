@@ -408,20 +408,29 @@ describe('runInit interactive (scripted answers)', () => {
     expect(card.authentication).toEqual({ required: true });
   });
 
-  it('prefills the site URL from an env var and names the source', async () => {
+  it('prefills the site URL from an env var, naming the source in the one-line question', async () => {
     writeBareApp(dir);
     const previous = process.env.NEXT_PUBLIC_SITE_URL;
     process.env.NEXT_PUBLIC_SITE_URL = 'https://envsite.com';
     try {
-      // Empty text script → ScriptedPrompter.text returns the prefilled default (the env value).
-      const prompter = new ScriptedPrompter({
-        text: [],
-        confirm: [false, false, false, false, false, false],
-      });
+      const questions: string[] = [];
+      const prompter: Prompter = {
+        // Accept the prefilled default, capturing the question text.
+        text: async (question, defaultValue) => {
+          questions.push(question);
+          return defaultValue ?? '';
+        },
+        confirm: async () => false,
+        multiSelect: async () => [],
+      };
       const code = await runInit([], { ...io(), prompter });
       expect(code).toBe(0);
       expect(
-        stdout.some((l) => l.includes('Prefilled') && l.includes('NEXT_PUBLIC_SITE_URL')),
+        questions.some(
+          (q) =>
+            q.includes('prefilled from NEXT_PUBLIC_SITE_URL') &&
+            q.includes('press Enter to approve'),
+        ),
       ).toBe(true);
       expect(readFileSync(join(dir, 'ax.config.ts'), 'utf8')).toContain(
         'siteUrl: "https://envsite.com"',

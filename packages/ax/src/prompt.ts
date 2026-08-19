@@ -67,12 +67,19 @@ export async function createReadlinePrompter(): Promise<Prompter & { close(): vo
     },
 
     async multiSelect(question, rows) {
-      // Numbered choices with pre-selected items marked; the user types the numbers to *toggle*.
-      // Numbers rather than a curses-style checkbox UI so this stays dependency-free and its output
-      // is legible in a plain build log. Display rows render in place, indented to the same column
-      // as the choice labels, so a selection embedded in a layout (the route tree) stays aligned.
       const choices = rows.filter(isMultiSelectChoice);
+      if (choices.length === 0) return [];
       const selected = choices.map((choice) => choice.selected);
+
+      // A genuinely selectable list: raw-mode keypresses move a cursor between the choice rows
+      // (display rows are skipped — they're layout, like the rest of the route tree), space
+      // toggles, Enter accepts. Still dependency-free: readline keypress events + ANSI redraws.
+      if (process.stdin.isTTY === true && process.stdout.isTTY === true) {
+        return interactiveMultiSelect(rl, question, rows, choices, selected);
+      }
+
+      // No raw-mode TTY (dumb terminal): fall back to a numbered toggle list, which needs nothing
+      // beyond plain line input.
       let n = 0;
       const rendered = rows
         .map((row) => {
@@ -98,4 +105,91 @@ export async function createReadlinePrompter(): Promise<Prompter & { close(): vo
       rl.close();
     },
   };
+}
+
+/**
+ * The raw-mode selector behind {@link Prompter.multiSelect}: a cursor (`❯`) sits on a choice row,
+ * ↑/↓ (or j/k, tab) move it between the choice rows only — display rows are inert layout — space
+ * toggles, Enter accepts. The question is printed once above the redraw region (a long question
+ * may wrap, which would break the cursor-up arithmetic); only the rows + key hint are redrawn.
+ * Ctrl-C exits the process like any aborted prompt.
+ *
+ * Keys are parsed off a raw `data` listener rather than readline keypress events: the shared
+ * readline interface is paused for the duration (so it can't consume the bytes into its line
+ * buffer), and an explicitly-paused stream emits nothing and holds no event-loop ref — the
+ * `input.resume()` here is what keeps the process alive and the keys flowing. Raw mode and the
+ * interface are always restored on the way out, so the following `rl.question` works untouched.
+ */
+function interactiveMultiSelect(
+  rl: { pause(): void; resume(): void },
+  question: string,
+  rows: MultiSelectRow[],
+  choices: MultiSelectChoice[],
+  selected: boolean[],
+): Promise<string[]> {
+  const input = process.stdin;
+  const output = process.stdout;
+
+  let focus = 0;
+  const renderRegion = (): string[] => {
+    let n = -1;
+    const body = rows.map((row) => {
+      if (!isMultiSelectChoice(row)) return `      ${row.text}`.trimEnd();
+      n++;
+      return `${n === focus ? ' ❯' : '  '} [${selected[n] ? 'x' : ' '}] ${row.label}`;
+    });
+    return [...body, '', '↑/↓ move · space toggle · enter accept'];
+  };
+
+  output.write(`${question}\n`);
+  let regionHeight = 0;
+  const draw = (): void => {
+    const lines = renderRegion();
+    if (regionHeight > 0) output.write(`\x1b[${regionHeight}A`);
+    for (const line of lines) output.write(`\x1b[2K${line}\n`);
+    regionHeight = lines.length;
+  };
+
+  rl.pause();
+  const wasRaw = input.isRaw === true;
+  input.setRawMode(true);
+  input.resume();
+  output.write('\x1b[?25l');
+  draw();
+
+  return new Promise((resolve) => {
+    const finish = (): void => {
+      input.removeListener('data', onData);
+      input.setRawMode(wasRaw);
+      output.write('\x1b[?25h');
+      rl.resume();
+      resolve(choices.filter((_, i) => selected[i]).map((choice) => choice.value));
+    };
+    const onData = (chunk: Buffer): void => {
+      const keys = chunk.toString('utf8');
+      for (let i = 0; i < keys.length; i++) {
+        if (keys[i] === '\x03') {
+          // Ctrl-C: restore the terminal, then exit like any aborted prompt.
+          input.setRawMode(wasRaw);
+          output.write('\x1b[?25h\n');
+          process.exit(130);
+        }
+        if (keys.startsWith('\x1b[A', i) || keys[i] === 'k') {
+          focus = (focus - 1 + choices.length) % choices.length;
+          draw();
+        } else if (keys.startsWith('\x1b[B', i) || keys[i] === 'j' || keys[i] === '\t') {
+          focus = (focus + 1) % choices.length;
+          draw();
+        } else if (keys[i] === ' ') {
+          selected[focus] = !(selected[focus] ?? false);
+          draw();
+        } else if (keys[i] === '\r' || keys[i] === '\n') {
+          finish();
+          return;
+        }
+        if (keys[i] === '\x1b') i += 2; // skip the rest of a parsed escape sequence
+      }
+    };
+    input.on('data', onData);
+  });
 }

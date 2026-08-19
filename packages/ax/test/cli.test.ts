@@ -555,15 +555,29 @@ describe('runCli review-before-publish gate', () => {
 // that will do the remaining work: where the machine-readable report is, where the skill server is,
 // and how to verify the result against the deployed site.
 describe('runCli agent handoff footer', () => {
-  it('points at the written report, the skill server, and the scan endpoint', async () => {
+  it('points at the written report with a plain tip — no vendor pitch in the log', async () => {
     writeMcpFixture(dir);
 
     await runCli(['--report'], { ...io, cwd: dir });
 
     const output = stdout.join('\n');
-    expect(output).toContain(`Agent handoff: ${join(dir, REPORT_OUTPUT_PATH)}`);
-    expect(output).toContain("Ora's skill server (MCP): https://ora.ai/skill/mcp");
-    expect(output).toContain('POST https://ora.ai/api/scan {"url": "https://example.com"}');
+    expect(output).toContain(`Find your report at: ${join(dir, REPORT_OUTPUT_PATH)}`);
+    expect(output).toContain('hand your coding agent the report');
+    expect(output).not.toContain('ora.ai');
+  });
+
+  it('suppresses the terminal recommendation list when the report carries it', async () => {
+    writeMcpFixture(dir);
+
+    await runCli(['--report'], { ...io, cwd: dir });
+    const withReport = stdout.join('\n');
+    expect(withReport).not.toContain('Recommendations to improve agent-readiness:');
+
+    // Without a report, the recommendations still print — they'd otherwise be lost entirely.
+    stdout.length = 0;
+    rmSync(join(dir, CATALOG_OUTPUT_PATH), { force: true });
+    await runCli([], { ...io, cwd: dir });
+    expect(stdout.join('\n')).toContain('Recommendations to improve agent-readiness:');
   });
 
   it('says how to get the report when this run did not write one', async () => {
@@ -571,17 +585,7 @@ describe('runCli agent handoff footer', () => {
 
     await runCli([], { ...io, cwd: dir });
 
-    const output = stdout.join('\n');
-    expect(output).toContain('Agent handoff:');
-    expect(output).toContain('re-run with --report');
-  });
-
-  it('falls back to a placeholder domain when no site URL resolved', async () => {
-    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
-
-    await runCli([], { ...io, cwd: dir });
-
-    expect(stdout.join('\n')).toContain('{"url": "https://<your-domain>"}');
+    expect(stdout.join('\n')).toContain('re-run with --report');
   });
 
   it('prints nothing for a site that already has every artifact ax knows about', async () => {
@@ -595,7 +599,7 @@ describe('runCli agent handoff footer', () => {
       [],
     );
     // Nothing left to hand off — a build with no remaining work doesn't get a to-do list.
-    expect(stdout.join('\n')).not.toContain('Agent handoff');
+    expect(stdout.join('\n')).not.toContain('Find your report at');
   });
 });
 
