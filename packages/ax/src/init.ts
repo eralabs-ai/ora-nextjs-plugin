@@ -257,11 +257,15 @@ function gateableSurfaces(findings: InitFindings): MultiSelectChoice[] {
     const path = served(mount.pathname);
     surfaces.push({
       value: path,
-      label: `MCP server (${path})${mount.tools.length > 0 ? ` — ${mount.tools.join(', ')}` : ''}`,
+      label: `MCP server (${path})`,
       // Start unchecked: the question asks the user to check the *gated* ones, and defaulting to
       // "open" (recall — advertise what's there) means an empty answer keeps everything open. The
       // review-before-publish gate is the backstop before anything is actually written.
       selected: false,
+      // Enumerate the mount's tools as a read-only tree, so the developer sees what the surface
+      // exposes before deciding. Auth on an mcp-handler mount is server-level (withMcpAuth wraps the
+      // whole transport), so the mount — not the individual tool — is the unit that gates.
+      ...(mount.tools.length > 0 ? { details: mount.tools } : {}),
     });
   }
   if (findings.openApiFound) {

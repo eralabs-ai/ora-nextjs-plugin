@@ -11,6 +11,12 @@ export interface MultiSelectChoice {
   label: string;
   /** Whether it starts selected — the recommended default for this choice. */
   selected: boolean;
+  /**
+   * Optional read-only sub-lines rendered beneath the choice as a tree (e.g. an MCP server's tools),
+   * so the user sees what a surface contains before deciding. Context only — not separately
+   * selectable; the whole choice is the unit that toggles.
+   */
+  details?: string[];
 }
 
 /**
@@ -60,7 +66,14 @@ export async function createReadlinePrompter(): Promise<Prompter & { close(): vo
       const selected = choices.map((choice) => choice.selected);
       const render = (): string =>
         choices
-          .map((choice, i) => `  ${i + 1}. [${selected[i] ? 'x' : ' '}] ${choice.label}`)
+          .map((choice, i) => {
+            const head = `  ${i + 1}. [${selected[i] ? 'x' : ' '}] ${choice.label}`;
+            const details = choice.details ?? [];
+            const sub = details.map(
+              (detail, j) => `        ${j === details.length - 1 ? '└' : '├'} ${detail}`,
+            );
+            return [head, ...sub].join('\n');
+          })
           .join('\n');
       const answer = (
         await rl.question(

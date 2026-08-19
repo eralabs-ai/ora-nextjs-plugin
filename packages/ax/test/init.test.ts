@@ -270,6 +270,29 @@ describe('runInit gated-surface candidates respect basePath', () => {
     // And that prefixed path is what lands in the generated isGated matcher.
     expect(readFileSync(join(dir, 'ax.config.ts'), 'utf8')).toContain('"/app/mcp"');
   });
+
+  it('enumerates a mount’s tools as a read-only tree, not inline in the label', async () => {
+    writeBareApp(dir);
+    addMcpMount(dir); // exposes one tool: roll_dice
+
+    const offered: MultiSelectChoice[] = [];
+    const prompter: Prompter = {
+      text: async () => 'https://acme.com',
+      confirm: async () => false,
+      multiSelect: async (_question, choices) => {
+        offered.push(...choices);
+        return [];
+      },
+    };
+
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+
+    const mcp = offered.find((c) => c.label.includes('MCP server'));
+    expect(mcp).toBeDefined();
+    // Tools live in the tree (details), not concatenated into the selectable label.
+    expect(mcp?.label).not.toContain('roll_dice');
+    expect(mcp?.details).toContain('roll_dice');
+  });
 });
 
 describe('runInit interactive (scripted answers)', () => {
