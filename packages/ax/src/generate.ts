@@ -98,6 +98,28 @@ function gateKindForEntry(entry: CatalogEntry): GateTarget['kind'] {
 }
 
 /**
+ * The per-tool gating verdict for an MCP surface. The matcher is asked once about the mount itself
+ * (`tool` unset) and once per detected tool. The surface is *fully* gated when the mount is gated
+ * outright or when every one of its tools is — a server whose tools are all auth-walled is an
+ * auth-walled server, whatever its bare endpoint returns. Otherwise the surface stays open and
+ * `publicTools` is what may be advertised; gated tools are withheld, never listed as open.
+ */
+function gateMcpTools(
+  isGated: (target: GateTarget) => boolean,
+  path: string,
+  tools: readonly string[],
+): { fullyGated: boolean; publicTools: string[] } {
+  const base: GateTarget = {
+    kind: 'mcp',
+    path,
+    ...(tools.length > 0 ? { tools: [...tools] } : {}),
+  };
+  if (isGated(base)) return { fullyGated: true, publicTools: [] };
+  const publicTools = tools.filter((tool) => !isGated({ ...base, tool }));
+  return { fullyGated: tools.length > 0 && publicTools.length === 0, publicTools };
+}
+
+/**
  * Applies the resolved `isGated` policy to the entry set. Precision over recall, applied to gating:
  *   - An entry ax can describe (a detector attached an `auth` descriptor, or the developer declared
  *     one) is *published with that descriptor* — more discoverable than dropping it. If `isGated`
@@ -117,7 +139,7 @@ function applyGating(
 ): CatalogEntry[] {
   const kept: CatalogEntry[] = [];
 
-  for (const entry of entries) {
+  for (let entry of entries) {
     const path = entryUrlPath(entry);
     const derived: EntryAuth | undefined = entry.auth;
 
@@ -126,12 +148,32 @@ function applyGating(
       continue;
     }
 
-    const target: GateTarget = {
-      kind: gateKindForEntry(entry),
-      path,
-      ...(Array.isArray(entry.capabilities) ? { tools: entry.capabilities as string[] } : {}),
-    };
-    const gated = isGated(target);
+    const kind = gateKindForEntry(entry);
+    const tools = Array.isArray(entry.capabilities) ? (entry.capabilities as string[]) : undefined;
+
+    let gated: boolean;
+    if (kind === 'mcp' && tools !== undefined && tools.length > 0) {
+      // MCP surfaces are gated per tool, not just per mount: a partly-gated server stays published
+      // with only its public tools advertised, and an all-tools-gated one counts as fully gated.
+      const verdict = gateMcpTools(isGated, path, tools);
+      gated = verdict.fullyGated;
+      if (!gated && verdict.publicTools.length < tools.length) {
+        const withheld = tools.filter((tool) => !verdict.publicTools.includes(tool));
+        warn(
+          `isGated withheld ${withheld.length} tool${withheld.length === 1 ? '' : 's'} on ` +
+            `"${entry.identifier}" (${path}): ${withheld.join(', ')} — they require login, so ` +
+            'they are not advertised in the entry capabilities.',
+        );
+        entry = { ...entry, capabilities: verdict.publicTools };
+      }
+    } else {
+      const target: GateTarget = {
+        kind,
+        path,
+        ...(tools !== undefined ? { tools } : {}),
+      };
+      gated = isGated(target);
+    }
 
     if (derived !== undefined) {
       if (gated && derived.status === 'none') {
@@ -272,13 +314,14 @@ export async function generateCatalog(
   // The gate `path` is the served (basePath-prefixed) pathname, matching what `applyGating` derives
   // from the entry URL, so a mount is judged identically here and there.
   const gating = resolveGating(config.isGated);
-  const cardMounts = mcpMounts.filter((mount) => {
-    const target: GateTarget = {
-      kind: 'mcp',
-      path: servedPath(basePath, mount.pathname),
-      ...(mount.capabilities.length > 0 ? { tools: mount.capabilities } : {}),
-    };
-    return !gating(target) || mount.auth !== undefined;
+  const cardMounts = mcpMounts.flatMap((mount) => {
+    const verdict = gateMcpTools(gating, servedPath(basePath, mount.pathname), mount.capabilities);
+    // A fully gated mount keeps its card only when its auth can be described honestly — and then
+    // with all tools listed, since the whole card already says authentication is required. An open
+    // mount's card advertises only the public tools; individually gated ones are withheld here the
+    // same way `applyGating` withholds them from the entry capabilities.
+    if (verdict.fullyGated) return mount.auth !== undefined ? [mount] : [];
+    return [{ ...mount, capabilities: verdict.publicTools }];
   });
   const serverCard = buildMcpServerCard({ mounts: cardMounts, siteUrl, basePath, site, recommend });
 

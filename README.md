@@ -222,7 +222,9 @@ const config: AxConfig = {
   // gated artifact ax can describe (a detected withMcpAuth / OpenAPI securitySchemes) is emitted
   // with a secret-free `auth` descriptor; one it can't describe is dropped, not published. With no
   // isGated, a built-in floor gates `/api/auth/**` and `/api/webhooks/**`; supplying isGated
-  // replaces that floor wholesale, so compose `defaultIsGated` to keep it:
+  // replaces that floor wholesale, so compose `defaultIsGated` to keep it. For MCP servers the
+  // matcher is also asked once per tool (`target.tool` set), so a single tool can be gated while
+  // the rest of the server stays open:
   isGated: (target) => defaultIsGated(target) && target.path !== '/api/auth/status',
   // Hand-declared entries — e.g. docs/skills pointers zero-config detection can't guess at. An
   // `identifier` matching a detected entry overrides/extends it field-by-field (never replaces it

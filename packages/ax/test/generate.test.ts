@@ -391,6 +391,74 @@ describe('generateCatalog zero-config artifact detection', () => {
     expect(catalog.entries[0]?.auth).toEqual({ status: 'unknown' });
   });
 
+  it('withholds individually gated MCP tools while keeping the surface open', async () => {
+    // Tool-level gating: the matcher gates only /mcp#pay, so the entry and server card stay
+    // published with the public tool alone; the gated tool is never advertised.
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({ name: 'demo', version: '1.0.0', description: 'Demo app' }),
+      'utf8',
+    );
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com', " +
+        "isGated: (t) => t.tool !== undefined && `${t.path}#${t.tool}` === '/mcp#pay' };\n",
+      'utf8',
+    );
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      "import { createMcpHandler } from 'mcp-handler';\n" +
+        'const handler = createMcpHandler((server) => {\n' +
+        "  server.tool('roll_dice', 'd', {}, async () => ({}));\n" +
+        "  server.tool('pay', 'd', {}, async () => ({}));\n" +
+        '});\n' +
+        'export { handler as GET };\n',
+      'utf8',
+    );
+
+    const warnings: string[] = [];
+    const { catalog, serverCard } = await generateCatalog({
+      cwd: dir,
+      onWarning: (m) => warnings.push(m),
+    });
+
+    expect(catalog.entries).toHaveLength(1);
+    expect(catalog.entries[0]?.capabilities).toEqual(['roll_dice']);
+    expect(serverCard?.tools).toEqual([{ name: 'roll_dice' }]);
+    expect(warnings.some((w) => w.includes('withheld') && w.includes('pay'))).toBe(true);
+  });
+
+  it('treats a mount whose tools are all gated as fully gated (dropped when undescribable)', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com', isGated: (t) => t.tool !== undefined };\n",
+      'utf8',
+    );
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      "import { createMcpHandler } from 'mcp-handler';\n" +
+        "const handler = createMcpHandler((server) => { server.tool('roll_dice', 'd', {}, async () => ({})); });\n" +
+        'export { handler as GET };\n',
+      'utf8',
+    );
+
+    const warnings: string[] = [];
+    const { catalog, serverCard } = await generateCatalog({
+      cwd: dir,
+      onWarning: (m) => warnings.push(m),
+    });
+
+    // No auth descriptor is derivable, so the all-tools-gated mount is dropped everywhere.
+    expect(catalog.entries).toEqual([]);
+    expect(serverCard).toBeUndefined();
+    expect(warnings.some((w) => w.includes('isGated excluded entry'))).toBe(true);
+  });
+
   it('passes a data-only entry through gating untouched (no URL path to match)', async () => {
     // Entries carrying `data` instead of `url` have no pathname, so isGated can't decide on them —
     // they pass through even when isGated returns true for everything it *can* match.

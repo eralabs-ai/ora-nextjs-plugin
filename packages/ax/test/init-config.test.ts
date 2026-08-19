@@ -18,7 +18,7 @@ function answers(overrides: Partial<InitAnswers> = {}): InitAnswers {
     scaffoldRobots: true,
     scaffoldAgent404: true,
     report: true,
-    gating: { floorKept: true, gatedPaths: [] },
+    gating: { floorKept: true, gatedPaths: [], gatedTools: [] },
     ...overrides,
   };
 }
@@ -54,14 +54,19 @@ describe('renderAxConfig', () => {
   });
 
   it('omits isGated when only the built-in floor is kept (the floor is the default)', () => {
-    const source = renderAxConfig(answers({ gating: { floorKept: true, gatedPaths: [] } }), TS);
+    const source = renderAxConfig(
+      answers({ gating: { floorKept: true, gatedPaths: [], gatedTools: [] } }),
+      TS,
+    );
     expect(source).not.toContain('isGated');
     expect(source).not.toContain('defaultIsGated');
   });
 
   it('composes defaultIsGated when the floor is kept and extra paths are gated', () => {
     const source = renderAxConfig(
-      answers({ gating: { floorKept: true, gatedPaths: ['/mcp', '/openapi.json'] } }),
+      answers({
+        gating: { floorKept: true, gatedPaths: ['/mcp', '/openapi.json'], gatedTools: [] },
+      }),
       TS,
     );
     expect(source).toContain("import { defaultIsGated, type AxConfig } from '@ora-ai/ax';");
@@ -70,9 +75,31 @@ describe('renderAxConfig', () => {
     );
   });
 
+  it('matches path#tool keys when individual MCP tools are gated', () => {
+    const source = renderAxConfig(
+      answers({
+        gating: { floorKept: true, gatedPaths: ['/openapi.json'], gatedTools: ['/mcp#pay'] },
+      }),
+      TS,
+    );
+    expect(source).toContain(
+      'isGated: (target) => defaultIsGated(target) || ["/openapi.json", "/mcp#pay"].includes(' +
+        'target.tool === undefined ? target.path : `${target.path}#${target.tool}`),',
+    );
+    // The rendered matcher gates the tool but not its mount or sibling tools.
+    const matcher = (target: { path: string; tool?: string }): boolean =>
+      ['/openapi.json', '/mcp#pay'].includes(
+        target.tool === undefined ? target.path : `${target.path}#${target.tool}`,
+      );
+    expect(matcher({ path: '/mcp', tool: 'pay' })).toBe(true);
+    expect(matcher({ path: '/mcp', tool: 'search' })).toBe(false);
+    expect(matcher({ path: '/mcp' })).toBe(false);
+    expect(matcher({ path: '/openapi.json' })).toBe(true);
+  });
+
   it('gates only the listed paths when the floor is dropped', () => {
     const source = renderAxConfig(
-      answers({ gating: { floorKept: false, gatedPaths: ['/mcp'] } }),
+      answers({ gating: { floorKept: false, gatedPaths: ['/mcp'], gatedTools: [] } }),
       TS,
     );
     expect(source).not.toContain('defaultIsGated');
@@ -80,7 +107,10 @@ describe('renderAxConfig', () => {
   });
 
   it('writes an explicit gate-nothing matcher when the floor is dropped with no paths', () => {
-    const source = renderAxConfig(answers({ gating: { floorKept: false, gatedPaths: [] } }), TS);
+    const source = renderAxConfig(
+      answers({ gating: { floorKept: false, gatedPaths: [], gatedTools: [] } }),
+      TS,
+    );
     expect(source).toContain('isGated: () => false,');
   });
 
@@ -92,10 +122,13 @@ describe('renderAxConfig', () => {
   });
 
   it('emits CommonJS JavaScript with require for defaultIsGated when needed', () => {
-    const source = renderAxConfig(answers({ gating: { floorKept: true, gatedPaths: ['/mcp'] } }), {
-      language: 'js',
-      moduleSystem: 'cjs',
-    });
+    const source = renderAxConfig(
+      answers({ gating: { floorKept: true, gatedPaths: ['/mcp'], gatedTools: [] } }),
+      {
+        language: 'js',
+        moduleSystem: 'cjs',
+      },
+    );
     expect(source).toContain("const { defaultIsGated } = require('@ora-ai/ax');");
     expect(source).toContain('module.exports = config;');
   });
@@ -103,7 +136,10 @@ describe('renderAxConfig', () => {
   it('produces a config object that passes the AxConfig schema (minus the erased type import)', () => {
     // Mirror what jiti would hand back: the field object, with isGated as a real function.
     const source = renderAxConfig(
-      answers({ scaffoldRobots: false, gating: { floorKept: true, gatedPaths: ['/mcp'] } }),
+      answers({
+        scaffoldRobots: false,
+        gating: { floorKept: true, gatedPaths: ['/mcp'], gatedTools: [] },
+      }),
       TS,
     );
     // Sanity-parse the rendered scalar answers back into an object and validate the data fields.

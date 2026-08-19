@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 
 import { findExistingConfig } from './config.js';
+import { detectMcpMounts } from './detect-mcp.js';
 import { generateCatalog } from './generate.js';
 import {
   configFileName,
@@ -162,13 +163,16 @@ function detectSiteUrlDefault(flagSiteUrl: string | undefined): SiteUrlDefault {
 
 interface InitFindings {
   routers: RouterKind[];
-  staticRouteCount: number;
+  /** Every statically addressable page route, for the route-tree summary. */
+  pageRoutes: string[];
+  /** Every API route that resolves to a stable URL (MCP mounts included), for the route tree. */
+  apiRoutePaths: string[];
   /**
    * `next.config` `basePath` (`''` when unset). Gated-surface candidates are prefixed with it, so
    * the `isGated` the wizard writes matches the basePath-prefixed `target.path` a real build passes.
    */
   basePath: string;
-  mcpMounts: { pathname: string; tools: string[] }[];
+  mcpMounts: { pathname: string; tools: string[]; authDetected: boolean }[];
   openApiFound: boolean;
   webMcpToolNames: string[];
   /** Presence of each detect-and-recommend artifact, for the findings summary. */
@@ -193,11 +197,28 @@ async function gatherFindings(cwd: string): Promise<InitFindings> {
   const generated = await generateCatalog({ cwd });
   const { report } = generated;
   const router = buildRouterModel(cwd);
+  // Re-run the mount scan directly (cheap — the router model is shared) because the report's mount
+  // list carries no auth posture, and the wizard's pre-selection heuristic needs to know which
+  // mounts are already wrapped in withMcpAuth.
+  const mounts = detectMcpMounts({ cwd, warn: () => {}, router });
+  const apiRoutePaths = [
+    ...new Set(
+      router
+        .listApiEndpoints()
+        .map((endpoint) => endpoint.url)
+        .filter((url): url is string => url !== undefined),
+    ),
+  ].sort();
   return {
     routers: report.routers,
-    staticRouteCount: router.listPageRoutes().length,
+    pageRoutes: router.listPageRoutes(),
+    apiRoutePaths,
     basePath: report.basePath,
-    mcpMounts: report.mcp.mounts.map((mount) => ({ pathname: mount.pathname, tools: mount.tools })),
+    mcpMounts: mounts.map((mount) => ({
+      pathname: mount.pathname,
+      tools: mount.capabilities,
+      authDetected: mount.auth !== undefined,
+    })),
     openApiFound: report.artifacts.openapi.found,
     webMcpToolNames: generated.webMcpToolNames,
     artifacts: {
@@ -211,19 +232,78 @@ async function gatherFindings(cwd: string): Promise<InitFindings> {
   };
 }
 
+/** One row of the route-tree summary: a served path, its kind marker, and any MCP tool children. */
+interface RouteTreeNode {
+  path: string;
+  marker: '○' | 'ƒ';
+  note?: string;
+  /** MCP tool names, rendered as selectable sub-routes of their mount. */
+  children: string[];
+}
+
+/**
+ * Distills the findings into the route rows the summary tree shows, sorted by path: page routes
+ * (○), API route handlers (ƒ), MCP mounts (ƒ, with their tools as children — the sub-routes agents
+ * actually call), and a detected OpenAPI doc. Every path is the *served* (basePath-prefixed) one,
+ * so what the tree shows is exactly what the gating question later asks about.
+ */
+function buildRouteTree(findings: InitFindings): RouteTreeNode[] {
+  const served = (pathname: string): string => servedPath(findings.basePath, pathname);
+  const mcpPaths = new Set(findings.mcpMounts.map((mount) => mount.pathname));
+  const nodes = new Map<string, RouteTreeNode>();
+  for (const route of findings.pageRoutes) {
+    nodes.set(served(route), { path: served(route), marker: '○', children: [] });
+  }
+  for (const route of findings.apiRoutePaths) {
+    if (mcpPaths.has(route)) continue;
+    nodes.set(served(route), { path: served(route), marker: 'ƒ', children: [] });
+  }
+  for (const mount of findings.mcpMounts) {
+    nodes.set(served(mount.pathname), {
+      path: served(mount.pathname),
+      marker: 'ƒ',
+      note: `MCP server${mount.authDetected ? ' · auth detected' : ''}`,
+      children: mount.tools,
+    });
+  }
+  if (findings.openApiFound) {
+    const path = served('/openapi.json');
+    nodes.set(path, { path, marker: '○', note: 'OpenAPI doc', children: [] });
+  }
+  return [...nodes.values()].sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/**
+ * Renders the findings as a `next build`-style route tree — the layout developers already read
+ * after every build — except MCP servers are broken into their tools as sub-routes, since those
+ * (not the mount) are the callable agent surfaces. Returns the lines without the `[ax] ` prefix.
+ */
+function renderRouteTree(findings: InitFindings): string[] {
+  const nodes = buildRouteTree(findings);
+  if (nodes.length === 0) return ['No routes detected.'];
+  const width = Math.max(...nodes.map((node) => node.path.length));
+  const lines = [`Route (${findings.routers.length > 0 ? findings.routers.join(' + ') : 'none'})`];
+  nodes.forEach((node, index) => {
+    const connector = index === 0 && nodes.length > 1 ? '┌' : index < nodes.length - 1 ? '├' : '└';
+    const padded = node.note !== undefined ? node.path.padEnd(width + 2) : node.path;
+    lines.push(`${connector} ${node.marker} ${padded}${node.note ?? ''}`.trimEnd());
+    const stem = index < nodes.length - 1 ? '│' : ' ';
+    node.children.forEach((tool, toolIndex) => {
+      const toolConnector = toolIndex < node.children.length - 1 ? '├' : '└';
+      lines.push(`${stem}   ${toolConnector} ⚙ ${tool}`);
+    });
+  });
+  const legend = ['○ page', 'ƒ api route'];
+  if (nodes.some((node) => node.children.length > 0)) legend.push('⚙ MCP tool');
+  lines.push('', legend.join('   '));
+  return lines;
+}
+
 function printFindings(findings: InitFindings, stdout: (line: string) => void): void {
   stdout("[ax] Scanned your project (no build needed) — here's what I found:");
-  stdout(
-    `[ax]   • Router: ${findings.routers.length > 0 ? findings.routers.join(' + ') : 'none detected'}`,
-  );
-  stdout(`[ax]   • Statically addressable routes: ${findings.staticRouteCount}`);
-  if (findings.mcpMounts.length > 0) {
-    stdout(
-      `[ax]   • MCP server${findings.mcpMounts.length === 1 ? '' : 's'}: ` +
-        findings.mcpMounts.map((m) => m.pathname).join(', '),
-    );
-  }
-  if (findings.openApiFound) stdout('[ax]   • OpenAPI doc: public/openapi.json');
+  stdout('[ax]');
+  for (const line of renderRouteTree(findings)) stdout(`[ax] ${line}`.trimEnd());
+  stdout('[ax]');
   if (findings.webMcpToolNames.length > 0) {
     stdout(`[ax]   • WebMCP tools: ${findings.webMcpToolNames.join(', ')}`);
   }
@@ -240,77 +320,178 @@ function printFindings(findings: InitFindings, stdout: (line: string) => void): 
 }
 
 /**
- * The advertisable surfaces the gating question is about: each detected MCP mount and an OpenAPI
- * doc. These — not page routes — are what `isGated` actually governs (whether ax advertises a
- * surface as open). Empty when the project exposes none, in which case the wizard skips the question
- * entirely rather than asking about an empty list.
- *
- * Each `value` is the *served* path (basePath prefix included), because that is exactly what a real
- * build passes as `isGated`'s `target.path` (`entryUrlPath` reads it off the basePath-prefixed entry
- * URL). Matching on the raw router pathname instead would make the generated matcher silently miss on
- * any `basePath` app — publishing a surface the user marked gated as open.
+ * Name tokens that suggest a surface sits behind a login, for the pre-selection heuristic. Matched
+ * against whole tokens (split on separators and camelCase), never substrings, so `author_search`
+ * doesn't trip on `auth`.
  */
-function gateableSurfaces(findings: InitFindings): MultiSelectChoice[] {
+const LOGIN_NAME_TOKENS = new Set([
+  'login',
+  'logout',
+  'signin',
+  'signup',
+  'signout',
+  'auth',
+  'oauth',
+  'sso',
+  'session',
+  'sessions',
+  'token',
+  'tokens',
+  'password',
+  'credential',
+  'credentials',
+  'account',
+  'accounts',
+  'admin',
+  'billing',
+  'invoice',
+  'invoices',
+  'subscribe',
+  'subscription',
+  'checkout',
+  'pay',
+  'payment',
+  'payments',
+  'purchase',
+  'profile',
+  'me',
+]);
+
+/** True when a tool/path name looks login-gated (a whole token matches the login vocabulary). */
+export function looksLoginGated(name: string): boolean {
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .some((token) => LOGIN_NAME_TOKENS.has(token));
+}
+
+/**
+ * The selectable agent surfaces the gating question is about — each detected MCP *tool* (a tool,
+ * not its mount, is the callable surface an agent sees, and gating is declared per tool), a
+ * tool-less MCP mount as a whole, and an OpenAPI doc. Empty when the project exposes none, in which
+ * case the wizard skips the question entirely.
+ *
+ * Selected means **public**. The pre-selection is a heuristic starting point, not a policy: docs
+ * surfaces (an OpenAPI doc) start public — documentation is what agents must be able to read —
+ * while a `withMcpAuth`-wrapped mount and tools whose names look login-shaped (login, checkout,
+ * pay, account, …) start deselected, since most gated APIs are gated exactly there.
+ *
+ * Tool values are `path#tool` keys and whole-surface values are the *served* path (basePath prefix
+ * included), because that is exactly what the generated matcher rebuilds from `target.path` /
+ * `target.tool` when a real build runs.
+ */
+function publicSurfaceChoices(findings: InitFindings): MultiSelectChoice[] {
   const served = (pathname: string): string => servedPath(findings.basePath, pathname);
-  const surfaces: MultiSelectChoice[] = [];
+  const choices: MultiSelectChoice[] = [];
   for (const mount of findings.mcpMounts) {
     const path = served(mount.pathname);
-    surfaces.push({
-      value: path,
-      label: `MCP server (${path})${mount.tools.length > 0 ? ` — ${mount.tools.join(', ')}` : ''}`,
-      // Start unchecked: the question asks the user to check the *gated* ones, and defaulting to
-      // "open" (recall — advertise what's there) means an empty answer keeps everything open. The
-      // review-before-publish gate is the backstop before anything is actually written.
-      selected: false,
-    });
+    if (mount.tools.length === 0) {
+      choices.push({
+        value: path,
+        label: `ƒ ${path} — MCP server${mount.authDetected ? ' (auth detected)' : ''}`,
+        selected: !mount.authDetected,
+      });
+      continue;
+    }
+    for (const tool of mount.tools) {
+      choices.push({
+        value: `${path}#${tool}`,
+        label: `⚙ ${path} › ${tool}${mount.authDetected ? ' (auth detected)' : ''}`,
+        selected: !mount.authDetected && !looksLoginGated(tool),
+      });
+    }
   }
   if (findings.openApiFound) {
     const path = served('/openapi.json');
-    surfaces.push({ value: path, label: `OpenAPI doc (${path})`, selected: false });
+    choices.push({ value: path, label: `○ ${path} — OpenAPI doc`, selected: true });
   }
-  return surfaces;
+  return choices;
 }
 
 /** The built-in floor paths, for the human-readable gating summary. */
 const FLOOR_SUMMARY = '/api/auth/** & /api/webhooks/**';
 
 /**
- * Runs the gating question. Everything ax detects is advertised as open by default (recall); the
- * user checks only the surfaces that sit behind auth, and an empty answer keeps them all open. The
- * question and the action agree — "check the gated ones" against a list that starts empty — so
- * there's no inverted-toggle trap (a pre-checked "public" list silently gates a surface the moment
- * the user types its number to affirm it). The built-in auth/webhook floor is always composed in;
- * never advertising an auth wall as open is a safety invariant, not a toggle. Prints a
- * plain-language summary of the decision.
+ * Runs the gating question. The user declares what is **public** — the shorter, safer list, since
+ * most real APIs sit behind a login — and everything left unselected is treated as gated: gated
+ * whole surfaces land in `gatedPaths`, individually gated tools in `gatedTools`, and a mount whose
+ * tools are all gated collapses to its path. Pressing Enter accepts the heuristic pre-selection
+ * (everything public except what looks login-gated — see `publicSurfaceChoices`). The built-in
+ * auth/webhook floor is always composed in; never advertising an auth wall as open is a safety
+ * invariant, not a toggle. Prints a plain-language summary of the decision.
  */
 async function askGating(
   prompter: Prompter,
   findings: InitFindings,
   stdout: (line: string) => void,
 ): Promise<GatingAnswer> {
-  const surfaces = gateableSurfaces(findings);
-  if (surfaces.length === 0) return { floorKept: true, gatedPaths: [] };
+  const choices = publicSurfaceChoices(findings);
+  if (choices.length === 0) return { floorKept: true, gatedPaths: [], gatedTools: [] };
 
-  const gatedPaths = await prompter.multiSelect(
-    'These agent surfaces are public by default (agents use them without logging in). Select any ' +
-      'that DO require logging in — press Enter if none of them do:',
-    surfaces,
-  );
-  const publicPaths = surfaces
-    .map((surface) => surface.value)
-    .filter((value) => !gatedPaths.includes(value));
+  const preDeselected = choices.filter((choice) => !choice.selected).length;
+  const question =
+    "Which of these agent surfaces DON'T require logging in? Press Enter if none require " +
+    'logging in; otherwise select the tools that are publicly available — anything left ' +
+    'unselected is treated as login-gated and never advertised as open.' +
+    (preDeselected > 0
+      ? ` (ax pre-deselected ${preDeselected} that look${preDeselected === 1 ? 's' : ''} ` +
+        'login-gated — adjust if that guess is wrong.)'
+      : '');
+  const publicValues = new Set(await prompter.multiSelect(question, choices));
+
+  const gatedPaths: string[] = [];
+  const gatedTools: string[] = [];
+  const publicLabels: string[] = [];
+  const gatedLabels: string[] = [];
+  const served = (pathname: string): string => servedPath(findings.basePath, pathname);
+
+  for (const mount of findings.mcpMounts) {
+    const path = served(mount.pathname);
+    if (mount.tools.length === 0) {
+      if (publicValues.has(path)) publicLabels.push(path);
+      else {
+        gatedPaths.push(path);
+        gatedLabels.push(path);
+      }
+      continue;
+    }
+    const gatedNames = mount.tools.filter((tool) => !publicValues.has(`${path}#${tool}`));
+    if (gatedNames.length === mount.tools.length) {
+      // Nothing on the mount is public → gate the whole surface; a simpler config, same effect.
+      gatedPaths.push(path);
+      gatedLabels.push(`${path} (all tools)`);
+      continue;
+    }
+    for (const tool of mount.tools) {
+      if (gatedNames.includes(tool)) {
+        gatedTools.push(`${path}#${tool}`);
+        gatedLabels.push(`${path} › ${tool}`);
+      } else {
+        publicLabels.push(`${path} › ${tool}`);
+      }
+    }
+  }
+  if (findings.openApiFound) {
+    const path = served('/openapi.json');
+    if (publicValues.has(path)) publicLabels.push(path);
+    else {
+      gatedPaths.push(path);
+      gatedLabels.push(path);
+    }
+  }
 
   stdout(
-    `[ax]   Public (advertised to agents): ${publicPaths.length > 0 ? publicPaths.join(', ') : 'none'}`,
+    `[ax]   Public (advertised to agents): ${publicLabels.length > 0 ? publicLabels.join(', ') : 'none'}`,
   );
   stdout(
-    `[ax]   Requires login (not advertised): ${
-      gatedPaths.length > 0
-        ? `${gatedPaths.join(', ')}, plus the built-in ${FLOOR_SUMMARY} floor`
+    `[ax]   Requires login (not advertised as open): ${
+      gatedLabels.length > 0
+        ? `${gatedLabels.join(', ')}, plus the built-in ${FLOOR_SUMMARY} floor`
         : `the built-in ${FLOOR_SUMMARY} floor`
     }`,
   );
-  return { floorKept: true, gatedPaths };
+  return { floorKept: true, gatedPaths, gatedTools };
 }
 
 /**
@@ -551,7 +732,7 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
       scaffoldRobots: true,
       scaffoldAgent404: true,
       report: true,
-      gating: { floorKept: true, gatedPaths: [] },
+      gating: { floorKept: true, gatedPaths: [], gatedTools: [] },
     };
     const fileName = writeConfigAndWire(cwd, answers, stdout);
     printNextSteps(fileName, answers, false, stdout);

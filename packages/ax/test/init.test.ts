@@ -255,19 +255,20 @@ describe('runInit gated-surface candidates respect basePath', () => {
     const prompter: Prompter = {
       text: async () => 'https://acme.com',
       confirm: async () => false,
-      // Check every surface → they're gated. (multiSelect returns the *gated* set; empty = all open.)
+      // Select nothing as public → every surface is gated.
       multiSelect: async (_question, choices) => {
         offered.push(...choices);
-        return choices.map((choice) => choice.value);
+        return [];
       },
     };
 
     expect(await runInit([], { ...io(), prompter })).toBe(0);
 
-    // The MCP candidate is offered as the basePath-prefixed served path, not the raw router path.
-    expect(offered.some((c) => c.value === '/app/mcp')).toBe(true);
-    expect(offered.some((c) => c.value === '/mcp')).toBe(false);
-    // And that prefixed path is what lands in the generated isGated matcher.
+    // The MCP tool candidate is offered under the basePath-prefixed served path, not the raw
+    // router path — one selectable choice per tool, keyed `path#tool`.
+    expect(offered.some((c) => c.value === '/app/mcp#roll_dice')).toBe(true);
+    expect(offered.some((c) => c.value === '/mcp#roll_dice')).toBe(false);
+    // With every tool gated the mount collapses to its prefixed path in the generated matcher.
     expect(readFileSync(join(dir, 'ax.config.ts'), 'utf8')).toContain('"/app/mcp"');
   });
 });
@@ -279,8 +280,9 @@ describe('runInit interactive (scripted answers)', () => {
 
     const prompter = new ScriptedPrompter({
       text: ['https://acme.com'],
-      // Check the /mcp mount → it's gated. The built-in floor is always kept.
-      multiSelect: [['/mcp']],
+      // Select nothing as public → the mount's only tool is gated, so the whole mount is gated.
+      // The built-in floor is always kept.
+      multiSelect: [[]],
       // scaffoldLlmsTxt, JsonLd, Robots, Agent404, report, run-build — all no.
       confirm: [false, false, false, false, false, false],
     });
@@ -298,10 +300,92 @@ describe('runInit interactive (scripted answers)', () => {
     );
     // The gating summary spells out the decision in plain language.
     expect(
-      stdout.some((l) => l.includes('Requires login (not advertised)') && l.includes('/mcp')),
+      stdout.some(
+        (l) => l.includes('Requires login (not advertised as open)') && l.includes('/mcp'),
+      ),
     ).toBe(true);
-    // The findings summary ran before any question.
+    // The findings summary ran before any question, laid out as a route tree with the MCP tool
+    // extracted as a sub-route.
     expect(stdout.some((l) => l.includes('Scanned your project'))).toBe(true);
+    expect(stdout.some((l) => l.includes('ƒ /mcp') && l.includes('MCP server'))).toBe(true);
+    expect(stdout.some((l) => l.includes('⚙ roll_dice'))).toBe(true);
+    expect(stdout.some((l) => l.includes('○ /') && !l.includes('/mcp'))).toBe(true);
+  });
+
+  it('writes path#tool gates when a mount is only partly public', async () => {
+    writeBareApp(dir);
+    // A mount with one public-looking and one login-looking tool.
+    const routeDir = join(dir, 'app', 'api', 'mcp');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      `import { createMcpHandler } from 'mcp-handler';\n` +
+        `const handler = createMcpHandler((server) => {\n` +
+        `  server.tool('search_flights', 'd', {}, async () => ({}));\n` +
+        `  server.tool('pay', 'd', {}, async () => ({}));\n` +
+        `});\n` +
+        `export { handler as GET };\n`,
+      'utf8',
+    );
+
+    const offered: MultiSelectChoice[] = [];
+    const prompter: Prompter = {
+      text: async () => 'https://acme.com',
+      confirm: async () => false,
+      // Accept the pre-selection: search_flights public, pay pre-deselected by the login heuristic.
+      multiSelect: async (_question, choices) => {
+        offered.push(...choices);
+        return choices.filter((choice) => choice.selected).map((choice) => choice.value);
+      },
+    };
+
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+
+    // The heuristic pre-selects the public-looking tool and deselects the login-looking one.
+    expect(offered.find((c) => c.value === '/api/mcp#search_flights')?.selected).toBe(true);
+    expect(offered.find((c) => c.value === '/api/mcp#pay')?.selected).toBe(false);
+
+    const source = readFileSync(join(dir, 'ax.config.ts'), 'utf8');
+    // Only the gated tool's path#tool key is written; the mount itself stays open.
+    expect(source).toContain('"/api/mcp#pay"');
+    expect(source).not.toContain('"/api/mcp",');
+    expect(source).toContain(
+      'target.tool === undefined ? target.path : `${target.path}#${target.tool}`',
+    );
+    expect(
+      stdout.some(
+        (l) => l.includes('Public (advertised to agents)') && l.includes('search_flights'),
+      ),
+    ).toBe(true);
+  });
+
+  it('pre-deselects every tool of a withMcpAuth-wrapped mount (login detected)', async () => {
+    writeBareApp(dir);
+    const routeDir = join(dir, 'app', 'api', 'mcp');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      `import { createMcpHandler, withMcpAuth } from 'mcp-handler';\n` +
+        `const handler = createMcpHandler((server) => { server.tool('search', 'd', {}, async () => ({})); });\n` +
+        `const auth = withMcpAuth(handler, async () => undefined);\n` +
+        `export { auth as GET };\n`,
+      'utf8',
+    );
+
+    const offered: MultiSelectChoice[] = [];
+    const prompter: Prompter = {
+      text: async () => 'https://acme.com',
+      confirm: async () => false,
+      multiSelect: async (_question, choices) => {
+        offered.push(...choices);
+        return choices.filter((choice) => choice.selected).map((choice) => choice.value);
+      },
+    };
+
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+    // Even a public-looking tool name starts deselected when the mount itself demands auth.
+    expect(offered.find((c) => c.value === '/api/mcp#search')?.selected).toBe(false);
+    expect(readFileSync(join(dir, 'ax.config.ts'), 'utf8')).toContain('"/api/mcp"');
   });
 
   it('prefills the site URL from an env var and names the source', async () => {
@@ -401,10 +485,10 @@ describe('runInit round-trip', () => {
     writeBareApp(dir);
     addMcpMount(dir);
 
-    // Press Enter at gating (nothing marked as requiring login) → no isGated written.
+    // Press Enter at gating (accept the pre-selection: roll_dice looks public, so it stays
+    // selected) → nothing gated → no isGated written.
     const prompter = new ScriptedPrompter({
       text: ['https://acme.com'],
-      multiSelect: [[]],
       confirm: [false, false, false, false, false, false],
     });
     expect(await runInit([], { ...io(), prompter })).toBe(0);

@@ -41,12 +41,20 @@ export interface GateTarget {
   kind: 'mcp' | 'openapi' | 'entry';
   path: string;
   tools?: string[];
+  /**
+   * When set, the check is about this single MCP tool on the surface at `path` — gating can be
+   * declared per tool, not just per server. The build asks once with `tool` unset (the whole
+   * mount) and then once per detected tool; a tool the matcher gates is withheld from the
+   * advertised capabilities while the rest of the surface stays open.
+   */
+  tool?: string;
 }
 
 /**
- * A whole-artifact gating predicate the developer supplies via `ax.config` `isGated`. Returns
- * `true` when the target is behind auth (must not be advertised as an open surface). Boolean and
- * whole-artifact for v1 — no per-tool gating.
+ * A gating predicate the developer supplies via `ax.config` `isGated`. Returns `true` when the
+ * target is behind auth (must not be advertised as an open surface). Called per artifact, and —
+ * for MCP surfaces — additionally per tool (see {@link GateTarget.tool}), so a matcher can gate a
+ * whole surface or just some of its tools.
  */
 export type IsGated = (target: GateTarget) => boolean;
 

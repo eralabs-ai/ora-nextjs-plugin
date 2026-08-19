@@ -19,8 +19,14 @@ export interface ConfigFileTarget {
 export interface GatingAnswer {
   /** Whether to keep the built-in `/api/auth/**` + `/api/webhooks/**` floor. */
   floorKept: boolean;
-  /** Extra server-relative pathnames the user marked gated (MCP mounts, OpenAPI, …). */
+  /** Whole surfaces the user left non-public, as server-relative pathnames (MCP mounts, OpenAPI, …). */
   gatedPaths: string[];
+  /**
+   * Individual MCP tools the user left non-public, as `path#tool` keys (e.g. `/api/mcp#pay`) — the
+   * same key the rendered matcher rebuilds from `target.path` and `target.tool`. Used when a mount
+   * is only partly public; a mount with *no* public tools collapses into `gatedPaths` instead.
+   */
+  gatedTools: string[];
 }
 
 /** Everything the wizard collected that shapes the config file. */
@@ -52,20 +58,27 @@ export function configFileName(target: ConfigFileTarget): string {
  *     override the default floor.
  */
 function renderIsGated(gating: GatingAnswer): { needsDefaultImport: boolean; line?: string } {
-  const paths = gating.gatedPaths;
-  const list = `[${paths.map((p) => JSON.stringify(p)).join(', ')}]`;
+  const keys = [...gating.gatedPaths, ...gating.gatedTools];
+  const list = `[${keys.map((p) => JSON.stringify(p)).join(', ')}]`;
+  // With tool-level gates, the matcher rebuilds the `path#tool` key for per-tool checks and keeps
+  // matching the bare path for whole-surface ones; with none, the simpler path-only form suffices.
+  const lookup =
+    gating.gatedTools.length > 0
+      ? 'target.tool === undefined ? target.path : `${target.path}#${target.tool}`'
+      : 'target.path';
+  const membership = `${list}.includes(${lookup})`;
 
-  if (gating.floorKept && paths.length === 0) return { needsDefaultImport: false };
+  if (gating.floorKept && keys.length === 0) return { needsDefaultImport: false };
   if (gating.floorKept) {
     return {
       needsDefaultImport: true,
-      line: `  isGated: (target) => defaultIsGated(target) || ${list}.includes(target.path),`,
+      line: `  isGated: (target) => defaultIsGated(target) || ${membership},`,
     };
   }
-  if (paths.length > 0) {
+  if (keys.length > 0) {
     return {
       needsDefaultImport: false,
-      line: `  isGated: (target) => ${list}.includes(target.path),`,
+      line: `  isGated: (target) => ${membership},`,
     };
   }
   return { needsDefaultImport: false, line: '  isGated: () => false,' };
@@ -125,7 +138,11 @@ export function renderAxConfig(answers: InitAnswers, target: ConfigFileTarget): 
 
   if (isGated.line !== undefined) {
     fields.push(
-      '  // Mark auth-walled surfaces so ax never advertises them as an open surface. ' +
+      '  // Mark login-gated surfaces' +
+        (answers.gating.gatedTools.length > 0
+          ? ' and individual MCP tools ("path#tool" keys)'
+          : '') +
+        ' so ax never advertises them as an open surface. ' +
         (answers.gating.floorKept
           ? 'Composes the built-in /api/auth + /api/webhooks floor.'
           : 'Replaces the built-in floor wholesale.') +

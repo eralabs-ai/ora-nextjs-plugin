@@ -78,4 +78,21 @@ describe('resolveGating', () => {
     expect(isGated({ kind: 'openapi', path: '/openapi.json' })).toBe(false);
     expect(seen[0]).toEqual({ kind: 'mcp', path: '/api/mcp', tools: ['roll_dice'] });
   });
+
+  it('passes a single tool through for per-tool checks, ignored by the path-based floor', () => {
+    const seen: GateTarget[] = [];
+    const isGated = resolveGating((t) => {
+      seen.push(t);
+      return t.tool === 'pay';
+    });
+    expect(isGated({ kind: 'mcp', path: '/api/mcp', tools: ['pay', 'search'], tool: 'pay' })).toBe(
+      true,
+    );
+    expect(
+      isGated({ kind: 'mcp', path: '/api/mcp', tools: ['pay', 'search'], tool: 'search' }),
+    ).toBe(false);
+    expect(seen[0]?.tool).toBe('pay');
+    // The built-in floor keys on path alone; a tool on a floor path is gated regardless of name.
+    expect(defaultIsGated({ kind: 'mcp', path: '/api/auth/mcp', tool: 'search' })).toBe(true);
+  });
 });

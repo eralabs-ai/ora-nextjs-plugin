@@ -102,6 +102,11 @@ export interface AxConfig {
    * `/api/webhooks/**` (see {@link import('./gating.js').defaultIsGated}); supplying `isGated`
    * replaces that floor wholesale, so call `defaultIsGated` from your own matcher to keep it.
    *
+   * For MCP surfaces the matcher is also asked once per detected tool (`target.tool` set), so
+   * gating can be declared per tool: a gated tool is withheld from the advertised capabilities
+   * while the rest of the server stays open, and a server whose tools are *all* gated counts as
+   * gated outright.
+   *
    * A function, so it is validated at load time by a `typeof` check rather than the JSON Schema
    * (which has no function type) — see validate-config.ts.
    */
