@@ -298,7 +298,7 @@ describe('runInit interactive (scripted answers)', () => {
     );
     // The gating summary spells out the decision in plain language.
     expect(
-      stdout.some((l) => l.includes('Gated (never advertised as open)') && l.includes('/mcp')),
+      stdout.some((l) => l.includes('Requires login (not advertised)') && l.includes('/mcp')),
     ).toBe(true);
     // The findings summary ran before any question.
     expect(stdout.some((l) => l.includes('Scanned your project'))).toBe(true);
@@ -393,6 +393,36 @@ describe('runInit round-trip', () => {
     expect(catalog.host.identifier).toBe('did:web:example.com');
     // The wizard opted into the report, so the build wrote one without a CLI flag.
     expect(existsSync(join(dir, '.ora', 'report.json'))).toBe(true);
+  });
+
+  // The regression CI missed: a normal run that gates *nothing* must leave the MCP mount published.
+  // Previously only the "gated → dropped" path was tested, so an empty catalog looked acceptable.
+  it('a default run gates nothing and the built catalog keeps the MCP entry', async () => {
+    writeBareApp(dir);
+    addMcpMount(dir);
+
+    // Press Enter at gating (nothing marked as requiring login) → no isGated written.
+    const prompter = new ScriptedPrompter({
+      text: ['https://acme.com'],
+      multiSelect: [[]],
+      confirm: [false, false, false, false, false, false],
+    });
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+    expect(readFileSync(join(dir, 'ax.config.ts'), 'utf8')).not.toContain('isGated');
+
+    stdout = [];
+    const code = await runCli([], {
+      cwd: dir,
+      stdout: (l) => stdout.push(l),
+      stderr: (l) => stderr.push(l),
+      confirm: async () => true,
+    });
+    expect(code).toBe(0);
+    const catalog = JSON.parse(readFileSync(join(dir, CATALOG_OUTPUT_PATH), 'utf8'));
+    expect(catalog.entries.length).toBeGreaterThan(0);
+    expect(
+      catalog.entries.some((e: { identifier: string }) => e.identifier.includes('mcp-server')),
+    ).toBe(true);
   });
 });
 

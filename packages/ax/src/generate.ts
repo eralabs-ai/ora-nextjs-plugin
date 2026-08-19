@@ -30,7 +30,7 @@ import type { JsonLdScaffoldResult } from './scaffold-json-ld.js';
 import { SPEC_VERSION } from './schema.js';
 import { buildMcpServerCard, type McpServerCard } from './server-card.js';
 import { readSiteMetadata } from './site-metadata.js';
-import { hostnameFromUrl, readSiteUrlFromEnv, resolveSiteUrl } from './site-url.js';
+import { hostnameFromUrl, readSiteUrlFromEnv, resolveSiteUrl, servedPath } from './site-url.js';
 import type { AiCatalog, CatalogEntry, EntryAuth } from './types.js';
 import type { EmissionTarget } from './write.js';
 
@@ -264,7 +264,23 @@ export async function generateCatalog(
   const inferredEntries: CatalogEntry[] = [
     ...buildMcpEntries({ mounts: mcpMounts, siteUrl, basePath, warn }),
   ];
-  const serverCard = buildMcpServerCard({ mounts: mcpMounts, siteUrl, basePath, site, recommend });
+
+  // Gating governs the server card too, not just catalog entries: the card is how agents actually
+  // discover an MCP server, so advertising a gated mount's card as open is the same
+  // precision-over-recall failure `applyGating` prevents for entries. Keep a mount's card only when
+  // it isn't gated, or when we can describe its auth honestly (a detected withMcpAuth descriptor).
+  // The gate `path` is the served (basePath-prefixed) pathname, matching what `applyGating` derives
+  // from the entry URL, so a mount is judged identically here and there.
+  const gating = resolveGating(config.isGated);
+  const cardMounts = mcpMounts.filter((mount) => {
+    const target: GateTarget = {
+      kind: 'mcp',
+      path: servedPath(basePath, mount.pathname),
+      ...(mount.capabilities.length > 0 ? { tools: mount.capabilities } : {}),
+    };
+    return !gating(target) || mount.auth !== undefined;
+  });
+  const serverCard = buildMcpServerCard({ mounts: cardMounts, siteUrl, basePath, site, recommend });
 
   const openApiEntry = detectOpenApi({ cwd, siteUrl, basePath, warn, recommend });
   if (openApiEntry) inferredEntries.push(openApiEntry);
@@ -298,7 +314,7 @@ export async function generateCatalog(
   // here. A gating decision, below, is worth warning about: a gated surface either carries an auth
   // descriptor or is dropped, and both are worth recording in the build output/report.
   const { entries: overridden } = applyEntryOverrides(inferredEntries, config.entries);
-  const entries = applyGating(overridden, resolveGating(config.isGated), warn);
+  const entries = applyGating(overridden, gating, warn);
 
   // Detect-and-recommend for the discovery/access artifacts that affect agent-readiness. These
   // never add catalog entries and never fail a build — they only surface advisory recommendations.

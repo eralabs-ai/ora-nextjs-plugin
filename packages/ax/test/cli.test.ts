@@ -252,6 +252,25 @@ describe('runCli', () => {
     expect(stdout.some((l) => l.includes('MCP server card'))).toBe(true);
   });
 
+  it('writes neither entry nor server card for a gated MCP mount', async () => {
+    // Gating must govern the well-known server card too, not just the catalog entry — the card is
+    // how agents discover an MCP server, so advertising a gated mount's card as open is the exact
+    // precision failure gating exists to prevent.
+    writeMcpFixture(dir);
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com', isGated: (t) => ['/mcp'].includes(t.path) };\n",
+      'utf8',
+    );
+
+    const code = await runCli(['--yes'], { ...io, cwd: dir });
+
+    expect(code).toBe(0);
+    const catalog = JSON.parse(readFileSync(join(dir, CATALOG_OUTPUT_PATH), 'utf8'));
+    expect(catalog.entries).toEqual([]);
+    expect(existsSync(join(dir, SERVER_CARD_OUTPUT_PATH))).toBe(false);
+  });
+
   it('writes no server card when there is no MCP mount', async () => {
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
 

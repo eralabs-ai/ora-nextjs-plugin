@@ -292,8 +292,8 @@ async function askGating(
   if (surfaces.length === 0) return { floorKept: true, gatedPaths: [] };
 
   const gatedPaths = await prompter.multiSelect(
-    'These agent surfaces will be advertised as open. Check any that require signing in — they will ' +
-      'be gated and never advertised as open. Press Enter if all are open:',
+    'These agent surfaces are public by default (agents use them without logging in). Select any ' +
+      'that DO require logging in — press Enter if none of them do:',
     surfaces,
   );
   const publicPaths = surfaces
@@ -301,10 +301,10 @@ async function askGating(
     .filter((value) => !gatedPaths.includes(value));
 
   stdout(
-    `[ax]   Open (advertised for agents): ${publicPaths.length > 0 ? publicPaths.join(', ') : 'none'}`,
+    `[ax]   Public (advertised to agents): ${publicPaths.length > 0 ? publicPaths.join(', ') : 'none'}`,
   );
   stdout(
-    `[ax]   Gated (never advertised as open): ${
+    `[ax]   Requires login (not advertised): ${
       gatedPaths.length > 0
         ? `${gatedPaths.join(', ')}, plus the built-in ${FLOOR_SUMMARY} floor`
         : `the built-in ${FLOOR_SUMMARY} floor`
