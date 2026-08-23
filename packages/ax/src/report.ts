@@ -41,8 +41,17 @@ export interface ReportScaffolds {
 export interface ReportMarkdownTwins {
   /** `ax.config` `markdownTwins`, resolved (default `true`). */
   enabled: boolean;
-  /** Twins written this run: which route, where it landed, and which tier derived it. */
-  written: Array<{ route: string; path: string; tier: TwinTier; source: 'mdx' | 'prerender' }>;
+  /**
+   * Twins written this run: which route, where it landed, and which tier derived it. `source:
+   * 'metadata'` marks the lowest-confidence rung — a client-rendered page's twin derived from its
+   * own metadata, honest about describing (not mirroring) the page.
+   */
+  written: Array<{
+    route: string;
+    path: string;
+    tier: TwinTier;
+    source: 'mdx' | 'prerender' | 'metadata';
+  }>;
   /** Routes already covered by a user-authored markdown source ax never touches. */
   userOwned: Array<{ route: string; source: string }>;
   /** Routes with no twin, each with its reason code and a human-actionable sentence. */

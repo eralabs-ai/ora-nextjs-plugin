@@ -31,12 +31,18 @@ describe('deriveHtmlTwin', () => {
 
   it('skips a page with neither landmark rather than converting <body>', async () => {
     const result = await deriveHtmlTwin(page(`<div><h1>Divs</h1><p>${FILLER}</p></div>`));
-    expect(result).toEqual({ ok: false, reason: 'no-content-region' });
+    // The refusal still carries the resolved head — the metadata twin rung reads it.
+    expect(result).toEqual({
+      ok: false,
+      reason: 'no-content-region',
+      title: 'Acme Docs',
+      description: "Acme's docs.",
+    });
   });
 
   it('skips a JS-shell page (under the text minimum) — an empty twin is a lie', async () => {
     const result = await deriveHtmlTwin(page('<main><div id="root"></div></main>'));
-    expect(result).toEqual({ ok: false, reason: 'too-little-text' });
+    expect(result).toMatchObject({ ok: false, reason: 'too-little-text', title: 'Acme Docs' });
     // Sanity: the guard threshold is what the audit criterion draws the line at.
     expect(MIN_TWIN_TEXT_CHARS).toBe(200);
   });

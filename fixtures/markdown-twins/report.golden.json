@@ -54,6 +54,12 @@
         "path": "public/guides/setup.md",
         "tier": 2,
         "source": "prerender"
+      },
+      {
+        "route": "/live",
+        "path": "public/live.md",
+        "tier": 2,
+        "source": "metadata"
       }
     ],
     "userOwned": [
@@ -71,7 +77,7 @@
       {
         "route": "/shell",
         "reason": "too-little-text",
-        "detail": "The prerendered HTML carries under 200 characters of text — a JS-shell page, whose twin would be an empty page presented as content."
+        "detail": "The prerendered HTML carries under 200 characters of text — a JS-shell page, whose twin would be an empty page presented as content. If this page renders client-side, keep page.tsx a server component that exports its own `metadata` (title + description) and renders your client component — ax then derives a minimal metadata twin, with no pre-hydration placeholder DOM (which would flicker)."
       }
     ],
     "dynamicRouteCount": 1,
@@ -98,6 +104,13 @@
       "bytes": 656,
       "chars": 656,
       "tokens": 164
+    },
+    {
+      "artifact": "markdown-twin",
+      "path": "public/live.md",
+      "bytes": 506,
+      "chars": 504,
+      "tokens": 126
     }
   ],
   "ora": {
@@ -177,6 +190,7 @@
   "warnings": [],
   "recommendations": [
     "No OpenAPI doc found (public/openapi.json) — an OpenAPI doc lets agents understand and call your API without guessing at routes or schemas. ax never generates one; produce it however your API is defined (many schema/validation libraries can emit OpenAPI from your existing route definitions) and commit the result to public/openapi.json.",
+    "1 page's twin is derived from page metadata only (the content renders in the browser). The twins say so honestly; for full-fidelity twins, give those pages server-rendered content.",
     "1 page file has dynamic URL segments, so no markdown twins exist for them (no build-time HTML, and ax never guesses URLs). To give those pages a markdown representation, add a markdown source per page or prerender representative routes.",
     "No llms.txt found — a short natural-language guide agents read to decide whether your site fits their task, and to find your key pages. Add one at app/llms.txt/route.ts (or public/llms.txt), or set scaffoldLlmsTxt: true in ax.config to have a starter written for you. Pair it with JSON-LD structured data (an Organization block with a sameAs array): llms.txt says what your site is for, JSON-LD identifies it as an entity registries can rank — the two reinforce each other, so add both rather than one alone.",
     "No WebMCP tools found, but your pages contain <form> elements — every form is a latent agent tool. Adding toolname and tooldescription attributes (the W3C WebMCP declarative API) makes a form callable by browser-resident agents with no JS changes, and is scored by Ora’s webmcp check. Chrome ships WebMCP in 157 (origin trial 149–156).",

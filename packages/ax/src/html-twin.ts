@@ -33,7 +33,17 @@ export type HtmlTwinResult =
       /** The document's meta description, when declared. */
       description?: string;
     }
-  | { ok: false; reason: HtmlTwinSkipReason };
+  | {
+      ok: false;
+      reason: HtmlTwinSkipReason;
+      /**
+       * The document's resolved head metadata, carried even on a refusal: a page with no
+       * server-rendered *content* may still own real metadata, which the metadata twin rung (see
+       * markdown-twins.ts) can honestly derive a minimal twin from.
+       */
+      title?: string;
+      description?: string;
+    };
 
 /** Elements that never belong in a content twin, removed from the region before conversion. */
 const NON_CONTENT_SELECTOR = 'script, style, noscript, template, nav, svg';
@@ -46,15 +56,29 @@ export async function deriveHtmlTwin(html: string): Promise<HtmlTwinResult> {
   const { createDocument } = await import('@mixmark-io/domino');
   const document = createDocument(html);
 
+  // Resolved head metadata, extracted up front so refusals carry it too (the metadata twin rung
+  // reads it off failed derivations).
+  const title =
+    document.querySelector('title')?.textContent?.trim() ||
+    document.querySelector('h1')?.textContent?.trim() ||
+    undefined;
+  const description =
+    document.querySelector('meta[name="description"]')?.getAttribute('content')?.trim() ||
+    undefined;
+  const head = {
+    ...(title !== undefined ? { title } : {}),
+    ...(description !== undefined ? { description } : {}),
+  };
+
   // domino returns undefined (not the DOM-spec null) on a query miss, so test loosely.
   const region = document.querySelector('main') ?? document.querySelector('article');
-  if (region == null) return { ok: false, reason: 'no-content-region' };
+  if (region == null) return { ok: false, reason: 'no-content-region', ...head };
 
   const junk = region.querySelectorAll(NON_CONTENT_SELECTOR);
   for (let i = junk.length - 1; i >= 0; i--) junk[i]?.remove();
 
   const text = (region.textContent ?? '').replace(/\s+/g, ' ').trim();
-  if (text.length < MIN_TWIN_TEXT_CHARS) return { ok: false, reason: 'too-little-text' };
+  if (text.length < MIN_TWIN_TEXT_CHARS) return { ok: false, reason: 'too-little-text', ...head };
 
   const { default: TurndownService } = await import('turndown');
   const { gfm } = await import('turndown-plugin-gfm');
@@ -66,21 +90,8 @@ export async function deriveHtmlTwin(html: string): Promise<HtmlTwinResult> {
   service.use(gfm);
 
   const markdown = `${service.turndown(region.innerHTML).trim()}\n`;
-  if (markdown.length > MAX_TWIN_CHARS) return { ok: false, reason: 'too-large' };
-  if (fenceMarkerCount(markdown) % 2 !== 0) return { ok: false, reason: 'uneven-fences' };
+  if (markdown.length > MAX_TWIN_CHARS) return { ok: false, reason: 'too-large', ...head };
+  if (fenceMarkerCount(markdown) % 2 !== 0) return { ok: false, reason: 'uneven-fences', ...head };
 
-  const title =
-    document.querySelector('title')?.textContent?.trim() ||
-    document.querySelector('h1')?.textContent?.trim() ||
-    undefined;
-  const description =
-    document.querySelector('meta[name="description"]')?.getAttribute('content')?.trim() ||
-    undefined;
-
-  return {
-    ok: true,
-    markdown,
-    ...(title !== undefined ? { title } : {}),
-    ...(description !== undefined ? { description } : {}),
-  };
+  return { ok: true, markdown, ...head };
 }

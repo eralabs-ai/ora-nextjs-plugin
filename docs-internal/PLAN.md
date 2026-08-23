@@ -1352,6 +1352,15 @@ Deviations, each with its reason:
 - **The manifest module is refresh-if-present on full runs** (created only by `ax manifest` / the
   wizard's opt-in wiring), so a plain build never introduces a new source-tree file silently.
 
+Amendment (2026-08-23, from demo manual testing): a **metadata rung** was added between Tiers 2
+and 3 — a content-less (client-rendered) page whose `page.tsx` declares its *own* metadata gets a
+minimal twin from the rendered head (title/description + an explicit "content renders in the
+browser" note), labeled `source: 'metadata'` in the report. Ownership is read from the page source
+(the rendered head can't distinguish page metadata from the layout cascade) and values from the
+render; heads shared across routes are refused as inherited-in-practice. Skip guidance was also
+reworded: wrap {children} in <main> at the layout (never per-page placeholder pre-hydration DOM,
+which paints and flickers), and declare per-page metadata for client-rendered pages.
+
 ---
 
 ## Phase 10 — Runtime: `@ora-ai/ax/middleware` (added 2026-08-16)

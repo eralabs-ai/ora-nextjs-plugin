@@ -8,6 +8,7 @@ import { isGeneratedMarkdown, renderFrontmatter } from './markdown-artifact.js';
 import { deriveMdxTwin } from './mdx-twin.js';
 import { resolvePagesPathname } from './pages-dir.js';
 import type { RouterModel } from './router-model.js';
+import { scrubSource } from './scrub-source.js';
 import { absoluteOrServedUrl, servedPath } from './site-url.js';
 import { pathSegments, ROUTE_FILE_NAMES, walkFiles } from './walk-files.js';
 
@@ -49,10 +50,15 @@ const SKIP_DETAIL: Record<TwinSkipReason, string> = {
   'empty-mdx': 'The MDX source contains no markdown prose to derive a twin from.',
   'no-content-region':
     'The prerendered HTML has no <main> or <article> landmark — extracting <body> would drag ' +
-    'nav/footer chrome into the twin. Wrap the page content in <main> to get a twin.',
+    'nav/footer chrome into the twin. Fix it once for every page by wrapping {children} in ' +
+    '<main> in your root layout. Never add placeholder pre-hydration DOM just to create ' +
+    'content — it paints before hydration and flickers.',
   'too-little-text':
     'The prerendered HTML carries under 200 characters of text — a JS-shell page, whose twin ' +
-    'would be an empty page presented as content.',
+    'would be an empty page presented as content. If this page renders client-side, keep ' +
+    'page.tsx a server component that exports its own `metadata` (title + description) and ' +
+    'renders your client component — ax then derives a minimal metadata twin, with no ' +
+    'pre-hydration placeholder DOM (which would flicker).',
   'too-large': 'The converted markdown exceeds the 100,000-character fetch-truncation ceiling.',
   'uneven-fences': 'Conversion produced an unclosed code fence, which would corrupt the twin.',
 };
@@ -65,8 +71,12 @@ export interface PlannedTwin {
   /** Absolute path the twin file will be written to, under `public/`. */
   filePath: string;
   tier: TwinTier;
-  /** What the content was derived from. */
-  source: 'mdx' | 'prerender';
+  /**
+   * What the content was derived from. `'metadata'` marks the lowest-confidence rung: a
+   * client-rendered page with no server-rendered content whose *own* metadata yields a minimal,
+   * explicitly-labeled twin (see the metadata rung in {@link planMarkdownTwins}).
+   */
+  source: 'mdx' | 'prerender' | 'metadata';
   /** The full file contents (frontmatter + body). */
   content: string;
 }
@@ -265,6 +275,20 @@ export async function planMarkdownTwins(
 
   // --- Tier 2: prerendered HTML from the build output, for every remaining static route. ---
   const htmlLookup = buildPrerenderedHtmlLookup(cwd, options.distDir ?? '.next');
+  // Every parsed page's resolved head (title + description), keyed by route — the metadata rung's
+  // dedupe basis: a head shared by more than one route is inherited/site-wide by definition.
+  const headKeyByRoute = new Map<string, string>();
+  const headKey = (title?: string, description?: string): string =>
+    `${title ?? ''} ${description ?? ''}`;
+  /** Content-less pages that may still earn a metadata twin, resolved after every head is known. */
+  const metadataCandidates: Array<{
+    route: string;
+    reason: TwinSkipReason;
+    title: string;
+    description?: string;
+  }> = [];
+  const pageFileByRoute = buildAppPageFileLookup(router);
+
   for (const route of router.listPageRoutes()) {
     if (covered.has(route)) continue;
     if (claimUserOwned(route)) continue;
@@ -288,8 +312,31 @@ export async function planMarkdownTwins(
       continue;
     }
     const derived = await deriveHtmlTwin(html);
+    if (derived.title !== undefined || derived.description !== undefined) {
+      headKeyByRoute.set(route, headKey(derived.title, derived.description));
+    }
     if (!derived.ok) {
-      skip(route, derived.reason);
+      // The metadata rung: a page with no server-rendered *content* may still be twinned from
+      // its metadata — but only when the page declares that metadata itself. The rendered head
+      // can't distinguish page-owned metadata from the layout's cascade (the values look the
+      // same either way), so ownership is read from the page source, and the resolved values
+      // from the head — each side answering the question only it can.
+      const contentless =
+        derived.reason === 'no-content-region' || derived.reason === 'too-little-text';
+      if (
+        contentless &&
+        derived.title !== undefined &&
+        pageOwnsMetadata(pageFileByRoute.get(route))
+      ) {
+        metadataCandidates.push({
+          route,
+          reason: derived.reason,
+          title: derived.title,
+          ...(derived.description !== undefined ? { description: derived.description } : {}),
+        });
+      } else {
+        skip(route, derived.reason);
+      }
       continue;
     }
     planWrite({
@@ -298,6 +345,38 @@ export async function planMarkdownTwins(
       source: 'prerender',
       content: `${frontmatterFor(route, derived.title, derived.description)}\n${derived.markdown}`,
     });
+  }
+
+  // Resolve the metadata candidates now that every page's head is known. A candidate whose
+  // title+description also appear on another route is carrying inherited/shared metadata — N
+  // identical twins would each claim to describe a specific page, so shared heads are refused
+  // (falling back to the original skip reason, whose detail says to declare per-page metadata).
+  let metadataTwins = 0;
+  for (const candidate of metadataCandidates) {
+    const key = headKey(candidate.title, candidate.description);
+    const shared = [...headKeyByRoute.entries()].some(
+      ([route, other]) => route !== candidate.route && other === key,
+    );
+    if (shared) {
+      skip(candidate.route, candidate.reason);
+      continue;
+    }
+    planWrite({
+      route: candidate.route,
+      tier: 2,
+      source: 'metadata',
+      content:
+        `${frontmatterFor(candidate.route, candidate.title, candidate.description)}\n` +
+        metadataTwinBody(candidate.title, candidate.description),
+    });
+    metadataTwins++;
+  }
+  if (metadataTwins > 0) {
+    options.recommend(
+      `${metadataTwins} page${metadataTwins === 1 ? "'s twin is" : "s' twins are"} derived from ` +
+        'page metadata only (the content renders in the browser). The twins say so honestly; for ' +
+        'full-fidelity twins, give those pages server-rendered content.',
+    );
   }
 
   // --- Tier 3: dynamic routes have no statically knowable URL — counted, recommended, refused. ---
@@ -336,6 +415,52 @@ export async function planMarkdownTwins(
     servedPaths,
     dynamicRouteCount,
   };
+}
+
+/**
+ * A page-owned metadata declaration: `export const metadata = …` or `export function
+ * generateMetadata(…)` in the page source. App Router only (the Pages Router has no metadata
+ * export — its `<Head>` fills the head at render time, with no static ownership signal, so its
+ * content-less pages never reach the metadata rung). Matched on scrubbed source so a mention in a
+ * comment can't misfire.
+ */
+const OWNS_METADATA_RE =
+  /\bexport\s+(?:const|let|var)\s+metadata\b|\bexport\s+(?:async\s+)?function\s+generateMetadata\b/;
+
+/** Whether the page source file declares its own metadata (vs inheriting the layout's). */
+function pageOwnsMetadata(pageFile: string | undefined): boolean {
+  if (pageFile === undefined) return false;
+  try {
+    return OWNS_METADATA_RE.test(scrubSource(readFileSync(pageFile, 'utf8')));
+  } catch {
+    return false;
+  }
+}
+
+/** Route → App Router page source file, for the metadata-ownership check. */
+function buildAppPageFileLookup(router: RouterModel): Map<string, string> {
+  const lookup = new Map<string, string>();
+  if (router.appDir === undefined) return lookup;
+  for (const file of walkFiles(router.appDir, (name) => /^page\.(?:tsx|jsx|js)$/.test(name))) {
+    const route = resolvePagePathname(file.absolutePath, router.appDir);
+    if (route !== undefined && !lookup.has(route)) lookup.set(route, file.absolutePath);
+  }
+  return lookup;
+}
+
+/**
+ * The minimal metadata twin: the page's own title and description, plus an explicit statement of
+ * what this document is — it describes the page rather than mirroring content, and says so, which
+ * is what keeps the lowest-confidence rung honest.
+ */
+function metadataTwinBody(title: string, description: string | undefined): string {
+  const lines = [`# ${title}`, ''];
+  if (description !== undefined) lines.push(description, '');
+  lines.push(
+    '> This page renders its content in the browser, so there is no server-rendered content to ' +
+      'mirror here. This document is generated from the page’s own metadata.',
+  );
+  return `${lines.join('\n')}\n`;
 }
 
 /** Every `.md` under `public/` carrying the generated-by marker — ax's own previous output. */

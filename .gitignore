@@ -29,6 +29,7 @@ fixtures/**/public/.well-known/mcp/server-card.json
 # up as untracked, which is the prompt to snapshot and list it.
 fixtures/markdown-twins/public/index.md
 fixtures/markdown-twins/public/guides/
+fixtures/markdown-twins/public/live.md
 fixtures/mdx-content/public/index.md
 fixtures/mdx-content/public/guide.md
 fixtures/discovery/public/index.md

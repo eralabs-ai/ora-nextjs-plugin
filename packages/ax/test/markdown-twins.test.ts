@@ -214,3 +214,69 @@ describe('applyMarkdownTwinPlan', () => {
     expect(existsSync(join(dir, 'public', 'gone.md'))).toBe(false);
   });
 });
+
+describe('planMarkdownTwins — metadata rung (content-less pages with page-owned metadata)', () => {
+  /** A prerendered shell: real head metadata, an empty <main>. */
+  function shellHtml(title: string, description: string): string {
+    return (
+      `<html><head><title>${title}</title><meta name="description" content="${description}"/>` +
+      `</head><body><main><div id="app"></div></main></body></html>`
+    );
+  }
+  const SERVER_SHELL_PAGE =
+    "import { Client } from './client';\n" +
+    "export const metadata = { title: 'Results', description: 'Search results, live-fetched.' };\n" +
+    'export default function Page() {\n  return (\n    <main>\n      <Client />\n    </main>\n  );\n}\n';
+
+  it('derives a minimal, honest twin from a page-owned head when the page has no content', async () => {
+    write('app/results/page.tsx', SERVER_SHELL_PAGE);
+    write('.next/server/app/results.html', shellHtml('Results', 'Search results, live-fetched.'));
+
+    const result = await plan();
+    expect(result.skips).toEqual([]);
+    expect(result.writes).toMatchObject([
+      { route: '/results', tier: 2, source: 'metadata', servedPath: '/results.md' },
+    ]);
+    const content = result.writes[0]?.content ?? '';
+    expect(content).toContain('title: "Results"');
+    expect(content).toContain('# Results');
+    expect(content).toContain('Search results, live-fetched.');
+    expect(content).toContain('renders its content in the browser');
+    expect(recommendations.some((r) => r.includes('derived from page metadata'))).toBe(true);
+  });
+
+  it('refuses when the page does not declare its own metadata (inherited head)', async () => {
+    write('app/results/page.tsx', 'export default () => null;');
+    write('.next/server/app/results.html', shellHtml('Site', 'Site-wide blurb.'));
+
+    const result = await plan();
+    expect(result.writes).toEqual([]);
+    expect(result.skips).toMatchObject([{ route: '/results', reason: 'too-little-text' }]);
+    // The skip detail carries the fix: per-page metadata from a server page.tsx.
+    expect(result.skips[0]?.detail).toContain('metadata');
+  });
+
+  it('refuses when the head values are shared with another route (inherited in practice)', async () => {
+    // Both pages *declare* metadata but resolve to identical heads — shared constants. N twins
+    // with the same body would each claim to describe a specific page, so both are refused.
+    write('app/a/page.tsx', SERVER_SHELL_PAGE);
+    write('app/b/page.tsx', SERVER_SHELL_PAGE);
+    write('.next/server/app/a.html', shellHtml('Same', 'Same blurb.'));
+    write('.next/server/app/b.html', shellHtml('Same', 'Same blurb.'));
+
+    const result = await plan();
+    expect(result.writes).toEqual([]);
+    expect(result.skips.map((s) => s.route).sort()).toEqual(['/a', '/b']);
+  });
+
+  it('a metadata mention in a comment never counts as ownership', async () => {
+    write(
+      'app/results/page.tsx',
+      '// TODO: export const metadata = { title: "..." } later\nexport default () => null;',
+    );
+    write('.next/server/app/results.html', shellHtml('Results', 'Own-looking head.'));
+    const result = await plan();
+    expect(result.writes).toEqual([]);
+    expect(result.skips).toMatchObject([{ route: '/results', reason: 'too-little-text' }]);
+  });
+});
