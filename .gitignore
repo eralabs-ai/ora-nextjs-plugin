@@ -35,7 +35,13 @@ fixtures/mdx-content/public/index.md
 fixtures/mdx-content/public/guide.md
 fixtures/mcp-multi-server/public/index.md
 fixtures/discovery/public/index.md
+fixtures/middleware/public/index.md
 fixtures/*/public/auth.md
+
+# The serving-manifest data module a fixture's `prebuild: ax manifest` regenerates every build —
+# build output there (real projects may commit theirs; a fixture must rebuild it from scratch).
+fixtures/**/ax-manifest.ts
+fixtures/**/ax-manifest.js
 
 # The machine-readable build report ax writes when a fixture's postbuild runs `ax --report`. Build
 # output — the tracked artifact is the normalized golden (fixtures/*/report.golden.json), which the

@@ -21,6 +21,7 @@ function nothingPresent(): OraArtifactPresence {
     'mcp-server': false,
     'mcp-server-card': false,
     'auth.md': false,
+    middleware: false,
   };
 }
 
@@ -51,6 +52,7 @@ describe('ORA_CHECK_MAP', () => {
       'mcp-server',
       'mcp-server-card',
       'auth.md',
+      'middleware',
     ]);
   });
 });

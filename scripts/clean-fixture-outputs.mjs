@@ -24,6 +24,12 @@ const GENERATED_JSON = [
   join('public', '.well-known', 'mcp', 'server-card.json'),
   // The named per-server cards a multi-server fixture emits — the whole directory is generated.
   join('public', '.well-known', 'mcp', 'server-card'),
+  // The serving-manifest data module `ax manifest` (a fixture's prebuild) regenerates — build
+  // output in a fixture, so the regen must start without one, exactly like a fresh checkout.
+  'ax-manifest.ts',
+  'ax-manifest.js',
+  join('src', 'ax-manifest.ts'),
+  join('src', 'ax-manifest.js'),
 ];
 
 /** Matches the frontmatter marker every ax-generated markdown file carries. */

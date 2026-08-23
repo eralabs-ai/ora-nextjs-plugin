@@ -331,3 +331,11 @@ export {
 } from './agent-ua.js';
 
 export { listStaticPageRoutes, resolvePagePathname, listMdxPageFiles } from './app-dir.js';
+
+export {
+  detectMiddleware,
+  buildMiddlewareWiringInstruction,
+  MIDDLEWARE_ENTRY_SPECIFIER,
+  MIDDLEWARE_MATCHER_LITERAL,
+  type MiddlewareStatus,
+} from './middleware-wiring.js';

@@ -1417,25 +1417,36 @@ browser contains "cursor" in its UA and must get HTML).
 
 ### 10.1 Packaging
 
-- [ ] New export `"./middleware"` in `packages/ax/package.json` `exports`, built as its own tsup
+- [x] New export `"./middleware"` in `packages/ax/package.json` `exports`, built as its own tsup
       entry. **Zero dependencies, Web-API only** (Edge-safe) — ajv/jiti must not enter this
       entry's import graph (the CLI keeps them; the runtime entry is the only code a consumer's
       app imports at runtime). `next` becomes an **optional peer dependency** (types only),
       `sideEffects: false` stays.
+      (Shipped: `./middleware` → `dist/middleware.{js,d.ts}` via a named tsup entry; the built
+      bundle's whole import graph is two dependency-free chunks (agent-ua + markdown-headers).
+      `test/middleware-import-graph.test.ts` asserts the source-level closure: relative runtime
+      imports only, no packages, no Node built-ins, `next/server` type-only. `next >=14` optional
+      peer + devDep for typechecking. `sideEffects: false` didn't exist yet — added, not kept.)
 
 ### 10.2 Detection (`src/middleware/detection.ts`)
 
-- [ ] Implement the 3-layer cascade exactly as specified in the sync section, consuming the
+- [x] Implement the 3-layer cascade exactly as specified in the sync section, consuming the
       Phase 7 corpus: (1) UA-substring match, suppressed on real browser document navigations;
       (2) `Signature-Agent` header contains a known domain; (3) heuristic — `sec-fetch-mode`
       absent + `BOT_LIKE_REGEX` UA + not in `TRADITIONAL_BOT_PATTERNS`. Return a discriminated
       result (`{ detected, method }`) so `onDetection` can log the method. Cover the agreed edge
       cases (embedded-browser UA like Cursor's must stay HTML; Googlebot never rerouted;
       Signature-Agent positive) as table tests.
+      (Shipped with one strengthening: the `TRADITIONAL_BOT_PATTERNS` veto runs **before all
+      three layers**, not just inside the heuristic — "never rerouted" is non-optional, so a UA
+      naming a search/preview/uptime bot short-circuits everything. `acceptsMarkdown` is checked
+      independently of detection: an explicit `Accept: text/markdown` from any client — a search
+      crawler included — is honest content negotiation, not cloaking. Table tests in
+      `test/middleware-detection.test.ts` use real UA strings.)
 
 ### 10.3 Behavior (`src/middleware/index.ts`)
 
-- [ ] A composing HOF (working name `withAx(options, existingMiddleware?)` — final name open),
+- [x] A composing HOF (working name `withAx(options, existingMiddleware?)` — final name open),
       taking the **generated manifest** (imported module, Phase 9.4) plus `onDetection?` and
       `canonicalUrl?` overrides. Per request, in order:
       1. Not an agent and no markdown `Accept` → fall through to the wrapped middleware /
@@ -1452,36 +1463,82 @@ browser contains "cursor" in its UA and must get HTML).
          the discovery artifacts that exist) — the runtime completion of the Phase 4.5 agent-404,
          and the "agents discard 404 bodies" doctrine applied with real build-derived data instead
          of a generic template. Plain clients keep the honest 404 via the normal app path.
-- [ ] **Armored `onDetection`:** sync throws swallowed; promises to `event.waitUntil()`.
+- [x] **Armored `onDetection`:** sync throws swallowed; promises to `event.waitUntil()`.
       Telemetry must never break serving.
-- [ ] **Canonical-URL hardening:** when deriving the canonical from request headers (proxy
+- [x] **Canonical-URL hardening:** when deriving the canonical from request headers (proxy
       setups), round-trip `Host`/`X-Forwarded-Proto` through the URL parser and rebuild from
       parsed components; unparseable → omit the Link header rather than reflect raw input
       (header-injection guard — hostile `Host` values must never corrupt a response header).
+      (10.3 shipped as specced with four deliberate deltas, each with its reason:
+      **(a) name resolved: `withAx`** (product call, 2026-08-23). **(b) The gated check runs
+      *before* the twin check** — the plan ordered twin first, but a stray user `.md` shadowing a
+      gated route would then serve markdown for a gated path; the gate must win. **(c) `next` is
+      honored as *types-only*:** nothing from `next/server` is imported at runtime — the rewrite
+      is a plain `Response` carrying `x-middleware-rewrite` (exactly what `NextResponse.rewrite`
+      sets, confirmed against next@15.5.20 source) and fall-through returns `undefined` (Next's
+      documented "continue the chain"); the fixture's `next start` dogfood pins the contract.
+      **(d) A new manifest field, `dynamicRoutePrefixes`** (`RouterModel.listDynamicRoutePrefixes`:
+      `/blog/[slug]` → `/blog`): with a static-routes-only manifest, step 4 would answer a real
+      dynamic page (`/blog/hello`) with a "this URL does not exist" body — a lie of exactly the
+      kind the twin ladder refuses — so under a dynamic prefix the middleware always falls
+      through and the app (and its agent-404) answers. Also: the wayfinding 200 carries
+      `Vary: Accept` but no canonical Link (a URL on no route has no canonical HTML page), and the
+      exported `axMatcher` is documentation — the wiring instruction pastes the literal, because
+      Next only statically analyzes `config.matcher`.)
 
 ### 10.4 Wiring (same rules as every scaffold)
 
-- [ ] Never edit an existing `middleware.ts`. The CLI prints the exact 3-line wiring (import,
+- [x] Never edit an existing `middleware.ts`. The CLI prints the exact 3-line wiring (import,
       wrap, matcher) phrased for a coding agent, and `.ora/report.json` carries the same strings —
       identical to the JSON-LD wiring pattern.
+      (Shipped as `src/middleware-wiring.ts`: `detectMiddleware` (root or `src/`, wiring detected
+      textually via the `@ora-ai/ax/middleware` specifier — same posture as the agent-404
+      signpost check) + `buildMiddlewareWiringInstruction` (one string, manifest-location-aware,
+      prefixed with the `ax manifest` step when no module exists, "wrap your existing default
+      export" when a middleware is present). It flows through `recommend()` *and* a new
+      `middleware` ora artifact mapped to `markdown-negotiation` / `markdown-negotiation-vary`
+      (addressed when wired, N/A with no page routes), plus a `middleware` report section
+      (`present`/`wiredToAx`/`source`).)
 - [ ] Optionally scaffold `middleware.ts` **only when none exists** (write-once, behind an opt-in
       flag / the wizard question).
+      (**Deliberately deferred, 2026-08-23 (product call): this PR ships wiring-instructions
+      only.** The scaffold + wizard question follow in a small later PR — keeps this one focused
+      on the runtime entry; nothing here blocks it.)
 
 ### 10.5 Verification
 
-- [ ] Unit: detection table tests; manifest gating (gated path never rewritten; unlisted path
+- [x] Unit: detection table tests; manifest gating (gated path never rewritten; unlisted path
       never rewritten); header invariants (Vary deduped against pre-existing values; canonical
       Link not duplicated); 404-negotiation body renders from a manifest fixture.
-- [ ] **Dogfood target:** a fixture app running `next start` must pass Ora's
+      (`test/middleware.test.ts` — includes a compile-time assignability check that the writer's
+      `ServingManifestData` stays readable as the runtime's `AxServingManifest`, and born-passing
+      assertions on the wayfinding body: H1, links, zero code fences, under the size ceiling.)
+- [x] **Dogfood target:** a fixture app running `next start` must pass Ora's
       `markdown-negotiation-vary` semantics — dual-fetch of the same URL (with and without
       `Accept: text/markdown`) returns different content-types, correct bodies both ways, and
       `Vary: Accept` on the negotiated response. This is the strictest known external check; the
       header helper should make failing it impossible. Live-deploy confirmation folds into the
       existing Vercel deploy steps.
+      (Shipped as `fixtures/middleware` + `scripts/dogfood-middleware.mjs` (`pnpm
+      dogfood:middleware`, run by CI's fixtures job after the snapshot verify): 18 probes — the
+      dual fetch, both cloaking guards, twin-less/gated/dynamic fall-throughs, and the
+      wayfinding-vs-honest-404 pair. Fixture design notes: `"prebuild": "ax manifest"` +
+      committed hand-authored `public/docs.md` so the *first* build's manifest already lists a
+      twin (the generated homepage twin demonstrates — and documents — the one-build staleness
+      instead); `ax-manifest.ts` is gitignored + cleaned as fixture build output. Two probe
+      gotchas worth remembering: Node's fetch/undici strips `sec-fetch-*` request headers, so the
+      embedded-browser probe goes through curl; React SSR interleaves comment markers between text
+      nodes, so body assertions never match joined strings.)
 
 **Done when:** the fixture passes the dual-fetch dogfood test locally; no rewrite ever fires for a
 gated or unlisted path (asserted); the wiring instructions appear in CLI output + report; the
 runtime entry's bundle contains no CLI dependencies.
+✓ All four hold (2026-08-23): dogfood 18/18 locally + wired into CI; gated/unlisted never rewritten
+(unit-asserted, incl. a twin deliberately shadowing a gated route); wiring strings in
+recommendations + the negotiation checks' note; the built `dist/middleware.js` import graph is two
+dependency-free chunks. Remaining from this phase: the opt-in `middleware.ts` scaffold + wizard
+question (10.4, deferred by product call) and the live Vercel-deploy confirmation, which folds into
+the existing deploy steps.
 
 ---
 

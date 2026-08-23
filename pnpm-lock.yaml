@@ -402,6 +402,34 @@ importers:
         specifier: ^5.7.3
         version: 5.9.3
 
+  fixtures/middleware:
+    dependencies:
+      next:
+        specifier: ^15.1.0
+        version: 15.5.20(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.7
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.7(react@19.2.7)
+    devDependencies:
+      '@ora-ai/ax':
+        specifier: workspace:*
+        version: link:../../packages/ax
+      '@types/node':
+        specifier: ^20.17.12
+        version: 20.19.43
+      '@types/react':
+        specifier: ^19.0.7
+        version: 19.2.17
+      '@types/react-dom':
+        specifier: ^19.0.3
+        version: 19.2.3(@types/react@19.2.17)
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+
   fixtures/monorepo: {}
 
   fixtures/monorepo/apps/web:
@@ -630,6 +658,9 @@ importers:
       '@types/turndown':
         specifier: ^5.0.6
         version: 5.0.6
+      next:
+        specifier: ^15.1.0
+        version: 15.5.20(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       tsup:
         specifier: ^8.3.5
         version: 8.5.1(jiti@2.7.0)(postcss@8.5.19)(typescript@5.9.3)

@@ -79,6 +79,35 @@ export function listStaticPagesRoutes(pagesDir: string): string[] {
   return [...routes].sort();
 }
 
+/**
+ * The static URL prefix of every dynamic Pages Router route, sorted and deduplicated:
+ * `pages/blog/[slug].tsx` → `/blog`, `pages/[slug].tsx` → `/`. The Pages Router mirror of the App
+ * Router's `listDynamicRoutePrefixes` — see that doc for why consumers that answer *misses* need
+ * it: under one of these prefixes a URL may be a real page, so "not found" must never be claimed.
+ */
+export function listDynamicPagesRoutePrefixes(pagesDir: string): string[] {
+  const prefixes = new Set<string>();
+  for (const file of walkFiles(pagesDir, (name) => PAGE_EXT_RE.test(name))) {
+    const rel = relative(pagesDir, file.absolutePath);
+    const segments = routeSegments(rel);
+    if (segments[0] === 'api') continue; // API routes aren't pages
+    if (segments.length === 1 && ERROR_PAGE_NAMES.has(segments[0] ?? '')) continue;
+
+    const resolved: string[] = [];
+    let prefix: string | undefined;
+    for (const segment of segments) {
+      if (segment.startsWith('[')) {
+        prefix = `/${resolved.join('/')}`;
+        break;
+      }
+      if (segment.startsWith('_')) break; // private (`_`) file/folder — never routes
+      resolved.push(segment);
+    }
+    if (prefix !== undefined) prefixes.add(prefix);
+  }
+  return [...prefixes].sort();
+}
+
 /** A route handler / API endpoint file with the URL it serves at (undefined when ambiguous). */
 export interface PagesApiEndpoint {
   file: string;

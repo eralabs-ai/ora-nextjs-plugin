@@ -43,7 +43,8 @@ export type OraArtifact =
   | 'openapi.json'
   | 'mcp-server'
   | 'mcp-server-card'
-  | 'auth.md';
+  | 'auth.md'
+  | 'middleware';
 
 export interface OraArtifactChecks {
   artifact: OraArtifact;
@@ -76,6 +77,12 @@ export const ORA_CHECK_MAP: readonly OraArtifactChecks[] = [
   // with nothing gated, the caller marks it 'not-applicable' and the checks are omitted entirely
   // (an absent check is "this build can't speak to it", never a claim the site fails it).
   { artifact: 'auth.md', checks: ['auth-md-exists', 'auth-md-structure'] },
+  // Ora's negotiation checks dual-fetch a page URL with and without `Accept: text/markdown` and
+  // expect different content-types plus `Vary: Accept` on the markdown variant — runtime behavior
+  // only the negotiation middleware provides. Addressed when a middleware file wires the ax
+  // runtime entry (whose header helper makes the Vary check unfailable by construction); N/A on a
+  // site with no page routes, where there is nothing to negotiate.
+  { artifact: 'middleware', checks: ['markdown-negotiation', 'markdown-negotiation-vary'] },
   // No 'webmcp' entry for now: WebMCP is still a W3C draft, and steering a coding agent toward a
   // non-official spec confuses more than it helps — until it is official we don't recommend it,
   // so the report carries no check for it. Re-add `{ artifact: 'webmcp', checks: ['webmcp'] }`

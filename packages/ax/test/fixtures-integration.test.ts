@@ -346,3 +346,40 @@ describe('generateCatalog against the Pages Router fixtures', () => {
     expect(routes).toEqual(['/', '/about', '/dashboard']);
   });
 });
+
+// The middleware fixture: the serving manifest its prebuild generates is the middleware's rewrite
+// contract, so the pieces the dogfood relies on must hold from the source tree alone. Assertions
+// stay independent of build state — only committed sources are asserted on (the generated homepage
+// twin and the catalog artifact appear only after a build, so they are deliberately not expected).
+describe('the middleware fixture serving manifest', () => {
+  it('lists the hand-authored twin, the gated path, and the dynamic prefix', async () => {
+    const cwd = join(fixturesDir, 'middleware');
+    const { buildServingManifest } = await import('../src/manifest.js');
+    const { resolveGating } = await import('../src/gating.js');
+    const { loadAxConfig } = await import('../src/config.js');
+
+    const { config } = await loadAxConfig(cwd);
+    const manifest = buildServingManifest({
+      cwd,
+      router: buildRouterModel(cwd),
+      isGated: resolveGating(config.isGated),
+      basePath: '',
+    });
+
+    expect(manifest.routes).toEqual(['/', '/docs', '/private', '/shell']);
+    expect(manifest.markdownTwins['/docs']).toBe('/docs.md');
+    expect(manifest.gatedPaths).toContain('/private');
+    expect(manifest.dynamicRoutePrefixes).toEqual(['/blog']);
+  });
+
+  it('wires the middleware, so its negotiation checks read addressed', async () => {
+    const { report } = await generateCatalog({ cwd: join(fixturesDir, 'middleware') });
+    expect(report.middleware).toMatchObject({ present: true, wiredToAx: true });
+    const negotiation = report.ora.checks.filter((check) => check.artifact === 'middleware');
+    expect(negotiation.map((check) => check.id).sort()).toEqual([
+      'markdown-negotiation',
+      'markdown-negotiation-vary',
+    ]);
+    expect(negotiation.every((check) => check.status === 'addressed')).toBe(true);
+  });
+});
