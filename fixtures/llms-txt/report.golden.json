@@ -48,6 +48,20 @@
     }
   },
   "scaffolds": {},
+  "markdownTwins": {
+    "enabled": true,
+    "written": [],
+    "userOwned": [],
+    "skipped": [
+      {
+        "route": "/",
+        "reason": "too-little-text",
+        "detail": "The prerendered HTML carries under 200 characters of text — a JS-shell page, whose twin would be an empty page presented as content. If this page renders client-side, keep page.tsx a server component that exports its own `metadata` (title + description) and renders your client component — ax then derives a minimal metadata twin, with no pre-hydration placeholder DOM (which would flicker)."
+      }
+    ],
+    "dynamicRouteCount": 0,
+    "deleted": []
+  },
   "sizes": [
     {
       "artifact": "ai-catalog.json",
@@ -78,6 +92,18 @@
         "id": "llms-txt-formatting",
         "artifact": "llms.txt",
         "status": "addressed"
+      },
+      {
+        "id": "markdown-url-fallback",
+        "artifact": "markdown-twins",
+        "status": "actionable",
+        "note": "No markdown twin could be derived for the homepage (too-little-text): The prerendered HTML carries under 200 characters of text — a JS-shell page, whose twin would be an empty page presented as content. If this page renders client-side, keep page.tsx a server component that exports its own `metadata` (title + description) and renders your client component — ax then derives a minimal metadata twin, with no pre-hydration placeholder DOM (which would flicker). The report’s markdownTwins.skipped section lists every twin-less route with its reason."
+      },
+      {
+        "id": "markdown-frontmatter",
+        "artifact": "markdown-twins",
+        "status": "actionable",
+        "note": "No markdown twin could be derived for the homepage (too-little-text): The prerendered HTML carries under 200 characters of text — a JS-shell page, whose twin would be an empty page presented as content. If this page renders client-side, keep page.tsx a server component that exports its own `metadata` (title + description) and renders your client component — ax then derives a minimal metadata twin, with no pre-hydration placeholder DOM (which would flicker). The report’s markdownTwins.skipped section lists every twin-less route with its reason."
       },
       {
         "id": "robots-ai-policy-quality",

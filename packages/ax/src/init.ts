@@ -11,7 +11,13 @@ import {
   type InitAnswers,
   renderAxConfig,
 } from './init-config.js';
-import { planPostbuildWiring, POSTBUILD_COMMAND } from './init-package-json.js';
+import {
+  planPostbuildWiring,
+  planPrebuildWiring,
+  POSTBUILD_COMMAND,
+  PREBUILD_COMMAND,
+} from './init-package-json.js';
+import { writeServingManifest } from './manifest.js';
 import { createReadlinePrompter, type MultiSelectRow, type Prompter } from './prompt.js';
 import { buildRouteTreeLines, renderRouteTree, type RouteTreeInput } from './route-tree.js';
 import { buildRouterModel, type RouterKind } from './router-model.js';
@@ -395,7 +401,7 @@ async function collectInteractive(
   findings: InitFindings,
   siteUrlDefault: SiteUrlDefault,
   stdout: (line: string) => void,
-): Promise<{ answers: InitAnswers; gatedMounts: Set<string> } | undefined> {
+): Promise<{ answers: InitAnswers; gatedMounts: Set<string>; wireManifest: boolean } | undefined> {
   // Gating first: its prompt renders the route tree, so it reads as the continuation of the
   // findings summary the user just saw — decide about the surface while looking at it.
   const gatedMounts = await askGating(prompter, findings, stdout);
@@ -431,11 +437,29 @@ async function collectInteractive(
     true,
   );
   const scaffoldAgent404 = await prompter.confirm('Scaffold an agent-aware 404 page?', true);
+  // Twin *intent* lands in config; generation happens at build (twins need the prerendered output).
+  const markdownTwins = await prompter.confirm(
+    'Generate markdown twins of your pages on every build (route /docs → /docs.md)?',
+    true,
+  );
   const report = await prompter.confirm('Write .ora/report.json (the agent handoff report)?', true);
+  const wireManifest = await prompter.confirm(
+    'Wire "prebuild": "ax manifest" (the serving manifest middleware imports)?',
+    true,
+  );
 
   return {
-    answers: { siteUrl, scaffoldLlmsTxt, scaffoldJsonLd, scaffoldRobots, scaffoldAgent404, report },
+    answers: {
+      siteUrl,
+      scaffoldLlmsTxt,
+      scaffoldJsonLd,
+      scaffoldRobots,
+      scaffoldAgent404,
+      markdownTwins,
+      report,
+    },
     gatedMounts,
+    wireManifest,
   };
 }
 
@@ -454,9 +478,13 @@ function resolveConfigTarget(cwd: string): ConfigFileTarget {
   return { language, moduleSystem };
 }
 
-/** Adds a `"postbuild": "ax"` script after `build`, preserving the rest of package.json verbatim. */
+/**
+ * Adds a `"postbuild": "ax"` script after `build` (and, opted in, a `"prebuild": "ax manifest"`
+ * before it), preserving the rest of package.json verbatim.
+ */
 function wirePackageJson(
   cwd: string,
+  wireManifest: boolean,
   stdout: (line: string) => void,
   warn: (line: string) => void,
 ): void {
@@ -489,36 +517,52 @@ function wirePackageJson(
     return;
   }
   const scripts = rawScripts as Record<string, unknown> | undefined;
-  const plan = planPostbuildWiring(scripts);
+  const postbuildPlan = planPostbuildWiring(scripts);
+  const prebuildPlan = wireManifest ? planPrebuildWiring(scripts) : undefined;
 
-  if (plan.action === 'already-wired') {
+  if (postbuildPlan.action === 'already-wired') {
     stdout('[ax] package.json already runs ax on postbuild — leaving it as is.');
-    return;
+  } else if (postbuildPlan.action === 'manual') {
+    stdout(`[ax] ${postbuildPlan.instruction}`);
   }
-  if (plan.action === 'manual') {
-    stdout(`[ax] ${plan.instruction}`);
-    return;
+  if (prebuildPlan?.action === 'already-wired') {
+    stdout('[ax] package.json already runs ax on prebuild — leaving it as is.');
+  } else if (prebuildPlan?.action === 'manual') {
+    stdout(`[ax] ${prebuildPlan.instruction}`);
   }
 
-  // action === 'add': insert postbuild right after build so the two read together. Any pre-existing
-  // `postbuild` key is dropped as it's re-copied — `add` only fires when it was absent or blank, and
-  // re-emitting it later in iteration order would otherwise clobber the "ax" we just inserted.
+  const addPostbuild = postbuildPlan.action === 'add';
+  const addPrebuild = prebuildPlan?.action === 'add';
+  if (!addPostbuild && !addPrebuild) return;
+
+  // Insert prebuild right before `build` and postbuild right after it, so the three read together.
+  // Any pre-existing key being added is dropped as it's re-copied — an `add` only fires when the
+  // slot was absent or blank, and re-emitting it later in iteration order would otherwise clobber
+  // the command we just inserted.
   const rebuilt: Record<string, unknown> = {};
   const source = scripts ?? {};
-  let inserted = false;
+  let insertedPre = false;
+  let insertedPost = false;
   for (const [key, value] of Object.entries(source)) {
-    if (key === 'postbuild') continue;
+    if (addPostbuild && key === 'postbuild') continue;
+    if (addPrebuild && key === 'prebuild') continue;
+    if (addPrebuild && key === 'build' && !insertedPre) {
+      rebuilt.prebuild = PREBUILD_COMMAND;
+      insertedPre = true;
+    }
     rebuilt[key] = value;
-    if (key === 'build') {
+    if (addPostbuild && key === 'build') {
       rebuilt.postbuild = POSTBUILD_COMMAND;
-      inserted = true;
+      insertedPost = true;
     }
   }
-  if (!inserted) rebuilt.postbuild = POSTBUILD_COMMAND;
+  if (addPrebuild && !insertedPre) rebuilt.prebuild = PREBUILD_COMMAND;
+  if (addPostbuild && !insertedPost) rebuilt.postbuild = POSTBUILD_COMMAND;
 
   pkg.scripts = rebuilt;
   writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8');
-  stdout('[ax] ✓ added "postbuild": "ax" to package.json');
+  if (addPostbuild) stdout('[ax] ✓ added "postbuild": "ax" to package.json');
+  if (addPrebuild) stdout(`[ax] ✓ added "prebuild": "${PREBUILD_COMMAND}" to package.json`);
 }
 
 /** Detects the package manager from a lockfile so the build offer runs the right one. */
@@ -620,9 +664,11 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
       scaffoldJsonLd: true,
       scaffoldRobots: true,
       scaffoldAgent404: true,
+      markdownTwins: true,
       report: true,
     };
-    const fileName = writeConfigAndWire(cwd, answers, stdout);
+    const fileName = writeConfigAndWire(cwd, answers, true, stdout);
+    await createServingManifest(cwd, stdout);
     printNextSteps(fileName, answers, false, stdout);
     return 0;
   }
@@ -646,9 +692,10 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
       stderr('[ax] No valid site URL provided — aborting without writing anything.');
       return 1;
     }
-    const { answers, gatedMounts } = collected;
+    const { answers, gatedMounts, wireManifest } = collected;
 
-    const fileName = writeConfigAndWire(cwd, answers, stdout);
+    const fileName = writeConfigAndWire(cwd, answers, wireManifest, stdout);
+    if (wireManifest) await createServingManifest(cwd, stdout);
     writeGatingCard(cwd, findings, answers.siteUrl, gatedMounts, stdout);
 
     // Offer the first build so the report shows up immediately. Default no — spawning a full
@@ -683,10 +730,11 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
   }
 }
 
-/** Writes `ax.config.*` and wires the postbuild script; returns the config filename written. */
+/** Writes `ax.config.*` and wires the build scripts; returns the config filename written. */
 function writeConfigAndWire(
   cwd: string,
   answers: InitAnswers,
+  wireManifest: boolean,
   stdout: (line: string) => void,
 ): string {
   const target = resolveConfigTarget(cwd);
@@ -694,8 +742,22 @@ function writeConfigAndWire(
   const fileName = configFileName(target);
   writeFileSync(join(cwd, fileName), source, 'utf8');
   stdout(`[ax] ✓ wrote ${fileName}`);
-  wirePackageJson(cwd, stdout, (message) => stdout(`[ax] ⚠ ${message}`));
+  wirePackageJson(cwd, wireManifest, stdout, (message) => stdout(`[ax] ⚠ ${message}`));
   return fileName;
+}
+
+/**
+ * Creates the serving-manifest module right away, so the wired `prebuild` step regenerates a file
+ * that already exists (and the user sees what they opted into) instead of the module first
+ * appearing mid-build. The write itself is `ax manifest`'s logic, so the two can't drift.
+ */
+async function createServingManifest(cwd: string, stdout: (line: string) => void): Promise<void> {
+  try {
+    const result = await writeServingManifest(cwd, (message) => stdout(`[ax] ⚠ ${message}`));
+    stdout(`[ax] ✓ wrote ${result.path} (serving manifest — regenerated by the prebuild step)`);
+  } catch (err) {
+    stdout(`[ax] ⚠ Could not write the serving manifest (${(err as Error).message}).`);
+  }
 }
 
 function printNextSteps(

@@ -9,10 +9,13 @@ import {
   measureArtifact,
   measureContent,
 } from './artifact-size.js';
+import { applyAuthMdPlan, type ApplyAuthMdResult } from './auth-md.js';
 import { AxConfigError, findExistingConfig } from './config.js';
 import { entryUrlPath } from './entries.js';
 import { generateCatalog, type GenerateCatalogResult } from './generate.js';
 import { runInit } from './init.js';
+import { refreshServingManifestIfPresent, writeServingManifest } from './manifest.js';
+import { applyMarkdownTwinPlan, type ApplyTwinPlanResult } from './markdown-twins.js';
 import type { BuildReport } from './report.js';
 import { renderRouteTree } from './route-tree.js';
 import { buildRouterModel } from './router-model.js';
@@ -32,6 +35,10 @@ Usage:
   ax [options]
   ax init [options]   First-time setup: detect your app, write ax.config, wire "postbuild": "ax".
                       Run \`ax init --help\` for its options.
+  ax manifest [--cwd <dir>]
+                      Regenerate the serving-manifest data module (ax-manifest.ts) your middleware
+                      imports. Source-tree-only and fast — wire it as "prebuild" so the manifest is
+                      fresh before next build compiles your middleware.
 
 Options:
   --cwd <dir>,
@@ -130,6 +137,13 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     return runInit(argv.slice(1), initIo);
   }
 
+  // `ax manifest` — the fast prebuild half of the twin/middleware story: middleware.ts is compiled
+  // *during* next build, so the manifest module it imports must be regenerated *before* the build;
+  // everything the manifest records is source-tree-derived, so this needs no build output.
+  if (argv[0] === 'manifest') {
+    return runManifestCommand(argv.slice(1), io, stdout, stderr);
+  }
+
   let args: ParsedArgs;
   try {
     args = parseArgs(argv);
@@ -217,6 +231,11 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   }
 
   const firstPublish = !existsSync(join(cwd, CATALOG_OUTPUT_PATH));
+  // Twins are default-on, so their *first* write is gated even when the catalog isn't new (e.g.
+  // upgrading ax on an already-published site): the summary above listed them, and the same
+  // confirmation covers them. Re-runs with twins already on disk stay unattended.
+  const firstTwinPublish =
+    generated.twinPlan.writes.length > 0 && !generated.twinPlan.hasExistingGenerated;
 
   // A first interactive run with no config at all (neither ax.config.* nor a legacy ard.config.*):
   // suggest the wizard, which wires the build and captures the judgment (siteUrl, gating, scaffolds)
@@ -226,16 +245,20 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     stdout('[ax] Tip: run `ax init` to set up ax.config and wire your postbuild in one step.');
   }
 
-  if (firstPublish && !args.yes) {
+  if ((firstPublish || firstTwinPublish) && !args.yes) {
+    const what = firstPublish
+      ? 'a new ai-catalog.json exposing the surface above'
+      : 'markdown twins for the pages above (a new public surface)';
     if (!interactive) {
       stderr(
-        '[ax] This run would publish a new ai-catalog.json exposing the surface above. Re-run ' +
-          'with --yes to confirm (required in CI / non-interactive shells).',
+        `[ax] This run would publish ${what}. Re-run with --yes to confirm (required in CI / ` +
+          'non-interactive shells).',
       );
       return 1;
     }
     const confirm = io.confirm ?? defaultConfirm;
-    if (!(await confirm('Publish this catalog?'))) {
+    const question = firstPublish ? 'Publish this catalog?' : 'Publish these markdown twins?';
+    if (!(await confirm(question))) {
       stdout('[ax] Aborted — nothing written.');
       return 1;
     }
@@ -281,6 +304,19 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     stdout(`[ax] ✓ wrote ${cardResult.path} (MCP server card)`);
   }
 
+  // Markdown twins + the auth guide: planned during generation, applied only now — after the
+  // review gate — so nothing lands in public/ the summary didn't show. When the feature is off,
+  // nothing is touched at all (including previously generated files: turning it off is the user's
+  // call; deleting their public/ contents on that signal is not ours to make silently).
+  const twinWarn = (message: string): void => stdout(`[ax] ⚠ ${message}`);
+  const twinResult = generated.twinPlan.enabled
+    ? applyMarkdownTwinPlan(cwd, generated.twinPlan, twinWarn)
+    : { written: [], deleted: [] };
+  const authMdResult = generated.twinPlan.enabled
+    ? applyAuthMdPlan(cwd, generated.authMdPlan, twinWarn)
+    : {};
+  reportMarkdownTwinOutcome(cwd, generated, twinResult, authMdResult, reportTarget, stdout);
+
   // Token-aware sizes: report each artifact this build wrote in bytes *and* estimated tokens
   // (chars ÷ 4), since tokens — not disk size — are what constrain the agent that later reads it.
   // Measured off the *served* content (the JSON/markdown an agent fetches), not the file on disk,
@@ -293,6 +329,14 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     llmsTxtBody: generated.scaffoldedLlmsTxtBody,
     report: generated.report,
   });
+  // Twins and the auth guide are served verbatim as written, so their in-memory content is exactly
+  // the response an agent fetches.
+  for (const twin of twinResult.written) {
+    sizes.push(measureContent(twin.content, 'markdown-twin', relative(cwd, twin.filePath)));
+  }
+  if (authMdResult.written !== undefined && generated.authMdPlan !== undefined) {
+    sizes.push(measureContent(generated.authMdPlan.content, 'auth.md', authMdResult.written));
+  }
   generated.report.sizes = sizes;
   if (sizes.length > 0) {
     stdout('[ax] Generated artifact sizes (estimated tokens = chars ÷ 4):');
@@ -313,6 +357,16 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   if (recommendations.length > 0 && reportTarget === undefined) {
     stdout('[ax] Recommendations to improve agent-readiness:');
     for (const recommendation of recommendations) stdout(`[ax]   → ${recommendation}`);
+  }
+
+  // Keep an existing serving-manifest module fresh: the twins just written are part of what it
+  // records. Refresh-if-present only — a build never introduces a new source-tree file silently;
+  // creating the module is `ax manifest`'s (or the wizard's prebuild wiring's) job.
+  const manifestResult = await refreshServingManifestIfPresent(cwd, (message) =>
+    stdout(`[ax] ⚠ ${message}`),
+  );
+  if (manifestResult !== undefined) {
+    stdout(`[ax] ✓ refreshed ${manifestResult.path} (serving manifest)`);
   }
 
   let reportPath: string | undefined;
@@ -412,10 +466,11 @@ function markMountGated(generated: GenerateCatalogResult, path: string): void {
 }
 
 /**
- * The handoff footer: where the report landed and what to do with it. Deliberately two plain
- * lines — the report itself carries the full recommendation detail, so the log only points at it.
- * Printed only when something is still actionable: a build with nothing left to do doesn't need a
- * to-do list.
+ * The handoff footer: where the report landed and what to do with it. The prompt is the one line
+ * users are meant to *act* on (paste it into their coding agent), so it's set apart with blank
+ * lines and a 📋 marker instead of blending into the build log; the report itself carries the full
+ * recommendation detail, so the log only points at it. Printed only when something is still
+ * actionable: a build with nothing left to do doesn't need a to-do list.
  */
 function printAgentHandoff(
   report: BuildReport,
@@ -430,13 +485,17 @@ function printAgentHandoff(
     );
     return;
   }
+  stdout('[ax]');
   stdout(`[ax] Find your report at: ${reportPath}`);
-  stdout('[ax] Prompt for your coding agent (copy-paste):');
+  stdout('[ax] 📋 Copy this prompt to your coding agent:');
+  stdout('[ax]');
   stdout(
     `[ax]   Read ${reportPath} and work through every check marked "actionable": create or ` +
       'improve those artifacts to make this site more agent-ready (each check may carry a note ' +
-      'with the exact next step), then rebuild and confirm the report marks them addressed.',
+      'with the exact next step, and the markdownTwins.skipped section lists why any route has ' +
+      'no markdown twin), then rebuild and confirm the report marks them addressed.',
   );
+  stdout('[ax]');
 }
 
 interface MeasureArtifactsInput {
@@ -538,6 +597,147 @@ function printExposureSummary(
           : '(inline data)';
     const auth = entry.auth !== undefined && entry.auth.status !== 'none' ? ' (requires auth)' : '';
     stdout(`[ax]   • ${label} → ${where}${auth}`);
+  }
+
+  // Twins and the auth guide are public surface too, so the gate must show them: one short line
+  // with the count and a few sample paths, not the full list (the report carries that).
+  const twins = generated.twinPlan.writes;
+  if (twins.length > 0) {
+    const sample = twins.slice(0, 3).map((twin) => twin.servedPath);
+    const more = twins.length > sample.length ? ', …' : '';
+    stdout(
+      `[ax]   • Markdown twins → ${twins.length} page${twins.length === 1 ? '' : 's'} ` +
+        `(${sample.join(', ')}${more})`,
+    );
+  }
+  if (generated.authMdPlan !== undefined) {
+    const { surfaceCount } = generated.authMdPlan;
+    stdout(
+      `[ax]   • Auth guide → ${generated.authMdPlan.servedPath} (${surfaceCount} gated ` +
+        `surface${surfaceCount === 1 ? '' : 's'})`,
+    );
+  }
+}
+
+/**
+ * Reconciles the applied twin/auth-guide results into the report and the terminal. The split is
+ * deliberate: the terminal gets counts and pointers; the per-route skip reasons (the actionable
+ * prose) live in the report. Without a report, the compact reason list prints here instead so the
+ * information isn't silently dropped.
+ */
+function reportMarkdownTwinOutcome(
+  cwd: string,
+  generated: GenerateCatalogResult,
+  twinResult: ApplyTwinPlanResult,
+  authMdResult: ApplyAuthMdResult,
+  reportTarget: true | string | undefined,
+  stdout: (line: string) => void,
+): void {
+  const twins = generated.report.markdownTwins;
+  twins.written = twinResult.written.map((twin) => ({
+    route: twin.route,
+    path: relative(cwd, twin.filePath),
+    tier: twin.tier,
+    source: twin.source,
+  }));
+  twins.deleted = twinResult.deleted;
+  if (authMdResult.written === undefined) delete twins.authMd;
+
+  const wrote: string[] = [];
+  if (twinResult.written.length > 0) {
+    const count = twinResult.written.length;
+    wrote.push(`${count} markdown twin${count === 1 ? '' : 's'}`);
+  }
+  if (authMdResult.written !== undefined) wrote.push(`${authMdResult.written} (auth guide)`);
+  if (wrote.length > 0) stdout(`[ax] ✓ wrote ${wrote.join(' + ')}`);
+  if (authMdResult.deleted !== undefined) {
+    stdout(`[ax] ✓ removed ${authMdResult.deleted} (no gated surfaces remain)`);
+  }
+  if (twinResult.deleted.length > 0) {
+    stdout(
+      `[ax] ✓ removed ${twinResult.deleted.length} stale markdown twin` +
+        `${twinResult.deleted.length === 1 ? '' : 's'}`,
+    );
+  }
+
+  const skipped = twins.skipped;
+  if (twins.enabled && skipped.length > 0) {
+    if (reportTarget !== undefined) {
+      stdout(
+        `[ax] ⚠ ${skipped.length} route${skipped.length === 1 ? ' has' : 's have'} no markdown ` +
+          'twin — per-route reasons recorded in the report',
+      );
+    } else {
+      stdout(
+        `[ax] ⚠ no markdown twin for ${skipped
+          .map((skip) => `${skip.route} (${skip.reason})`)
+          .join(', ')}`,
+      );
+    }
+  }
+}
+
+/**
+ * The `ax manifest` subcommand: regenerate the serving-manifest data module from the source tree.
+ * Deliberately tiny (one flag) and fast (no build output, no converters) — it exists to run as a
+ * `prebuild` script, before `next build` compiles the middleware that imports the module.
+ */
+async function runManifestCommand(
+  argv: string[],
+  io: CliIO,
+  stdout: (line: string) => void,
+  stderr: (line: string) => void,
+): Promise<number> {
+  let cwdArg: string | undefined;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === undefined) continue;
+    if (arg === '-h' || arg === '--help') {
+      stdout(
+        'ax manifest — regenerate the serving-manifest data module (ax-manifest.{ts,js})\n\n' +
+          'Usage:\n  ax manifest [--cwd <dir>]\n\n' +
+          'Derives everything from the source tree (routes, gating, twins and artifacts present in\n' +
+          'public/), so it is fast enough to wire as "prebuild" — which keeps the manifest fresh\n' +
+          'before next build compiles the middleware that imports it.',
+      );
+      return 0;
+    }
+    if (arg === '--cwd') {
+      const value = argv[++i];
+      if (value === undefined) {
+        stderr('[ax] --cwd requires a directory argument');
+        return 1;
+      }
+      cwdArg = value;
+    } else if (arg.startsWith('--cwd=')) {
+      const value = arg.slice('--cwd='.length);
+      if (value === '') {
+        stderr('[ax] --cwd requires a directory argument');
+        return 1;
+      }
+      cwdArg = value;
+    } else {
+      stderr(`[ax] Unrecognized argument: ${arg}`);
+      return 1;
+    }
+  }
+
+  const cwd = resolve(cwdArg ?? io.cwd ?? process.cwd());
+  try {
+    const result = await writeServingManifest(cwd, (message) => stdout(`[ax] ⚠ ${message}`));
+    const twinCount = Object.keys(result.data.markdownTwins).length;
+    stdout(
+      `[ax] ✓ wrote ${result.path} (serving manifest: ${result.data.routes.length} routes, ` +
+        `${twinCount} markdown twin${twinCount === 1 ? '' : 's'}, ` +
+        `${result.data.gatedPaths.length} gated path${result.data.gatedPaths.length === 1 ? '' : 's'})`,
+    );
+    return 0;
+  } catch (err) {
+    if (err instanceof AxConfigError) {
+      stderr(`[ax] ${err.message}`);
+      return 1;
+    }
+    throw err;
   }
 }
 

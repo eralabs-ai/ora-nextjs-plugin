@@ -212,6 +212,10 @@ const config: AxConfig = {
   // Scaffold an app/organization-json-ld.tsx server component when no JSON-LD is rendered
   // anywhere. Opt-in (defaults to false); ax never edits your layout to wire it up.
   scaffoldJsonLd: true,
+  // Generate markdown twins of your pages (route /docs → public/docs.md) plus /auth.md when
+  // surfaces are gated. Default ON — twins are regenerated build artifacts, not scaffolds, and
+  // their first write is confirmed at the review gate. See "Markdown twins".
+  markdownTwins: true,
   // Write .ora/report.json, the machine-readable twin of the CLI output (true, or a custom path).
   // Opt-in (defaults to false); the CLI flag --report[=path] does the same per run.
   report: true,
@@ -354,6 +358,73 @@ to insert an element, is not a change a postbuild step should make behind your b
 prints the exact import and element to add, phrased for a coding agent to apply mechanically, and
 the build report carries the same two strings. Until something imports it, the component publishes
 nothing, and the report keeps saying so.
+
+## Markdown twins & generated markdown (`markdownTwins`, default on)
+
+Agents read markdown better than HTML, and the `.md`-URL convention (`/docs` → `/docs.md`) is the
+one retrieval mechanism that needs **zero runtime**: ax writes each twin as a static file in
+`public/`, so Next serves it as-is before any middleware ships. Twins are **generated artifacts,
+not scaffolds** — regenerated every build, marked `generated-by: "@ora-ai/ax"` in their
+frontmatter, never yours to edit (edit a page's twin and your edits are one build from gone; if a
+human should own the markdown, make it a real markdown source instead — see Tier 1).
+
+Where twin content comes from is a ladder of decreasing certainty; every rung ax refuses is
+recorded in the report **with its reason**, so the skip list doubles as the what-to-do-next list:
+
+- **Tier 1 — markdown sources in the repo.** An `app/**/page.mdx` (when `pageExtensions` routes
+  it) becomes its route's twin directly — the markdown _is_ the source. Guard: the file must be
+  mostly markdown (imports/exports/JSX ≤ 25% of non-blank lines); past that, stripping components
+  would silently omit what the page shows, so ax recommends instead. A hand-written
+  `public/<route>.md` (no generated-by marker) or an `app/<route>.md/route.*` handler already _is_
+  the twin: ax records it and never touches it.
+- **Tier 2 — the build output.** Every statically prerendered route's final HTML exists after
+  `next build`; ax extracts the content region (`<main>`, else `<article>` — never `<body>`, which
+  would drag nav/footer chrome in), converts it to markdown (turndown + GFM tables), and refuses
+  anything that smells like a lie: no content landmark, under 200 chars of text (a JS shell),
+  over the 100K-char truncation ceiling, an unclosed code fence — and **never a route your
+  `isGated` gates** (a gated page's prerender is a login shell).
+- **Tier 2½ — the metadata rung, for client-rendered pages.** A page whose prerender has no real
+  content (a JS shell) can still earn a _minimal_ twin from its resolved `<title>`/description —
+  but only when the page **declares that metadata itself** (`export const metadata` /
+  `generateMetadata` in `page.tsx`; the rendered head can't distinguish page-owned metadata from
+  the layout's cascade, so ownership is read from the source and values from the render) and the
+  head isn't shared with another route (shared heads are inherited in practice — N identical twins
+  would each claim to describe a specific page). The twin is explicit about what it is: title,
+  description, and a wayfinding note (the content loads in the browser; start machine-readable
+  access from the catalog). Labeled `source: "metadata"`
+  in the report. The recommended page shape — a server `page.tsx` exporting metadata and rendering
+  your client component — needs no pre-hydration placeholder DOM (which would paint and flicker).
+- **Tier 3 — dynamic/SSR routes: refused.** No build-time HTML exists, so no twin and no guessed
+  URLs; the CLI counts them and recommends adding a markdown source or prerendering.
+
+Every twin opens with YAML frontmatter (`title`, `description` when the page declares one,
+`canonical_url` — the attribution link back to the HTML page — and `last_updated`, the build
+time). Twins never become catalog entries; they surface via the scaffolded `llms.txt`, the
+`<link rel="alternate" type="text/markdown">` recommendation, and the serving manifest. The first
+run that would write twins extends the review-before-publish summary (count + sample paths) behind
+the same confirm/`--yes` gate as the catalog.
+
+### Generated `/auth.md` — the gated-surface guide
+
+When gated surfaces exist (a gated MCP mount, an OpenAPI doc declaring `securitySchemes`, a
+declared entry with an `auth` descriptor), ax generates one `public/auth.md` aggregating what an
+agent actually needs: which surfaces are gated, the scheme per surface (from the same secret-free
+descriptors the catalog publishes, incl. OAuth endpoints and the RFC 9728 metadata link when
+declared), and where a human obtains credentials (`auth.docsUrl` when declared; an explicit
+"not documented yet" pointer otherwise). Your gated routes should keep their honest 401/403 and
+point at it — the CLI prints that recommendation (`WWW-Authenticate` + a `Link` to `/auth.md`);
+ax never rewrites your handlers.
+
+### The serving manifest — `ax manifest` and the `prebuild` slot
+
+`ax manifest` regenerates a data module (`ax-manifest.ts`/`.js`, beside where `middleware.ts`
+lives) recording the route table, which routes have markdown twins, which paths are gated, and
+where the discovery artifacts live — all basePath-aware. It exists so a middleware **never
+rewrites blind**: a middleware alone cannot check a rewrite target exists, but the build-time
+source tree can. Ordering matters: `middleware.ts` is compiled _during_ `next build` while ax runs
+postbuild, so the manifest is regenerated by a fast, source-tree-only `prebuild` step — `ax init`
+wires `"prebuild": "ax manifest"` (never touching an existing prebuild). A full `ax` run also
+refreshes an existing manifest module, but never creates one you didn't opt into.
 
 ## Machine-readable build report (`--report` / `report`)
 

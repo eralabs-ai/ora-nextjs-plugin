@@ -127,6 +127,9 @@ function withDefaults(config: AxConfig): ResolvedAxConfig {
     scaffoldAgent404: config.scaffoldAgent404 ?? false,
     scaffoldRobots: config.scaffoldRobots ?? false,
     scaffoldJsonLd: config.scaffoldJsonLd ?? false,
+    // Default ON, unlike the scaffolds: twins are regenerated build artifacts (never user-owned
+    // files), and their first write is confirmed at the review gate — see config-schema.ts.
+    markdownTwins: config.markdownTwins ?? true,
     // `isGated` stays a possibly-undefined function (resolveGating supplies the built-in floor when
     // it's absent) — there is no data default to fill in here, unlike the other fields.
     ...(config.isGated !== undefined ? { isGated: config.isGated } : {}),

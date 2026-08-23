@@ -10,6 +10,13 @@
 /** The command ax wires into `postbuild`. Bare `ax` — same as the README quickstart. */
 export const POSTBUILD_COMMAND = 'ax';
 
+/**
+ * The command ax wires into `prebuild`. The serving manifest must exist *before* `next build`
+ * compiles the middleware that imports it (ax's own run is postbuild, one build too late), and it
+ * is source-tree-derived, so a fast prebuild regeneration closes the ordering gap.
+ */
+export const PREBUILD_COMMAND = 'ax manifest';
+
 export type PostbuildWiring =
   /** No `postbuild` existed; caller should write `scripts.postbuild = "ax"`. */
   | { action: 'add' }
@@ -32,7 +39,21 @@ function invokesAx(command: string): boolean {
  * without touching disk; the caller performs the write (only for `add`).
  */
 export function planPostbuildWiring(scripts: Record<string, unknown> | undefined): PostbuildWiring {
-  const existing = scripts?.postbuild;
+  return planScriptWiring(scripts, 'postbuild', POSTBUILD_COMMAND, 'the catalog regenerates');
+}
+
+/** The `prebuild` counterpart of {@link planPostbuildWiring}, for the serving manifest. */
+export function planPrebuildWiring(scripts: Record<string, unknown> | undefined): PostbuildWiring {
+  return planScriptWiring(scripts, 'prebuild', PREBUILD_COMMAND, 'the serving manifest is fresh');
+}
+
+function planScriptWiring(
+  scripts: Record<string, unknown> | undefined,
+  slot: 'prebuild' | 'postbuild',
+  command: string,
+  why: string,
+): PostbuildWiring {
+  const existing = scripts?.[slot];
   if (typeof existing !== 'string' || existing.trim() === '') {
     return { action: 'add' };
   }
@@ -46,8 +67,8 @@ export function planPostbuildWiring(scripts: Record<string, unknown> | undefined
     action: 'manual',
     existing,
     instruction:
-      `Your package.json already has a "postbuild" script (${JSON.stringify(existing)}). ` +
-      `Add ax to it so the catalog regenerates on every build, e.g.: ` +
-      `"postbuild": ${JSON.stringify(`${existing} && ${POSTBUILD_COMMAND}`)}`,
+      `Your package.json already has a "${slot}" script (${JSON.stringify(existing)}). ` +
+      `Add ax to it so ${why} on every build, e.g.: ` +
+      `"${slot}": ${JSON.stringify(`${existing} && ${command}`)}`,
   };
 }

@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 
 import { manageAgent404 } from './agent-404.js';
+import { buildAuthMd, type AuthMdPlan } from './auth-md.js';
 import { loadAxConfig } from './config.js';
 import { detectAgentsMd } from './detect-agents-md.js';
 import { detectJsonLd } from './detect-json-ld.js';
@@ -16,6 +17,7 @@ import { applyEntryOverrides, entryUrlPath } from './entries.js';
 import { defaultIsGated, resolveGating, type GateTarget, type IsGated } from './gating.js';
 import { loadProjectEnv } from './load-project-env.js';
 import { buildMarkdownAlternateRecommendation } from './markdown-alternate.js';
+import { planMarkdownTwins, type MarkdownTwinPlan } from './markdown-twins.js';
 import { loadNextConfig } from './next-config.js';
 import { buildOraChecks, type OraArtifact } from './ora-checks.js';
 import type { BuildReport, ReportArtifact, ReportScaffolds } from './report.js';
@@ -76,6 +78,13 @@ export interface GenerateCatalogResult {
    * this rather than the `route.ts` file on disk, so the reported tokens match what an agent fetches.
    */
   scaffoldedLlmsTxtBody?: string;
+  /**
+   * This build's markdown-twin plan — computed here (pure, so the review gate can show it), applied
+   * by the CLI only after the gate, alongside the catalog write.
+   */
+  twinPlan: MarkdownTwinPlan;
+  /** The generated `/auth.md`, when gated surfaces exist. Written by the CLI with the twins. */
+  authMdPlan?: AuthMdPlan;
 }
 
 /** Presence-shape shared by the detect-and-recommend detectors (`{found, source?}`). */
@@ -232,8 +241,32 @@ function applyGating(
 function oraCheckNotes(scaffolds: {
   llmsTxtScaffolded?: string;
   jsonLd?: JsonLdScaffoldResult;
+  twinPlan?: MarkdownTwinPlan;
+  authMdMissing?: boolean;
 }): Partial<Record<OraArtifact, string>> {
   const notes: Partial<Record<OraArtifact, string>> = {};
+
+  const twinPlan = scaffolds.twinPlan;
+  if (twinPlan !== undefined) {
+    if (!twinPlan.enabled) {
+      notes['markdown-twins'] =
+        'markdownTwins is disabled in ax.config, so no .md fallbacks are generated. Set it back ' +
+        'to true (the default) to address these checks.';
+    } else {
+      const rootSkip = twinPlan.skips.find((skip) => skip.route === '/');
+      notes['markdown-twins'] =
+        (rootSkip !== undefined
+          ? `No markdown twin could be derived for the homepage (${rootSkip.reason}): ${rootSkip.detail}`
+          : 'No markdown twin exists for the homepage — the URL Ora’s markdown-fallback probe fetches.') +
+        ' The report’s markdownTwins.skipped section lists every twin-less route with its reason.';
+    }
+  }
+
+  if (scaffolds.authMdMissing === true) {
+    notes['auth.md'] =
+      'This site has gated surfaces but markdownTwins is disabled in ax.config, so the generated ' +
+      'public/auth.md (how agents obtain access) is not written. Set markdownTwins back to true.';
+  }
 
   if (scaffolds.llmsTxtScaffolded !== undefined) {
     notes['llms.txt'] =
@@ -345,6 +378,33 @@ export async function generateCatalog(
 
   const openApi = openApiArtifact(cwd);
 
+  // Plan this build's markdown twins — pure computation, applied by the CLI only after the review
+  // gate. Runs before the llms.txt detector so a scaffolded starter can already link the twins and
+  // the auth guide this same run writes.
+  const twinPlan = await planMarkdownTwins({
+    cwd,
+    router,
+    isGated: gating,
+    basePath,
+    ...(nextConfig.config.distDir !== undefined ? { distDir: nextConfig.config.distDir } : {}),
+    ...(nextConfig.config.pageExtensions !== undefined
+      ? { pageExtensions: nextConfig.config.pageExtensions }
+      : {}),
+    siteUrl,
+    enabled: config.markdownTwins,
+    warn,
+    recommend,
+  });
+
+  // Whether a generated /auth.md is (very likely) being written this run — decided from the same
+  // pre-gating signals the final `buildAuthMd` reads, because the llms.txt scaffold runs before
+  // entry gating resolves. A config-declared gated entry that only materializes later would just
+  // mean the one-time starter misses the link; the auth guide itself is still written.
+  const authMdLikely =
+    config.markdownTwins &&
+    (mcpMounts.some((mount) => mount.auth !== undefined) ||
+      (openApiEntry?.auth !== undefined && openApiEntry.auth.status !== 'none'));
+
   const llmsTxtResult = detectLlmsTxt({
     cwd,
     siteUrl,
@@ -354,9 +414,15 @@ export async function generateCatalog(
     scaffold: config.scaffoldLlmsTxt,
     site,
     router,
-    // Only what this build actually found: the starter's "Machine-readable resources" section is a
-    // list of live artifacts, so a link to something that doesn't exist would be worse than none.
-    resources: { openApi: openApi.found, mcpPathnames: mcpMounts.map((mount) => mount.pathname) },
+    // Only what this build actually found (or writes this same run — the twins and auth guide land
+    // with the catalog): the starter's "Machine-readable resources" section is a list of live
+    // artifacts, so a link to something that doesn't exist would be worse than none.
+    resources: {
+      openApi: openApi.found,
+      mcpPathnames: mcpMounts.map((mount) => mount.pathname),
+      twinPaths: twinPlan.servedPaths,
+      authMd: authMdLikely,
+    },
   });
   if (llmsTxtResult.entry) inferredEntries.push(llmsTxtResult.entry);
 
@@ -415,13 +481,34 @@ export async function generateCatalog(
   });
   for (const message of buildDiscoveryRecommendations({ siteUrl, basePath })) recommend(message);
 
-  // Markdown-twin alternate link. ax does not generate markdown twins yet, and nothing names them,
-  // so `twinPaths` is empty today and this adds nothing to a current build — the recommendation
-  // lands the moment there is a twin for a `<link rel="alternate">` to point at.
+  // The generated /auth.md (gated-surface guide), from the final published surface: gated MCP
+  // mounts plus entries carrying an auth descriptor. Undefined when nothing is gated — an auth
+  // guide with nothing to say would itself be noise. Built unconditionally (it's pure and cheap)
+  // so the ora checks can distinguish "nothing gated" (auth.md not applicable) from "gated but the
+  // feature is off" (actionable); only an enabled run actually writes it.
+  const authMdCandidate = buildAuthMd({
+    mounts: mcpMounts,
+    entries,
+    siteUrl,
+    basePath,
+    siteDisplayName: site.displayName,
+  });
+  const authMdPlan = config.markdownTwins ? authMdCandidate : undefined;
+  if (authMdPlan !== undefined) {
+    recommend(
+      'Gated routes should keep their honest 401/403 status and point agents at the auth guide: ' +
+        'add a WWW-Authenticate header and a Link (or body) pointer to ' +
+        `${authMdPlan.servedPath} in your gated route handlers. A 200 "this is gated" page is a ` +
+        'soft auth wall agents are built to distrust; ax generates the guide but never rewrites ' +
+        'your handlers.',
+    );
+  }
+
+  // Markdown-twin alternate link: fires only once twins exist for the tag to point at.
   for (const message of buildMarkdownAlternateRecommendation({
     siteUrl,
     basePath,
-    twinPaths: [],
+    twinPaths: twinPlan.servedPaths,
   })) {
     recommend(message);
   }
@@ -501,6 +588,27 @@ export async function generateCatalog(
       openapi: openApi,
     },
     scaffolds,
+    // Planned values; the CLI reconciles `written`/`deleted`/`authMd` after it applies the plan
+    // (post-review-gate), the same way it patches in the catalog path.
+    markdownTwins: {
+      enabled: twinPlan.enabled,
+      written: twinPlan.writes.map((twin) => ({
+        route: twin.route,
+        path: relative(cwd, twin.filePath),
+        tier: twin.tier,
+        source: twin.source,
+      })),
+      userOwned: twinPlan.userOwned.map((twin) => ({
+        route: twin.route,
+        source: twin.sourcePath,
+      })),
+      skipped: twinPlan.skips,
+      dynamicRouteCount: twinPlan.dynamicRouteCount,
+      deleted: [],
+      ...(authMdPlan !== undefined
+        ? { authMd: { path: join('public', 'auth.md'), surfaceCount: authMdPlan.surfaceCount } }
+        : {}),
+    },
     // Filled in by the CLI once artifacts are on disk (it knows the written catalog / server-card
     // paths and can read the scaffolded files back), so the generator leaves it empty.
     sizes: [],
@@ -510,14 +618,29 @@ export async function generateCatalog(
           // The catalog is the one artifact every run produces, so its checks are always addressed.
           'ai-catalog.json': true,
           'llms.txt': llmsTxtResult.found,
+          // Ora's probe fetches the *homepage's* .md fallback, so the root twin is what answers
+          // it — a site with no page routes at all has nothing for the probe to fetch (N/A).
+          'markdown-twins':
+            router.listPageRoutes().length === 0
+              ? 'not-applicable'
+              : twinPlan.writes.some((twin) => twin.route === '/') ||
+                twinPlan.userOwned.some((twin) => twin.route === '/'),
           'robots.txt': robots.found,
           sitemap: sitemap.found,
           'agents.md': agentsMd.found,
           'json-ld': jsonLd.found,
           'openapi.json': openApi.found,
           'mcp-server': mcpMounts.length > 0,
+          // With nothing gated there is nothing an auth guide could say — the checks are omitted,
+          // never claimed addressed or held actionable.
+          'auth.md': authMdCandidate === undefined ? 'not-applicable' : authMdPlan !== undefined,
         },
-        oraCheckNotes({ llmsTxtScaffolded: llmsTxtResult.scaffoldedPath, jsonLd: jsonLd.scaffold }),
+        oraCheckNotes({
+          llmsTxtScaffolded: llmsTxtResult.scaffoldedPath,
+          jsonLd: jsonLd.scaffold,
+          twinPlan,
+          authMdMissing: authMdCandidate !== undefined && authMdPlan === undefined,
+        }),
       ),
     },
     warnings,
@@ -530,6 +653,8 @@ export async function generateCatalog(
     webMcpToolNames: webMcp.toolNames,
     report,
     reportTarget: config.report,
+    twinPlan,
+    ...(authMdPlan !== undefined ? { authMdPlan } : {}),
     ...(serverCard ? { serverCard } : {}),
     ...(llmsTxtResult.scaffoldedBody !== undefined
       ? { scaffoldedLlmsTxtBody: llmsTxtResult.scaffoldedBody }

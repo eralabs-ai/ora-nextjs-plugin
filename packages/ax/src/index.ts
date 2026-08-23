@@ -43,7 +43,13 @@ export {
   type EmissionTarget,
 } from './write.js';
 
-export type { BuildReport, ReportArtifact, ReportScaffolds, OraReport } from './report.js';
+export type {
+  BuildReport,
+  ReportArtifact,
+  ReportScaffolds,
+  ReportMarkdownTwins,
+  OraReport,
+} from './report.js';
 
 export {
   measureArtifact,
@@ -99,7 +105,9 @@ export {
 
 export {
   planPostbuildWiring,
+  planPrebuildWiring,
   POSTBUILD_COMMAND,
+  PREBUILD_COMMAND,
   type PostbuildWiring,
 } from './init-package-json.js';
 
@@ -254,6 +262,60 @@ export {
 } from './markdown-headers.js';
 
 export {
+  GENERATED_BY,
+  renderFrontmatter,
+  isGeneratedMarkdown,
+  fenceMarkerCount,
+  type MarkdownFrontmatter,
+} from './markdown-artifact.js';
+
+export { deriveMdxTwin, MDX_MAX_NON_MARKDOWN_FRACTION, type MdxTwinResult } from './mdx-twin.js';
+
+export {
+  deriveHtmlTwin,
+  MIN_TWIN_TEXT_CHARS,
+  MAX_TWIN_CHARS,
+  type HtmlTwinResult,
+  type HtmlTwinSkipReason,
+} from './html-twin.js';
+
+export {
+  planMarkdownTwins,
+  applyMarkdownTwinPlan,
+  twinPathnameForRoute,
+  type MarkdownTwinPlan,
+  type PlannedTwin,
+  type UserOwnedTwin,
+  type TwinSkip,
+  type TwinSkipReason,
+  type TwinTier,
+  type PlanMarkdownTwinsOptions,
+  type ApplyTwinPlanResult,
+} from './markdown-twins.js';
+
+export {
+  buildAuthMd,
+  applyAuthMdPlan,
+  AUTH_MD_PATHNAME,
+  type AuthMdPlan,
+  type BuildAuthMdOptions,
+  type ApplyAuthMdResult,
+} from './auth-md.js';
+
+export {
+  buildServingManifest,
+  writeServingManifest,
+  refreshServingManifestIfPresent,
+  existingManifestModulePath,
+  manifestModulePath,
+  renderManifestModule,
+  MANIFEST_MODULE_BASE,
+  type ServingManifestData,
+  type BuildServingManifestOptions,
+  type WriteServingManifestResult,
+} from './manifest.js';
+
+export {
   AI_AGENT_UA_PATTERNS,
   SIGNATURE_AGENT_DOMAINS,
   TRADITIONAL_BOT_PATTERNS,
@@ -263,4 +325,4 @@ export {
   UA_CORPUS_REVIEWED,
 } from './agent-ua.js';
 
-export { listStaticPageRoutes, resolvePagePathname } from './app-dir.js';
+export { listStaticPageRoutes, resolvePagePathname, listMdxPageFiles } from './app-dir.js';

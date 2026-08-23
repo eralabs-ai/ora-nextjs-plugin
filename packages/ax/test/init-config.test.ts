@@ -17,6 +17,7 @@ function answers(overrides: Partial<InitAnswers> = {}): InitAnswers {
     scaffoldJsonLd: true,
     scaffoldRobots: true,
     scaffoldAgent404: true,
+    markdownTwins: true,
     report: true,
     ...overrides,
   };
@@ -44,6 +45,7 @@ describe('renderAxConfig', () => {
       'scaffoldJsonLd',
       'scaffoldRobots',
       'scaffoldAgent404',
+      'markdownTwins',
       'report',
     ]) {
       const line = source.split('\n').findIndex((l) => l.trim().startsWith(`${key}:`));
@@ -80,6 +82,7 @@ describe('renderAxConfig', () => {
       scaffoldJsonLd: true,
       scaffoldRobots: false,
       scaffoldAgent404: true,
+      markdownTwins: true,
       report: true,
     };
     expect(source).toContain('scaffoldRobots: false,');
