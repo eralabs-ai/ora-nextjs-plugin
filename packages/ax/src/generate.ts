@@ -241,8 +241,32 @@ function applyGating(
 function oraCheckNotes(scaffolds: {
   llmsTxtScaffolded?: string;
   jsonLd?: JsonLdScaffoldResult;
+  twinPlan?: MarkdownTwinPlan;
+  authMdMissing?: boolean;
 }): Partial<Record<OraArtifact, string>> {
   const notes: Partial<Record<OraArtifact, string>> = {};
+
+  const twinPlan = scaffolds.twinPlan;
+  if (twinPlan !== undefined) {
+    if (!twinPlan.enabled) {
+      notes['markdown-twins'] =
+        'markdownTwins is disabled in ax.config, so no .md fallbacks are generated. Set it back ' +
+        'to true (the default) to address these checks.';
+    } else {
+      const rootSkip = twinPlan.skips.find((skip) => skip.route === '/');
+      notes['markdown-twins'] =
+        (rootSkip !== undefined
+          ? `No markdown twin could be derived for the homepage (${rootSkip.reason}): ${rootSkip.detail}`
+          : 'No markdown twin exists for the homepage — the URL Ora’s markdown-fallback probe fetches.') +
+        ' The report’s markdownTwins.skipped section lists every twin-less route with its reason.';
+    }
+  }
+
+  if (scaffolds.authMdMissing === true) {
+    notes['auth.md'] =
+      'This site has gated surfaces but markdownTwins is disabled in ax.config, so the generated ' +
+      'public/auth.md (how agents obtain access) is not written. Set markdownTwins back to true.';
+  }
 
   if (scaffolds.llmsTxtScaffolded !== undefined) {
     notes['llms.txt'] =
@@ -459,16 +483,17 @@ export async function generateCatalog(
 
   // The generated /auth.md (gated-surface guide), from the final published surface: gated MCP
   // mounts plus entries carrying an auth descriptor. Undefined when nothing is gated — an auth
-  // guide with nothing to say would itself be noise.
-  const authMdPlan = config.markdownTwins
-    ? buildAuthMd({
-        mounts: mcpMounts,
-        entries,
-        siteUrl,
-        basePath,
-        siteDisplayName: site.displayName,
-      })
-    : undefined;
+  // guide with nothing to say would itself be noise. Built unconditionally (it's pure and cheap)
+  // so the ora checks can distinguish "nothing gated" (auth.md not applicable) from "gated but the
+  // feature is off" (actionable); only an enabled run actually writes it.
+  const authMdCandidate = buildAuthMd({
+    mounts: mcpMounts,
+    entries,
+    siteUrl,
+    basePath,
+    siteDisplayName: site.displayName,
+  });
+  const authMdPlan = config.markdownTwins ? authMdCandidate : undefined;
   if (authMdPlan !== undefined) {
     recommend(
       'Gated routes should keep their honest 401/403 status and point agents at the auth guide: ' +
@@ -593,14 +618,29 @@ export async function generateCatalog(
           // The catalog is the one artifact every run produces, so its checks are always addressed.
           'ai-catalog.json': true,
           'llms.txt': llmsTxtResult.found,
+          // Ora's probe fetches the *homepage's* .md fallback, so the root twin is what answers
+          // it — a site with no page routes at all has nothing for the probe to fetch (N/A).
+          'markdown-twins':
+            router.listPageRoutes().length === 0
+              ? 'not-applicable'
+              : twinPlan.writes.some((twin) => twin.route === '/') ||
+                twinPlan.userOwned.some((twin) => twin.route === '/'),
           'robots.txt': robots.found,
           sitemap: sitemap.found,
           'agents.md': agentsMd.found,
           'json-ld': jsonLd.found,
           'openapi.json': openApi.found,
           'mcp-server': mcpMounts.length > 0,
+          // With nothing gated there is nothing an auth guide could say — the checks are omitted,
+          // never claimed addressed or held actionable.
+          'auth.md': authMdCandidate === undefined ? 'not-applicable' : authMdPlan !== undefined,
         },
-        oraCheckNotes({ llmsTxtScaffolded: llmsTxtResult.scaffoldedPath, jsonLd: jsonLd.scaffold }),
+        oraCheckNotes({
+          llmsTxtScaffolded: llmsTxtResult.scaffoldedPath,
+          jsonLd: jsonLd.scaffold,
+          twinPlan,
+          authMdMissing: authMdCandidate !== undefined && authMdPlan === undefined,
+        }),
       ),
     },
     warnings,

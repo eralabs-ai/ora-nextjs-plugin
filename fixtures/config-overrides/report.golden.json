@@ -104,6 +104,18 @@
         "status": "actionable"
       },
       {
+        "id": "markdown-url-fallback",
+        "artifact": "markdown-twins",
+        "status": "actionable",
+        "note": "No markdown twin could be derived for the homepage (too-little-text): The prerendered HTML carries under 200 characters of text — a JS-shell page, whose twin would be an empty page presented as content. The report’s markdownTwins.skipped section lists every twin-less route with its reason."
+      },
+      {
+        "id": "markdown-frontmatter",
+        "artifact": "markdown-twins",
+        "status": "actionable",
+        "note": "No markdown twin could be derived for the homepage (too-little-text): The prerendered HTML carries under 200 characters of text — a JS-shell page, whose twin would be an empty page presented as content. The report’s markdownTwins.skipped section lists every twin-less route with its reason."
+      },
+      {
         "id": "robots-ai-policy-quality",
         "artifact": "robots.txt",
         "status": "actionable"

@@ -12,12 +12,14 @@ function nothingPresent(): OraArtifactPresence {
   return {
     'ai-catalog.json': false,
     'llms.txt': false,
+    'markdown-twins': false,
     'robots.txt': false,
     sitemap: false,
     'agents.md': false,
     'json-ld': false,
     'openapi.json': false,
     'mcp-server': false,
+    'auth.md': false,
   };
 }
 
@@ -39,12 +41,14 @@ describe('ORA_CHECK_MAP', () => {
     expect(artifacts).toEqual([
       'ai-catalog.json',
       'llms.txt',
+      'markdown-twins',
       'robots.txt',
       'sitemap',
       'agents.md',
       'json-ld',
       'openapi.json',
       'mcp-server',
+      'auth.md',
     ]);
   });
 });
@@ -101,5 +105,28 @@ describe('buildOraChecks', () => {
     const present = { ...nothingPresent(), 'json-ld': true };
     const checks = buildOraChecks(present, { 'json-ld': 'stale advice' });
     expect(checks.every((check) => check.note === undefined)).toBe(true);
+  });
+});
+
+describe("buildOraChecks 'not-applicable' artifacts", () => {
+  it('omits a not-applicable artifact’s checks entirely — absent, never actionable', () => {
+    const present = { ...nothingPresent(), 'auth.md': 'not-applicable' as const };
+    const checks = buildOraChecks(present);
+    expect(checks.some((check) => check.artifact === 'auth.md')).toBe(false);
+    // The other artifacts are unaffected.
+    expect(checks.some((check) => check.id === 'markdown-url-fallback')).toBe(true);
+  });
+
+  it('maps the markdown twins and auth guide onto Ora’s real check ids', () => {
+    const present = { ...nothingPresent(), 'markdown-twins': true, 'auth.md': true };
+    const addressed = buildOraChecks(present)
+      .filter((check) => check.status === 'addressed')
+      .map((check) => check.id);
+    expect(addressed).toEqual([
+      'markdown-url-fallback',
+      'markdown-frontmatter',
+      'auth-md-exists',
+      'auth-md-structure',
+    ]);
   });
 });

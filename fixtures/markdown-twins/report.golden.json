@@ -123,6 +123,16 @@
         "status": "actionable"
       },
       {
+        "id": "markdown-url-fallback",
+        "artifact": "markdown-twins",
+        "status": "addressed"
+      },
+      {
+        "id": "markdown-frontmatter",
+        "artifact": "markdown-twins",
+        "status": "addressed"
+      },
+      {
         "id": "robots-ai-policy-quality",
         "artifact": "robots.txt",
         "status": "actionable"

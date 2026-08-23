@@ -37,6 +37,9 @@ function writeFullyAgentReadyApp(dir: string): void {
   const publicDir = join(dir, 'public');
   mkdirSync(publicDir, { recursive: true });
   writeFileSync(join(publicDir, 'llms.txt'), '# demo\n', 'utf8');
+  // A hand-authored homepage twin (no generated-by marker): the markdown-fallback checks read as
+  // addressed without this synthetic app needing a real prerendered build output.
+  writeFileSync(join(publicDir, 'index.md'), '# demo home\n', 'utf8');
   writeFileSync(join(publicDir, 'robots.txt'), 'User-agent: *\nAllow: /\n', 'utf8');
   writeFileSync(join(publicDir, 'sitemap.xml'), '<urlset></urlset>\n', 'utf8');
   writeFileSync(join(publicDir, 'agents.md'), '# When to use\n', 'utf8');
@@ -562,8 +565,11 @@ describe('runCli agent handoff footer', () => {
 
     const output = stdout.join('\n');
     expect(output).toContain(`Find your report at: ${join(dir, REPORT_OUTPUT_PATH)}`);
-    expect(output).toContain('Prompt for your coding agent (copy-paste):');
+    expect(output).toContain('📋 Copy this prompt to your coding agent:');
     expect(output).toContain(`Read ${join(dir, REPORT_OUTPUT_PATH)} and work through every check`);
+    // The prompt names the twin skip list, so an agent addresses twin-less routes too — not just
+    // the ora checks (the report-driven fix an early demo run missed).
+    expect(output).toContain('markdownTwins.skipped');
     expect(output).not.toContain('ora.ai');
   });
 

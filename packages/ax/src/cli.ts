@@ -466,10 +466,11 @@ function markMountGated(generated: GenerateCatalogResult, path: string): void {
 }
 
 /**
- * The handoff footer: where the report landed and what to do with it. Deliberately two plain
- * lines — the report itself carries the full recommendation detail, so the log only points at it.
- * Printed only when something is still actionable: a build with nothing left to do doesn't need a
- * to-do list.
+ * The handoff footer: where the report landed and what to do with it. The prompt is the one line
+ * users are meant to *act* on (paste it into their coding agent), so it's set apart with blank
+ * lines and a 📋 marker instead of blending into the build log; the report itself carries the full
+ * recommendation detail, so the log only points at it. Printed only when something is still
+ * actionable: a build with nothing left to do doesn't need a to-do list.
  */
 function printAgentHandoff(
   report: BuildReport,
@@ -484,13 +485,17 @@ function printAgentHandoff(
     );
     return;
   }
+  stdout('[ax]');
   stdout(`[ax] Find your report at: ${reportPath}`);
-  stdout('[ax] Prompt for your coding agent (copy-paste):');
+  stdout('[ax] 📋 Copy this prompt to your coding agent:');
+  stdout('[ax]');
   stdout(
     `[ax]   Read ${reportPath} and work through every check marked "actionable": create or ` +
       'improve those artifacts to make this site more agent-ready (each check may carry a note ' +
-      'with the exact next step), then rebuild and confirm the report marks them addressed.',
+      'with the exact next step, and the markdownTwins.skipped section lists why any route has ' +
+      'no markdown twin), then rebuild and confirm the report marks them addressed.',
   );
+  stdout('[ax]');
 }
 
 interface MeasureArtifactsInput {
