@@ -355,13 +355,14 @@ async function askGating(
 }
 
 /**
- * Runs the primary-server question — only for a host with several MCP servers, because the root
- * well-known card path (/.well-known/mcp/server-card.json) can be owned by exactly one of them
- * and that's a judgment call ax never guesses silently. The gating question just rendered the
- * full route tree, so this one lists only the MCP server rows (same markers, gating answers as
- * annotations) — re-printing the identical tree back-to-back would be pure noise. Defaults to the
- * first public server: the root path is probed blind by registries, so the server agents can use
- * without credentials is the least surprising owner. Returns the chosen mount's pathname.
+ * Resolves which MCP server is primary (owns the root well-known card path) — only for a host
+ * with several servers. With exactly one *public* server the answer isn't a judgment call at all:
+ * the root path is probed blind by registries, so the one server agents can use without
+ * credentials is its only sensible owner — picked silently, no question. The question is asked
+ * only when it's genuinely ambiguous (several public servers, or none). The gating question just
+ * rendered the full route tree, so the prompt lists only the MCP server rows (same markers,
+ * gating answers as annotations) — re-printing the identical tree back-to-back would be pure
+ * noise. Returns the chosen mount's pathname.
  */
 async function askPrimary(
   prompter: Prompter,
@@ -371,12 +372,21 @@ async function askPrimary(
 ): Promise<string | undefined> {
   if (findings.mcpMounts.length <= 1) return findings.mcpMounts[0]?.pathname;
 
-  const defaultMount =
-    findings.mcpMounts.find((mount) => !gatedMounts.has(mount.pathname)) ?? findings.mcpMounts[0];
   const served = (pathname: string): string => servedPath(findings.basePath, pathname);
   const mounts = [...findings.mcpMounts].sort((a, b) =>
     served(a.pathname).localeCompare(served(b.pathname)),
   );
+  const publics = mounts.filter((mount) => !gatedMounts.has(mount.pathname));
+
+  if (publics.length === 1 && publics[0] !== undefined) {
+    stdout(
+      `[ax]   Primary MCP server: ${served(publics[0].pathname)} (the public one — its card ` +
+        'owns /.well-known/mcp/server-card.json)',
+    );
+    return publics[0].pathname;
+  }
+
+  const defaultMount = publics[0] ?? mounts[0];
   const width = Math.max(...mounts.map((mount) => served(mount.pathname).length));
   const rows: MultiSelectRow[] = mounts.map((mount) => ({
     value: mount.pathname,
@@ -385,13 +395,10 @@ async function askPrimary(
       (gatedMounts.has(mount.pathname) ? ' · requires login' : ''),
     selected: mount.pathname === defaultMount?.pathname,
   }));
-  const question =
-    'Which MCP server is the PRIMARY — its card owns /.well-known/mcp/server-card.json, the ' +
-    'path agents probe first? (Every server also gets its own card under ' +
-    '/.well-known/mcp/server-card/.)';
+  const question = 'Which MCP server is the PRIMARY (the path agents probe first)?';
   const chosen = (await prompter.select(question, rows)) ?? defaultMount?.pathname;
   if (chosen !== undefined) {
-    stdout(`[ax]   Primary MCP server: ${servedPath(findings.basePath, chosen)}`);
+    stdout(`[ax]   Primary MCP server: ${served(chosen)}`);
   }
   return chosen;
 }

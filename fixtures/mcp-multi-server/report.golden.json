@@ -43,7 +43,6 @@
       "/api/public/mcp"
     ],
     "primaryMount": "/api/public/mcp",
-    "primaryUnreviewed": true,
     "serverCardPath": "public/.well-known/mcp/server-card.json",
     "serverCards": [
       {

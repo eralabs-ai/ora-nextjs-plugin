@@ -593,13 +593,15 @@ describe('generateCatalog multi-mount MCP', () => {
       'api-mcp',
       'api-public-mcp',
     ]);
-    // No root card on record → default primary is the public server, flagged for review.
+    // No root card on record, but exactly one PUBLIC server → it is the primary with nothing to
+    // review: the root path is probed blind, so the credential-free server is its only sensible
+    // owner.
     expect(serverCardPlan?.cards[0]).toMatchObject({
       mountPathname: '/api/public/mcp',
       primary: true,
     });
     expect(report.mcp.primaryMount).toBe('/api/public/mcp');
-    expect(report.mcp.primaryUnreviewed).toBe(true);
+    expect(report.mcp.primaryUnreviewed).toBeUndefined();
     // The public (unreviewed-gating) mount is listed; the withMcpAuth one is self-reviewed.
     expect(report.mcp.unreviewedMounts).toEqual(['/api/public/mcp']);
 
@@ -611,6 +613,31 @@ describe('generateCatalog multi-mount MCP', () => {
       'https://example.com/.well-known/mcp/server-card.json',
       'https://example.com/.well-known/mcp/server-card/api-mcp.json',
     ]);
+  });
+
+  it('flags the primary unreviewed only when several servers are public (ambiguous)', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com' };\n",
+      'utf8',
+    );
+    for (const name of ['alpha', 'beta']) {
+      const mountDir = join(dir, 'app', 'api', name, 'mcp');
+      mkdirSync(mountDir, { recursive: true });
+      writeFileSync(
+        join(mountDir, 'route.ts'),
+        "import { createMcpHandler } from 'mcp-handler';\n" +
+          "const handler = createMcpHandler((server) => { server.tool('t', 'd', {}, async () => ({})); });\n" +
+          'export { handler as GET };\n',
+        'utf8',
+      );
+    }
+
+    const { report } = await generateCatalog({ cwd: dir });
+
+    expect(report.mcp.primaryMount).toBe('/api/alpha/mcp');
+    expect(report.mcp.primaryUnreviewed).toBe(true);
   });
 
   it('reads the primary and per-mount gating back from committed root + named cards', async () => {

@@ -33,6 +33,7 @@ fixtures/markdown-twins/public/guides/
 fixtures/markdown-twins/public/live.md
 fixtures/mdx-content/public/index.md
 fixtures/mdx-content/public/guide.md
+fixtures/mcp-multi-server/public/index.md
 fixtures/discovery/public/index.md
 fixtures/*/public/auth.md
 

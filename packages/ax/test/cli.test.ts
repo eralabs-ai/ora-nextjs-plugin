@@ -710,11 +710,12 @@ describe('runCli multi-mount server cards', () => {
     expect(publicCard.authentication).toBeUndefined();
     expect(gatedCard.authentication).toEqual({ required: true });
 
-    // Headless: the default was applied, warned about, and noted in the report.
-    expect(stdout.some((l) => l.includes('no primary on record'))).toBe(true);
+    // Exactly one public server → it is the primary with nothing to confirm: no warning, and the
+    // report records the choice without flagging it unreviewed.
+    expect(stdout.some((l) => l.includes('no primary on record'))).toBe(false);
     const report = JSON.parse(readFileSync(join(dir, REPORT_OUTPUT_PATH), 'utf8'));
     expect(report.mcp.primaryMount).toBe('/api/public/mcp');
-    expect(report.mcp.primaryUnreviewed).toBe(true);
+    expect(report.mcp.primaryUnreviewed).toBeUndefined();
     expect(report.mcp.serverCards).toEqual([
       { mount: '/api/public/mcp', path: expect.stringContaining('api-public-mcp.json') },
       { mount: '/api/mcp', path: expect.stringContaining('api-mcp.json') },
@@ -759,7 +760,7 @@ describe('runCli multi-mount server cards', () => {
     expect(report.mcp.primaryMount).toBe('/api/public/mcp');
   });
 
-  it('asks the primary question at the gate and persists a non-default answer in the root card', async () => {
+  it('never asks the primary question when exactly one server is public — even interactively', async () => {
     writeTwoMountFixture(dir);
 
     const questions: string[] = [];
@@ -768,28 +769,70 @@ describe('runCli multi-mount server cards', () => {
       cwd: dir,
       confirm: async (question: string) => {
         questions.push(question);
-        // Gating: the public mount is public (yes). Primary: decline the public default,
-        // accept the gated server. Publish: yes.
-        if (question.includes('be the primary')) return question.includes('at /api/mcp be');
         return true;
       },
     });
 
     expect(code).toBe(0);
-    expect(questions.filter((q) => q.includes('be the primary')).length).toBeGreaterThan(0);
+    // The gating question runs (the public mount is unreviewed); the primary one never does.
+    expect(questions.some((q) => q.includes('public'))).toBe(true);
+    expect(questions.some((q) => q.includes('be the primary'))).toBe(false);
     const root = JSON.parse(readFileSync(join(dir, SERVER_CARD_OUTPUT_PATH), 'utf8'));
-    expect(root.serverUrl).toBe('https://example.com/api/mcp');
-    expect(root.authentication).toEqual({ required: true });
+    expect(root.serverUrl).toBe('https://example.com/api/public/mcp');
+  });
 
-    // The entry URLs swapped with the primary: the gated server's entry now points at the root
-    // card, the public one at its named slot.
-    const catalog = JSON.parse(readFileSync(join(dir, CATALOG_OUTPUT_PATH), 'utf8'));
-    const gatedEntry = catalog.entries.find(
-      (e: { auth?: { status: string } }) => e.auth?.status === 'unknown',
+  it('asks the primary question at the gate (several public servers) and persists a non-default answer', async () => {
+    // Two OPEN mounts: with several public servers the root-card owner is genuinely ambiguous,
+    // so the gate asks. Modeled as /api/alpha/mcp + /api/beta/mcp, both un-wrapped.
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({ name: 'demo', version: '1.0.0' }),
+      'utf8',
     );
-    expect(gatedEntry.url).toBe('https://example.com/.well-known/mcp/server-card.json');
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com' };\n",
+      'utf8',
+    );
+    for (const name of ['alpha', 'beta']) {
+      const mountDir = join(dir, 'app', 'api', name, 'mcp');
+      mkdirSync(mountDir, { recursive: true });
+      writeFileSync(
+        join(mountDir, 'route.ts'),
+        `import { createMcpHandler } from 'mcp-handler';\n` +
+          `const handler = createMcpHandler((server) => { server.tool('${name}_tool', 'd', {}, async () => ({})); });\n` +
+          `export { handler as GET };\n`,
+        'utf8',
+      );
+    }
 
-    // Third build sees the committed root card and keeps the choice without asking.
+    const questions: string[] = [];
+    const code = await runCli([], {
+      ...io,
+      cwd: dir,
+      confirm: async (question: string) => {
+        questions.push(question);
+        // Gating: both public (yes). Primary: decline the default (alpha), accept beta.
+        if (question.includes('be the primary')) return question.includes('at /api/beta/mcp be');
+        return true;
+      },
+    });
+
+    expect(code).toBe(0);
+    expect(questions.filter((q) => q.includes('be the primary')).length).toBe(2);
+    const root = JSON.parse(readFileSync(join(dir, SERVER_CARD_OUTPUT_PATH), 'utf8'));
+    expect(root.serverUrl).toBe('https://example.com/api/beta/mcp');
+
+    // The entry URLs follow the primary: beta's entry points at the root card, alpha's at its
+    // named slot.
+    const catalog = JSON.parse(readFileSync(join(dir, CATALOG_OUTPUT_PATH), 'utf8'));
+    const urls = catalog.entries.map((e: { url: string }) => e.url).sort();
+    expect(urls).toEqual([
+      'https://example.com/.well-known/mcp/server-card.json',
+      'https://example.com/.well-known/mcp/server-card/api-alpha-mcp.json',
+    ]);
+
+    // The next build sees the committed root card and keeps the choice without asking.
     stdout = [];
     const rerunQuestions: string[] = [];
     expect(
@@ -804,6 +847,6 @@ describe('runCli multi-mount server cards', () => {
     ).toBe(0);
     expect(rerunQuestions.some((q) => q.includes('be the primary'))).toBe(false);
     const rebuilt = JSON.parse(readFileSync(join(dir, SERVER_CARD_OUTPUT_PATH), 'utf8'));
-    expect(rebuilt.serverUrl).toBe('https://example.com/api/mcp');
+    expect(rebuilt.serverUrl).toBe('https://example.com/api/beta/mcp');
   });
 });

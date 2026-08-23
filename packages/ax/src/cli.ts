@@ -224,7 +224,7 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
       if (primaryUnreviewed && generated.report.mcp.primaryMount !== undefined) {
         stdout(
           `[ax] ⚠ ${generated.report.mcp.mounts.length} MCP servers but no primary on record — ` +
-            `the root server card defaults to the public server at ` +
+            `the root server card defaults to ` +
             `${servedPath(generated.report.basePath, generated.report.mcp.primaryMount)}. Run an ` +
             'interactive build (or `ax init`) to choose a different primary.',
         );
@@ -471,26 +471,31 @@ async function reviewMcpDecisions(
     if (!isPublic) markMountGated(generated, path);
   }
 
-  // The primary question runs after gating so its default can honor the answers just given:
-  // the root well-known path is probed blind by registries, so the server usable without
-  // credentials is the least surprising owner. One y/N per candidate, public servers first,
-  // stopping at the first yes; declining every candidate keeps the default.
+  // The primary decision runs after gating so it can honor the answers just given. Exactly one
+  // public server is no judgment call — the root well-known path is probed blind by registries,
+  // so the one server usable without credentials is its only sensible owner, applied silently.
+  // Only the ambiguous cases (several public servers, or none) get asked: one y/N per candidate,
+  // public servers first, stopping at the first yes; declining every candidate keeps the default.
   const plan = generated.serverCardPlan;
   if (generated.report.mcp.primaryUnreviewed === true && plan !== undefined && plan.multi) {
     const basePath = generated.report.basePath;
-    const candidates = [...plan.cards].sort(
-      (a, b) =>
-        Number(a.card.authentication !== undefined) - Number(b.card.authentication !== undefined),
-    );
-    for (const candidate of candidates) {
-      const served = servedPath(basePath, candidate.mountPathname);
-      const chosen = await confirm(
-        `Should the MCP server at ${served} be the primary — its card owns ` +
-          '/.well-known/mcp/server-card.json, the path agents probe first?',
+    const publicCards = plan.cards.filter((card) => card.card.authentication === undefined);
+    if (publicCards.length === 1 && publicCards[0] !== undefined) {
+      applyPrimaryChoice(generated, publicCards[0].mountPathname);
+    } else {
+      const candidates = [...plan.cards].sort(
+        (a, b) =>
+          Number(a.card.authentication !== undefined) - Number(b.card.authentication !== undefined),
       );
-      if (chosen) {
-        applyPrimaryChoice(generated, candidate.mountPathname);
-        break;
+      for (const candidate of candidates) {
+        const served = servedPath(basePath, candidate.mountPathname);
+        const chosen = await confirm(
+          `Should the MCP server at ${served} be the primary (the path agents probe first)?`,
+        );
+        if (chosen) {
+          applyPrimaryChoice(generated, candidate.mountPathname);
+          break;
+        }
       }
     }
     const primary = plan.cards.find((emission) => emission.primary);

@@ -651,8 +651,10 @@ authors judgment content. **This is the immediate work.**
       `/.well-known/mcp/server-card.json`, and every server's card also lands at
       `/.well-known/mcp/server-card/<server-name>.json` (`<server-name>` = the mount pathname
       slugified, e.g. `api-public-mcp` — unique, stable, and the read-back key for per-mount gating
-      persistence). "Primary" is a judgment call ax never guesses silently: asked in `ax init` and at
-      the build review gate (default = the public server), persisted by the root card's `serverUrl`.
+      persistence). "Primary": with exactly one *public* server it is picked silently — the root
+      path is probed blind, so the credential-free server is its only sensible owner (not a guess).
+      Only the ambiguous cases (several public servers, or none) are asked — in `ax init` and at
+      the build review gate (default = first public) — persisted by the root card's `serverUrl`.
       **Known divergence + revisit trigger:** the named sub-path scheme is ax's own (neither the
       current SEP revision nor Ora define one). When **SEP-2127 merges** (watch the PR) or **Ora's
       `mcp-server-card`/`mcp-well-known-discovery` checks change their probed path**, revisit: likely

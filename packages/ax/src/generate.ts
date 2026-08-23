@@ -180,10 +180,16 @@ function resolveMcpMountGating(options: {
       : mount;
   });
 
-  // A single mount is trivially primary; several mounts need the root card's recorded answer.
-  // Defaulting to the first *public* server when there's no record: the root path is the one
-  // registries probe blind, so the server agents can use without credentials is the least
-  // surprising owner — but it's still a default, so `primaryUnreviewed` gets it confirmed.
+  // A single mount is trivially primary; several mounts take the root card's recorded answer.
+  // Without a record, exactly one *public* server is no judgment call either: the root path is
+  // the one registries probe blind, so the one server agents can use without credentials is its
+  // only sensible owner — picked silently. Only the ambiguous cases (several public servers, or
+  // none) fall back to the first candidate AND set `primaryUnreviewed`, so an interactive build
+  // asks and a headless one warns.
+  const sortedByPath = [...resolved].sort((a, b) =>
+    servedPath(basePath, a.pathname).localeCompare(servedPath(basePath, b.pathname)),
+  );
+  const publicMounts = sortedByPath.filter((mount) => mount.auth === undefined);
   let primaryPathname = resolved[0]?.pathname;
   let primaryUnreviewed = false;
   if (resolved.length > 1) {
@@ -194,9 +200,8 @@ function resolveMcpMountGating(options: {
     if (rootMatch !== undefined) {
       primaryPathname = rootMatch.pathname;
     } else {
-      primaryPathname = (resolved.find((mount) => mount.auth === undefined) ?? resolved[0])
-        ?.pathname;
-      primaryUnreviewed = true;
+      primaryPathname = (publicMounts[0] ?? sortedByPath[0])?.pathname;
+      primaryUnreviewed = publicMounts.length !== 1;
     }
   }
 
