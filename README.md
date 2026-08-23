@@ -390,7 +390,8 @@ recorded in the report **with its reason**, so the skip list doubles as the what
   the layout's cascade, so ownership is read from the source and values from the render) and the
   head isn't shared with another route (shared heads are inherited in practice — N identical twins
   would each claim to describe a specific page). The twin is explicit about what it is: title,
-  description, and a note that the content renders in the browser. Labeled `source: "metadata"`
+  description, and a wayfinding note (the content loads in the browser; start machine-readable
+  access from the catalog). Labeled `source: "metadata"`
   in the report. The recommended page shape — a server `page.tsx` exporting metadata and rendering
   your client component — needs no pre-hydration placeholder DOM (which would paint and flicker).
 - **Tier 3 — dynamic/SSR routes: refused.** No build-time HTML exists, so no twin and no guessed

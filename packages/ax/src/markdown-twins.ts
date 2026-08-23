@@ -367,7 +367,14 @@ export async function planMarkdownTwins(
       source: 'metadata',
       content:
         `${frontmatterFor(candidate.route, candidate.title, candidate.description)}\n` +
-        metadataTwinBody(candidate.title, candidate.description),
+        metadataTwinBody(candidate.title, candidate.description, {
+          path: servedPath(options.basePath, '/.well-known/ai-catalog.json'),
+          url: absoluteOrServedUrl(
+            options.siteUrl,
+            options.basePath,
+            '/.well-known/ai-catalog.json',
+          ),
+        }),
     });
     metadataTwins++;
   }
@@ -449,16 +456,22 @@ function buildAppPageFileLookup(router: RouterModel): Map<string, string> {
 }
 
 /**
- * The minimal metadata twin: the page's own title and description, plus an explicit statement of
- * what this document is — it describes the page rather than mirroring content, and says so, which
- * is what keeps the lowest-confidence rung honest.
+ * The minimal metadata twin: the page's own title and description, plus one wayfinding note. The
+ * note has two jobs — stop an agent from reading a two-line twin as "this page is empty" (the
+ * content exists, it's interactive), and point at the site's machine-readable entry point instead
+ * of dead-ending. The catalog is the one artifact every ax run produces, so it is always an
+ * honest link target.
  */
-function metadataTwinBody(title: string, description: string | undefined): string {
+function metadataTwinBody(
+  title: string,
+  description: string | undefined,
+  catalog: { path: string; url: string },
+): string {
   const lines = [`# ${title}`, ''];
   if (description !== undefined) lines.push(description, '');
   lines.push(
-    '> This page renders its content in the browser, so there is no server-rendered content to ' +
-      'mirror here. This document is generated from the page’s own metadata.',
+    '> This page is interactive — its content loads in the browser and is not mirrored here. ' +
+      `For machine-readable access to this site, start from [${catalog.path}](${catalog.url}).`,
   );
   return `${lines.join('\n')}\n`;
 }

@@ -241,7 +241,11 @@ describe('planMarkdownTwins — metadata rung (content-less pages with page-owne
     expect(content).toContain('title: "Results"');
     expect(content).toContain('# Results');
     expect(content).toContain('Search results, live-fetched.');
-    expect(content).toContain('renders its content in the browser');
+    expect(content).toContain('its content loads in the browser');
+    // The wayfinding pointer: an agent hitting a minimal twin is sent to the catalog, not a dead end.
+    expect(content).toContain(
+      '[/.well-known/ai-catalog.json](https://example.com/.well-known/ai-catalog.json)',
+    );
     expect(recommendations.some((r) => r.includes('derived from page metadata'))).toBe(true);
   });
 

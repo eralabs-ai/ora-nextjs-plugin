@@ -10,4 +10,4 @@ generated-by: "@ora-ai/ax"
 
 Real-time departures, fetched in the browser after the page loads.
 
-> This page renders its content in the browser, so there is no server-rendered content to mirror here. This document is generated from the page’s own metadata.
+> This page is interactive — its content loads in the browser and is not mirrored here. For machine-readable access to this site, start from [/.well-known/ai-catalog.json](https://markdown-twins-fixture.example.com/.well-known/ai-catalog.json).

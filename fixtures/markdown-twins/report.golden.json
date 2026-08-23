@@ -108,9 +108,9 @@
     {
       "artifact": "markdown-twin",
       "path": "public/live.md",
-      "bytes": 506,
-      "chars": 504,
-      "tokens": 126
+      "bytes": 591,
+      "chars": 589,
+      "tokens": 147
     }
   ],
   "ora": {
