@@ -379,10 +379,7 @@ async function askPrimary(
   const publics = mounts.filter((mount) => !gatedMounts.has(mount.pathname));
 
   if (publics.length === 1 && publics[0] !== undefined) {
-    stdout(
-      `[ax]   Primary MCP server: ${served(publics[0].pathname)} (the public one — its card ` +
-        'owns /.well-known/mcp/server-card.json)',
-    );
+    stdout(`[ax]   Primary MCP server: ${served(publics[0].pathname)} (the public one)`);
     return publics[0].pathname;
   }
 
