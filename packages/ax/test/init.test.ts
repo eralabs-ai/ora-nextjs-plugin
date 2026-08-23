@@ -341,12 +341,15 @@ describe('runInit multi-mount primary question', () => {
 
     expect(await runInit([], { ...io(), prompter })).toBe(0);
 
-    // The primary question renders the tree with a selectable row per server, defaulting to the
-    // public one.
+    // The primary question lists only the MCP server rows (the gating question just showed the
+    // full tree — repeating it would be noise), defaulting to the public one, with the gating
+    // answer annotated on the gated row.
     expect(selectQuestions.some((q) => q.includes('PRIMARY'))).toBe(true);
+    expect(selectRows.every(isMultiSelectChoice)).toBe(true);
     const choices = selectRows.filter(isMultiSelectChoice);
     expect(choices.map((c) => c.value).sort()).toEqual(['/api/mcp', '/api/public/mcp']);
     expect(choices.find((c) => c.selected)?.value).toBe('/api/public/mcp');
+    expect(choices.find((c) => c.value === '/api/mcp')?.label).toContain('requires login');
 
     // Root card = the primary (public) server; every server has its named slot.
     const root = JSON.parse(
