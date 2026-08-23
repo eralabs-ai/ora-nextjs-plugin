@@ -158,7 +158,7 @@
       },
       {
         "id": "mcp-server-card",
-        "artifact": "mcp-server",
+        "artifact": "mcp-server-card",
         "status": "addressed"
       }
     ]

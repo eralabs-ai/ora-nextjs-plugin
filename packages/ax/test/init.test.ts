@@ -20,11 +20,13 @@ class ScriptedPrompter implements Prompter {
   private ti = 0;
   private ci = 0;
   private mi = 0;
+  private si = 0;
   constructor(
     private readonly scripted: {
       text?: string[];
       confirm?: boolean[];
       multiSelect?: string[][];
+      select?: string[];
     },
   ) {}
   async text(_question: string, defaultValue?: string): Promise<string> {
@@ -40,6 +42,12 @@ class ScriptedPrompter implements Prompter {
         .filter(isMultiSelectChoice)
         .filter((choice) => choice.selected)
         .map((choice) => choice.value)
+    );
+  }
+  async select(_question: string, rows: MultiSelectRow[]): Promise<string | undefined> {
+    return (
+      this.scripted.select?.[this.si++] ??
+      rows.filter(isMultiSelectChoice).find((choice) => choice.selected)?.value
     );
   }
 }
@@ -268,6 +276,8 @@ describe('runInit gating respects basePath', () => {
         offered.push(...rows.filter(isMultiSelectChoice));
         return [];
       },
+      select: async (_question, rows) =>
+        rows.filter(isMultiSelectChoice).find((choice) => choice.selected)?.value,
     };
 
     expect(await runInit([], { ...io(), prompter })).toBe(0);
@@ -280,6 +290,118 @@ describe('runInit gating respects basePath', () => {
     );
     expect(card.serverUrl).toBe('https://acme.com/app/mcp');
     expect(card.authentication).toEqual({ required: true });
+  });
+});
+
+describe('runInit multi-mount primary question', () => {
+  /** Two mounts: an open /api/public/mcp and a withMcpAuth-gated /api/mcp. */
+  function addTwoMounts(dir: string): void {
+    const publicDir = join(dir, 'app', 'api', 'public', 'mcp');
+    mkdirSync(publicDir, { recursive: true });
+    writeFileSync(
+      join(publicDir, 'route.ts'),
+      `import { createMcpHandler } from 'mcp-handler';\n` +
+        `const handler = createMcpHandler((server) => { server.tool('search', 'd', {}, async () => ({})); });\n` +
+        `export { handler as GET };\n`,
+      'utf8',
+    );
+    const gatedDir = join(dir, 'app', 'api', 'mcp');
+    mkdirSync(gatedDir, { recursive: true });
+    writeFileSync(
+      join(gatedDir, 'route.ts'),
+      `import { createMcpHandler, withMcpAuth } from 'mcp-handler';\n` +
+        `const handler = createMcpHandler((server) => { server.tool('pay', 'd', {}, async () => ({})); });\n` +
+        `const auth = withMcpAuth(handler, async () => undefined);\n` +
+        `export { auth as GET };\n`,
+      'utf8',
+    );
+  }
+
+  it('asks which server is primary (route-tree rows, public default) and writes root + named cards', async () => {
+    writeBareApp(dir);
+    addTwoMounts(dir);
+
+    const selectRows: MultiSelectRow[] = [];
+    const selectQuestions: string[] = [];
+    const prompter: Prompter = {
+      text: async () => 'https://acme.com',
+      confirm: async () => false,
+      // Accept the gating pre-selection: the public mount stays public, withMcpAuth stays gated.
+      multiSelect: async (_question, rows) =>
+        rows
+          .filter(isMultiSelectChoice)
+          .filter((choice) => choice.selected)
+          .map((choice) => choice.value),
+      select: async (question, rows) => {
+        selectQuestions.push(question);
+        selectRows.push(...rows);
+        return rows.filter(isMultiSelectChoice).find((choice) => choice.selected)?.value;
+      },
+    };
+
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+
+    // The primary question renders the tree with a selectable row per server, defaulting to the
+    // public one.
+    expect(selectQuestions.some((q) => q.includes('PRIMARY'))).toBe(true);
+    const choices = selectRows.filter(isMultiSelectChoice);
+    expect(choices.map((c) => c.value).sort()).toEqual(['/api/mcp', '/api/public/mcp']);
+    expect(choices.find((c) => c.selected)?.value).toBe('/api/public/mcp');
+
+    // Root card = the primary (public) server; every server has its named slot.
+    const root = JSON.parse(
+      readFileSync(join(dir, 'public', '.well-known', 'mcp', 'server-card.json'), 'utf8'),
+    );
+    expect(root.serverUrl).toBe('https://acme.com/api/public/mcp');
+    const namedDir = join(dir, 'public', '.well-known', 'mcp', 'server-card');
+    const gated = JSON.parse(readFileSync(join(namedDir, 'api-mcp.json'), 'utf8'));
+    expect(gated.authentication).toEqual({ required: true });
+    expect(existsSync(join(namedDir, 'api-public-mcp.json'))).toBe(true);
+  });
+
+  it('records a chosen non-default primary in the root card', async () => {
+    writeBareApp(dir);
+    addTwoMounts(dir);
+
+    const prompter = new ScriptedPrompter({
+      text: ['https://acme.com'],
+      confirm: [false, false, false, false, false, false, false, false],
+      select: ['/api/mcp'],
+    });
+
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+
+    const root = JSON.parse(
+      readFileSync(join(dir, 'public', '.well-known', 'mcp', 'server-card.json'), 'utf8'),
+    );
+    expect(root.serverUrl).toBe('https://acme.com/api/mcp');
+    expect(root.authentication).toEqual({ required: true });
+  });
+
+  it('skips the primary question entirely for a single mount', async () => {
+    writeBareApp(dir);
+    addMcpMount(dir);
+
+    let selectCalls = 0;
+    const prompter: Prompter = {
+      text: async () => 'https://acme.com',
+      confirm: async () => false,
+      multiSelect: async (_question, rows) =>
+        rows
+          .filter(isMultiSelectChoice)
+          .filter((choice) => choice.selected)
+          .map((choice) => choice.value),
+      select: async () => {
+        selectCalls++;
+        return undefined;
+      },
+    };
+
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+    expect(selectCalls).toBe(0);
+    // Single mount: root card only, no named directory.
+    expect(existsSync(join(dir, 'public', '.well-known', 'mcp', 'server-card.json'))).toBe(true);
+    expect(existsSync(join(dir, 'public', '.well-known', 'mcp', 'server-card'))).toBe(false);
   });
 });
 
@@ -351,6 +473,8 @@ describe('runInit interactive (scripted answers)', () => {
           .filter((choice) => choice.selected)
           .map((choice) => choice.value);
       },
+      select: async (_question, rows) =>
+        rows.filter(isMultiSelectChoice).find((choice) => choice.selected)?.value,
     };
 
     expect(await runInit([], { ...io(), prompter })).toBe(0);
@@ -398,6 +522,8 @@ describe('runInit interactive (scripted answers)', () => {
         offered.push(...choices);
         return choices.filter((choice) => choice.selected).map((choice) => choice.value);
       },
+      select: async (_question, rows) =>
+        rows.filter(isMultiSelectChoice).find((choice) => choice.selected)?.value,
     };
 
     expect(await runInit([], { ...io(), prompter })).toBe(0);
@@ -422,6 +548,8 @@ describe('runInit interactive (scripted answers)', () => {
         },
         confirm: async () => false,
         multiSelect: async () => [],
+        select: async (_question, rows) =>
+          rows.filter(isMultiSelectChoice).find((choice) => choice.selected)?.value,
       };
       const code = await runInit([], { ...io(), prompter });
       expect(code).toBe(0);

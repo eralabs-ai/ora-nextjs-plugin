@@ -32,6 +32,7 @@ const fixturesDir = join(repoRoot, 'fixtures');
 const REPORT_PATH = join('.ora', 'report.json');
 const GOLDEN_FILE = 'report.golden.json';
 const TWINS_GOLDEN_DIR = 'twins.golden';
+const CARDS_GOLDEN_DIR = 'cards.golden';
 
 /**
  * The reports carry three fields that vary per run or per checkout and must be neutralized before
@@ -155,6 +156,86 @@ function checkTwinSnapshots(name, fixtureRoot, update) {
   return failures.map((f) => `${f} (run \`pnpm reports:regen\` if intended)`);
 }
 
+/**
+ * Every MCP server card the fixture build produced, by path relative to public/.well-known/mcp:
+ * the root `server-card.json` plus any named `server-card/<server-name>.json`. Cards are fully
+ * deterministic (the fixtures pin `siteUrl`, and identity comes from package.json + the mount
+ * paths), so unlike reports/twins they're snapshotted verbatim.
+ */
+function producedServerCards(fixtureRoot) {
+  const mcpDir = join(fixtureRoot, 'public', '.well-known', 'mcp');
+  const files = new Map();
+  const rootCard = join(mcpDir, 'server-card.json');
+  if (existsSync(rootCard)) files.set('server-card.json', readFileSync(rootCard, 'utf8'));
+  const namedDir = join(mcpDir, 'server-card');
+  if (existsSync(namedDir)) {
+    for (const name of readdirSync(namedDir)) {
+      if (!name.endsWith('.json')) continue;
+      files.set(join('server-card', name), readFileSync(join(namedDir, name), 'utf8'));
+    }
+  }
+  return files;
+}
+
+/** Every .json under a fixture's committed cards.golden/, by path relative to that dir. */
+function cardGoldenFiles(fixtureRoot) {
+  const goldenDir = join(fixtureRoot, CARDS_GOLDEN_DIR);
+  const files = new Map();
+  const stack = existsSync(goldenDir) ? [goldenDir] : [];
+  while (stack.length > 0) {
+    const dir = stack.pop();
+    for (const name of readdirSync(dir)) {
+      const abs = join(dir, name);
+      if (statSync(abs).isDirectory()) stack.push(abs);
+      else if (name.endsWith('.json'))
+        files.set(relative(goldenDir, abs), readFileSync(abs, 'utf8'));
+    }
+  }
+  return files;
+}
+
+/**
+ * Card snapshots: every server card the fixture build produced is pinned verbatim under
+ * fixtures/<name>/cards.golden/. Returns failure strings (empty when in sync / updating).
+ */
+function checkCardSnapshots(name, fixtureRoot, update) {
+  const produced = producedServerCards(fixtureRoot);
+  const goldenDir = join(fixtureRoot, CARDS_GOLDEN_DIR);
+
+  if (update) {
+    rmSync(goldenDir, { recursive: true, force: true });
+    for (const [rel, content] of produced) {
+      const target = join(goldenDir, rel);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, content, 'utf8');
+    }
+    if (produced.size > 0) console.log(`updated  ${name}/${CARDS_GOLDEN_DIR} (${produced.size})`);
+    return [];
+  }
+
+  const failures = [];
+  const goldens = cardGoldenFiles(fixtureRoot);
+  for (const [rel, content] of produced) {
+    const golden = goldens.get(rel);
+    if (golden === undefined) {
+      failures.push(
+        `${name}: generated .well-known/mcp/${rel} has no ${CARDS_GOLDEN_DIR}/${rel} snapshot`,
+      );
+    } else if (content !== golden) {
+      failures.push(
+        `${name}: .well-known/mcp/${rel} does not match its ${CARDS_GOLDEN_DIR} snapshot`,
+      );
+    }
+    goldens.delete(rel);
+  }
+  for (const rel of goldens.keys()) {
+    failures.push(
+      `${name}: stale snapshot ${CARDS_GOLDEN_DIR}/${rel} — the build no longer produces it`,
+    );
+  }
+  return failures.map((f) => `${f} (run \`pnpm reports:regen\` if intended)`);
+}
+
 const update = process.argv.includes('--update');
 const failures = [];
 let checked = 0;
@@ -174,6 +255,7 @@ for (const name of fixturesWithReports()) {
 
   const actual = serialize(normalize(JSON.parse(readFileSync(reportPath, 'utf8')), fixtureRoot));
   failures.push(...checkTwinSnapshots(name, fixtureRoot, update));
+  failures.push(...checkCardSnapshots(name, fixtureRoot, update));
 
   if (update) {
     writeFileSync(goldenPath, actual, 'utf8');

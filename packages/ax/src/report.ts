@@ -96,8 +96,17 @@ export interface BuildReport {
   mcp: {
     /** `mcp-handler` mounts detected in `app/`. */
     mounts: Array<{ pathname: string; tools: string[] }>;
-    /** Path the well-known server card was written to, when one was emitted. */
+    /** Path the root well-known server card (the primary server's) was written to, when emitted. */
     serverCardPath?: string;
+    /** Named per-server cards written for a multi-server host: which mount, and where its card landed. */
+    serverCards?: Array<{ mount: string; path: string }>;
+    /**
+     * The mount whose card owns the root well-known path — present only with several mounts.
+     * `primaryUnreviewed` marks a defaulted (public-server) choice with no committed root card
+     * confirming it: an interactive build asks, and the next card write records the answer.
+     */
+    primaryMount?: string;
+    primaryUnreviewed?: boolean;
     /**
      * Served paths of detected mounts with no gating decision on record (no config `isGated`, no
      * detected auth wrapper, not covered by a previously written server card). Advertised as open

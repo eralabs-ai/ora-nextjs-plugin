@@ -61,6 +61,26 @@ describe('buildServingManifest', () => {
     });
   });
 
+  it('records the root server card and every named per-server card as served paths', () => {
+    write('app/page.tsx', 'export default () => null;');
+    write('public/.well-known/mcp/server-card.json', '{"serverUrl":"https://x.test/api/a"}');
+    write('public/.well-known/mcp/server-card/api-a.json', '{"serverUrl":"https://x.test/api/a"}');
+    write('public/.well-known/mcp/server-card/api-b.json', '{"serverUrl":"https://x.test/api/b"}');
+
+    const data = buildServingManifest({
+      cwd: dir,
+      router: buildRouterModel(dir),
+      isGated: defaultIsGated,
+      basePath: '/app',
+    });
+
+    expect(data.artifacts.mcpServerCard).toBe('/app/.well-known/mcp/server-card.json');
+    expect(data.artifacts.mcpServerCards).toEqual([
+      '/app/.well-known/mcp/server-card/api-a.json',
+      '/app/.well-known/mcp/server-card/api-b.json',
+    ]);
+  });
+
   it('prefixes every recorded path with the basePath, and matchers see the served path', () => {
     write('app/docs/page.tsx', 'export default () => null;');
     write('public/docs.md', '# docs twin\n');

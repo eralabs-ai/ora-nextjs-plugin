@@ -1,4 +1,4 @@
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 
 import { loadAxConfig } from './config.js';
@@ -7,7 +7,11 @@ import { loadNextConfig } from './next-config.js';
 import { buildRouterModel, type RouterModel } from './router-model.js';
 import { servedPath } from './site-url.js';
 import { pathSegments, ROUTE_FILE_NAMES, walkFiles } from './walk-files.js';
-import { CATALOG_OUTPUT_PATH, SERVER_CARD_OUTPUT_PATH } from './write.js';
+import {
+  CATALOG_OUTPUT_PATH,
+  SERVER_CARD_DIR_OUTPUT_PATH,
+  SERVER_CARD_OUTPUT_PATH,
+} from './write.js';
 
 // The serving manifest: a generated data module a consumer's `middleware.ts` imports, so the
 // middleware never rewrites blind — a Next.js middleware alone cannot check that a rewrite target
@@ -38,7 +42,10 @@ export interface ServingManifestData {
   /** Where the discovery artifacts actually live; a member is present only when its source exists. */
   artifacts: {
     aiCatalog?: string;
+    /** The root card (the primary MCP server's). */
     mcpServerCard?: string;
+    /** Named per-server cards, for a host mounting several MCP servers. */
+    mcpServerCards?: string[];
     llmsTxt?: string;
     authMd?: string;
     openapi?: string;
@@ -116,6 +123,33 @@ export function buildServingManifest(options: BuildServingManifestOptions): Serv
     appRouteExists('.well-known', 'mcp', 'server-card.json')
   ) {
     artifacts.mcpServerCard = servedPath(basePath, '/.well-known/mcp/server-card.json');
+  }
+  // Named per-server cards: whichever emission target produced them, the served path is the same.
+  const namedCardNames = new Set<string>();
+  const staticCardDir = join(cwd, SERVER_CARD_DIR_OUTPUT_PATH);
+  if (existsSync(staticCardDir)) {
+    for (const name of readdirSync(staticCardDir)) {
+      if (name.endsWith('.json')) namedCardNames.add(name);
+    }
+  }
+  const routeCardDir =
+    router.appDir !== undefined
+      ? join(router.appDir, '.well-known', 'mcp', 'server-card')
+      : undefined;
+  if (routeCardDir !== undefined && existsSync(routeCardDir)) {
+    for (const name of readdirSync(routeCardDir)) {
+      if (
+        name.endsWith('.json') &&
+        [...ROUTE_FILE_NAMES].some((file) => existsSync(join(routeCardDir, name, file)))
+      ) {
+        namedCardNames.add(name);
+      }
+    }
+  }
+  if (namedCardNames.size > 0) {
+    artifacts.mcpServerCards = [...namedCardNames]
+      .sort()
+      .map((name) => servedPath(basePath, `/.well-known/mcp/server-card/${name}`));
   }
   if (existsSync(join(cwd, 'public', 'llms.txt')) || appRouteExists('llms.txt')) {
     artifacts.llmsTxt = servedPath(basePath, '/llms.txt');

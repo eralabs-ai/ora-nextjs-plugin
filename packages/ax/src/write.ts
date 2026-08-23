@@ -1,9 +1,9 @@
-import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 import { findAppDir } from './app-dir.js';
 import type { BuildReport } from './report.js';
-import type { McpServerCard } from './server-card.js';
+import type { McpServerCardPlan } from './server-card.js';
 import type { AiCatalog } from './types.js';
 import { formatCatalogErrors, validateCatalogArd } from './validate.js';
 
@@ -13,6 +13,14 @@ export const CATALOG_OUTPUT_PATH = join('public', '.well-known', 'ai-catalog.jso
 /** Where the static MCP server card lands (the well-known path agent registries probe). */
 export const SERVER_CARD_OUTPUT_PATH = join('public', '.well-known', 'mcp', 'server-card.json');
 
+/** Directory of the static per-server named cards, for a host mounting several MCP servers. */
+export const SERVER_CARD_DIR_OUTPUT_PATH = join('public', '.well-known', 'mcp', 'server-card');
+
+/** The served URL path of a named per-server card. */
+export function namedServerCardUrlPath(serverName: string): string {
+  return `/.well-known/mcp/server-card/${serverName}.json`;
+}
+
 /** Default path for the opt-in machine-readable build report — build output, never `public/`. */
 export const REPORT_OUTPUT_PATH = join('.ora', 'report.json');
 
@@ -21,6 +29,9 @@ const CATALOG_ROUTE_SEGMENTS = ['.well-known', 'ai-catalog.json'];
 
 /** App Router route segments that serve the MCP server card for the `'route'` emission target. */
 const SERVER_CARD_ROUTE_SEGMENTS = ['.well-known', 'mcp', 'server-card.json'];
+
+/** Route/public segments of the per-server named-card directory. */
+const SERVER_CARD_DIR_SEGMENTS = ['.well-known', 'mcp', 'server-card'];
 
 /** Media type of the MCP server card (SEP-1649 / PR-2127). */
 const SERVER_CARD_CONTENT_TYPE = 'application/mcp-server-card+json';
@@ -81,43 +92,122 @@ export function writeCatalog(
   return { ok: true, path: writeStaticFile(cwd, catalog), target: 'static' };
 }
 
-export type WriteServerCardResult = { path: string; target: EmissionTarget };
+export interface WriteServerCardsResult {
+  /** Where the root (primary) card landed. */
+  rootPath: string;
+  /** Named per-server card writes, in plan order. Empty for a single mount. */
+  named: Array<{ serverName: string; path: string }>;
+  /** Stale named cards removed — servers the plan no longer describes. */
+  removed: string[];
+  target: EmissionTarget;
+}
 
 /**
- * Writes the well-known MCP server card — either as the static
- * `public/.well-known/mcp/server-card.json` (default) or as an App Router route handler at
- * `app/.well-known/mcp/server-card.json/route.{ts,js}` serving `application/mcp-server-card+json`
- * (`target: 'route'`). Unlike the catalog there is no strict schema to gate on (the server-card
- * shape isn't standardized yet), so this always writes. Follows the
- * same `emit` target and the same static-vs-route fallback as `writeCatalog`.
+ * Writes the well-known MCP server cards — either as static files under `public/.well-known/mcp/`
+ * (default) or as App Router route handlers serving `application/mcp-server-card+json`
+ * (`target: 'route'`). The primary card lands at the root `server-card.json` path agent registries
+ * probe; with several mounts, every card (primary included) also lands at its named
+ * `server-card/<server-name>.json` slot, so each server has a persistent card recording its own
+ * gating decision. Unlike the catalog there is no strict schema to gate on (the server-card shape
+ * isn't standardized yet), so this always writes. Follows the same `emit` target and the same
+ * static-vs-route fallback as `writeCatalog`.
+ *
+ * Named cards for servers the plan no longer describes are removed — the committed card is the
+ * persistence layer for a mount's gating decision, so a card outliving its mount would keep
+ * advertising (and "reviewing") a server that no longer exists.
  */
-export function writeServerCard(
+export function writeServerCards(
   cwd: string,
-  card: McpServerCard,
+  plan: McpServerCardPlan,
   options: WriteCatalogOptions = {},
-): WriteServerCardResult {
-  const target = options.target ?? 'static';
+): WriteServerCardsResult {
+  const requested = options.target ?? 'static';
   const warn = options.warn ?? (() => {});
-  const body = jsonText(card);
+  const primary = plan.cards.find((emission) => emission.primary) ?? plan.cards[0];
+  if (primary === undefined) throw new Error('writeServerCards: empty card plan');
 
-  if (target === 'route') {
-    const appDir = findAppDir(cwd);
-    if (appDir) {
-      return {
-        path: writeRouteHandler(cwd, appDir, SERVER_CARD_ROUTE_SEGMENTS, body, {
-          contentType: SERVER_CARD_CONTENT_TYPE,
-          served: '/.well-known/mcp/server-card.json',
-        }),
-        target: 'route',
-      };
-    }
+  const appDir = requested === 'route' ? findAppDir(cwd) : undefined;
+  if (requested === 'route' && appDir === undefined) {
     warn(
       "emit: 'route' was requested but no App Router directory (app/ or src/app/) was found — " +
         'falling back to the static public/.well-known/mcp/server-card.json target.',
     );
   }
+  const target: EmissionTarget = appDir !== undefined ? 'route' : 'static';
 
-  return { path: atomicWrite(join(cwd, SERVER_CARD_OUTPUT_PATH), body), target: 'static' };
+  const writeCard = (segments: string[], served: string, body: string): string =>
+    appDir !== undefined
+      ? writeRouteHandler(cwd, appDir, segments, body, {
+          contentType: SERVER_CARD_CONTENT_TYPE,
+          served,
+        })
+      : atomicWrite(join(cwd, 'public', ...segments), body);
+
+  const rootPath = writeCard(
+    SERVER_CARD_ROUTE_SEGMENTS,
+    '/.well-known/mcp/server-card.json',
+    jsonText(primary.card),
+  );
+
+  const named: WriteServerCardsResult['named'] = [];
+  if (plan.multi) {
+    for (const emission of plan.cards) {
+      const fileName = `${emission.serverName}.json`;
+      named.push({
+        serverName: emission.serverName,
+        path: writeCard(
+          [...SERVER_CARD_DIR_SEGMENTS, fileName],
+          namedServerCardUrlPath(emission.serverName),
+          jsonText(emission.card),
+        ),
+      });
+    }
+  }
+
+  const keep = new Set(
+    plan.multi ? plan.cards.map((emission) => `${emission.serverName}.json`) : [],
+  );
+  const removed = removeStaleNamedCards(cwd, appDir, keep);
+
+  return { rootPath, named, removed, target };
+}
+
+/**
+ * Removes named cards (static files and route handlers) whose server is no longer in the plan.
+ * Both targets are swept regardless of this run's emission target, so switching `emit` can't leave
+ * a stale card behind on the other target.
+ */
+function removeStaleNamedCards(
+  cwd: string,
+  appDir: string | undefined,
+  keep: Set<string>,
+): string[] {
+  const removed: string[] = [];
+
+  const staticDir = join(cwd, 'public', ...SERVER_CARD_DIR_SEGMENTS);
+  if (existsSync(staticDir)) {
+    for (const name of readdirSync(staticDir)) {
+      if (!name.endsWith('.json') || keep.has(name)) continue;
+      rmSync(join(staticDir, name), { force: true });
+      removed.push(join(staticDir, name));
+    }
+    if (readdirSync(staticDir).length === 0) rmSync(staticDir, { recursive: true, force: true });
+  }
+
+  const resolvedAppDir = appDir ?? findAppDir(cwd);
+  if (resolvedAppDir === undefined) return removed;
+  const routeDir = join(resolvedAppDir, ...SERVER_CARD_DIR_SEGMENTS);
+  if (existsSync(routeDir)) {
+    for (const name of readdirSync(routeDir)) {
+      const handlerDir = join(routeDir, name);
+      if (!name.endsWith('.json') || keep.has(name)) continue;
+      rmSync(handlerDir, { recursive: true, force: true });
+      removed.push(handlerDir);
+    }
+    if (readdirSync(routeDir).length === 0) rmSync(routeDir, { recursive: true, force: true });
+  }
+
+  return removed;
 }
 
 /** Atomically writes the static `public/.well-known/ai-catalog.json`. */

@@ -22,6 +22,8 @@ const fixturesDir = join(repoRoot, 'fixtures');
 const GENERATED_JSON = [
   join('public', '.well-known', 'ai-catalog.json'),
   join('public', '.well-known', 'mcp', 'server-card.json'),
+  // The named per-server cards a multi-server fixture emits — the whole directory is generated.
+  join('public', '.well-known', 'mcp', 'server-card'),
 ];
 
 /** Matches the frontmatter marker every ax-generated markdown file carries. */

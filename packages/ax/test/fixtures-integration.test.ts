@@ -74,8 +74,9 @@ describe('generateCatalog zero-config detection against the fixture corpus', () 
   });
 
   it('builds a well-known MCP server card from the mcp-adapter fixture mount', async () => {
-    const { serverCard } = await generateCatalog({ cwd: `${fixturesDir}mcp-adapter` });
-    expect(serverCard).toMatchObject({
+    const { serverCardPlan } = await generateCatalog({ cwd: `${fixturesDir}mcp-adapter` });
+    expect(serverCardPlan?.multi).toBe(false);
+    expect(serverCardPlan?.cards[0]?.card).toMatchObject({
       name: 'com.example.mcp-adapter-fixture/mcp-adapter',
       serverUrl: 'https://mcp-adapter-fixture.example.com/mcp',
       remotes: [{ type: 'streamable-http', url: 'https://mcp-adapter-fixture.example.com/mcp' }],
@@ -84,7 +85,7 @@ describe('generateCatalog zero-config detection against the fixture corpus', () 
   });
 
   it('marks the gated mcp-adapter-gated mount with auth and a server-card authentication block', async () => {
-    const { catalog, serverCard } = await generateCatalog({
+    const { catalog, serverCardPlan } = await generateCatalog({
       cwd: `${fixturesDir}mcp-adapter-gated`,
     });
     expect(validateCatalogArd(catalog).valid).toBe(true);
@@ -97,7 +98,7 @@ describe('generateCatalog zero-config detection against the fixture corpus', () 
       url: 'https://mcp-gated-fixture.example.com/.well-known/mcp/server-card.json',
       auth: { status: 'unknown' },
     });
-    expect(serverCard?.authentication).toEqual({
+    expect(serverCardPlan?.cards[0]?.card.authentication).toEqual({
       required: true,
       resourceMetadata:
         'https://mcp-gated-fixture.example.com/.well-known/oauth-protected-resource',
@@ -286,7 +287,7 @@ describe('generateCatalog against the Pages Router fixtures', () => {
 
   it('detects the pages/api/[transport].ts MCP mount at /api/mcp (entry, server card, and report)', async () => {
     const recommendations: string[] = [];
-    const { catalog, serverCard, report } = await generateCatalog({
+    const { catalog, serverCardPlan, report } = await generateCatalog({
       cwd: `${fixturesDir}pages-mcp`,
       onRecommendation: (m) => recommendations.push(m),
     });
@@ -301,7 +302,7 @@ describe('generateCatalog against the Pages Router fixtures', () => {
       url: 'https://pages-mcp-fixture.example.com/.well-known/mcp/server-card.json',
       capabilities: ['roll_dice'],
     });
-    expect(serverCard).toMatchObject({
+    expect(serverCardPlan?.cards[0]?.card).toMatchObject({
       serverUrl: 'https://pages-mcp-fixture.example.com/api/mcp',
       tools: [{ name: 'roll_dice' }],
     });

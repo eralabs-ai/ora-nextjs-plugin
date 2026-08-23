@@ -21,6 +21,7 @@ coverage/
 # ignored.
 fixtures/**/public/.well-known/ai-catalog.json
 fixtures/**/public/.well-known/mcp/server-card.json
+fixtures/**/public/.well-known/mcp/server-card/
 
 # Markdown twins + the auth guide ax's postbuild step generates in fixtures — build output. The
 # tracked artifacts are the normalized snapshots under fixtures/*/twins.golden/. Scoped to the

@@ -142,11 +142,6 @@
         "id": "mcp-server",
         "artifact": "mcp-server",
         "status": "actionable"
-      },
-      {
-        "id": "mcp-server-card",
-        "artifact": "mcp-server",
-        "status": "actionable"
       }
     ]
   },
