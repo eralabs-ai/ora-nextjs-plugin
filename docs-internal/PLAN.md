@@ -1205,6 +1205,14 @@ gating is per-server and persisted in the committed server card, read back via
 `src/gating.ts`, which applies the built-in `/api/auth/**` + `/api/webhooks/**` floor unless the
 user supplied their own matcher. Still no new gating surface needed.)
 
+**Amendment (2026-08-23):** the seven setup questions (`scaffoldLlmsTxt`, `scaffoldJsonLd`,
+`scaffoldRobots`, `scaffoldAgent404`, `markdownTwins`, `report`, `wireManifest`) collapsed from
+sequential y/n confirms into one multi-select checklist (`SETUP_OPTIONS` in `src/init.ts`), every
+item pre-selected with a one-line "why" in its label (e.g. "Scaffold llms.txt — a guided map so
+agents know how to navigate your site"). Same yes-when-asked/no-when-silent policy as before — the
+list itself is now the single ask, deselecting an item is the opt-out — just collapsed from seven
+prompts into one, since none of the seven choices depends on another's answer.
+
 ---
 
 ## Phase 9 — Markdown twins & generated markdown artifacts (added 2026-08-16)

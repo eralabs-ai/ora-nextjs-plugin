@@ -452,6 +452,66 @@ function writeGatingCards(
 }
 
 /**
+ * The stable key for each item in the setup multi-select — doubles as the value round-tripped
+ * through `Prompter.multiSelect`. Kept separate from `InitAnswers`' field names (and from
+ * `wireManifest`, which isn't a config field at all) so the mapping in {@link collectInteractive} is
+ * one explicit switch rather than a name-matching convention.
+ */
+type SetupOptionValue =
+  'llmsTxt' | 'jsonLd' | 'robots' | 'agent404' | 'markdownTwins' | 'report' | 'manifest';
+
+/**
+ * The seven setup choices, each pre-selected — replaces what used to be seven sequential y/n
+ * confirms. One question reads faster than seven, and a list makes the *shape* of what's on offer
+ * visible at a glance instead of trickling out one item at a time. Every label states the "why" in
+ * one clause so a user who's never read the README still knows what they'd be giving up by
+ * deselecting it.
+ */
+const SETUP_OPTIONS: Array<{ value: SetupOptionValue; label: string; selected: true }> = [
+  {
+    value: 'llmsTxt',
+    label: 'Scaffold llms.txt — a guided map so agents know how to navigate your site',
+    selected: true,
+  },
+  {
+    value: 'jsonLd',
+    label:
+      'Scaffold Organization JSON-LD — machine-readable identity so agents gain trust in your site',
+    selected: true,
+  },
+  {
+    value: 'robots',
+    label:
+      'Add robots.txt pointers + AI-crawler rules — so agent crawlers find (and may read) your artifacts',
+    selected: true,
+  },
+  {
+    value: 'agent404',
+    label:
+      'Scaffold an agent-aware 404 page — steers lost agents back to your catalog instead of a dead end',
+    selected: true,
+  },
+  {
+    value: 'markdownTwins',
+    label:
+      'Markdown twins on every build (/docs → /docs.md) — clean markdown agents parse far better than HTML',
+    selected: true,
+  },
+  {
+    value: 'report',
+    label:
+      'Write .ora/report.json — the handoff report a coding agent reads to close your remaining gaps',
+    selected: true,
+  },
+  {
+    value: 'manifest',
+    label:
+      'Wire "prebuild": "ax manifest" — keeps the serving-manifest middleware imports in sync each build',
+    selected: true,
+  },
+];
+
+/**
  * Asks the questions the source tree can't answer, each with a default. Returns undefined only when
  * a required answer (a valid siteUrl) couldn't be obtained after several tries. The gating answer
  * comes back separately from the config answers: it lands in the server card, never in ax.config.
@@ -492,46 +552,33 @@ async function collectInteractive(
   }
   if (siteUrl === undefined) return undefined;
 
-  // Scaffolds default to yes in the wizard: config defaults are false because a *silent* write into
-  // a source tree is invasive, but here the ask itself is the opt-in and the user is present to say
-  // no. Same yes-when-asked / no-when-silent policy the README documents.
-  const scaffoldLlmsTxt = await prompter.confirm(
-    'Scaffold a starter llms.txt from your routes?',
-    true,
+  // Every setup item defaults to selected in the list: config defaults are false because a *silent*
+  // write into a source tree is invasive, but here the ask itself is the opt-in and the user is
+  // present to deselect anything they don't want. Same yes-when-asked / no-when-silent policy the
+  // README documents — just collapsed from seven yes/no questions into one list, since none of these
+  // choices depend on another's answer.
+  const setupValues = new Set(
+    await prompter.multiSelect(
+      "What should ax set up? All are recommended — deselect anything you don't want, then press Enter:",
+      SETUP_OPTIONS,
+    ),
   );
-  const scaffoldJsonLd = await prompter.confirm(
-    'Scaffold an Organization JSON-LD component?',
-    true,
-  );
-  const scaffoldRobots = await prompter.confirm(
-    'Add discovery pointers + AI-crawler rules to robots.txt?',
-    true,
-  );
-  const scaffoldAgent404 = await prompter.confirm('Scaffold an agent-aware 404 page?', true);
-  // Twin *intent* lands in config; generation happens at build (twins need the prerendered output).
-  const markdownTwins = await prompter.confirm(
-    'Generate markdown twins of your pages on every build (route /docs → /docs.md)?',
-    true,
-  );
-  const report = await prompter.confirm('Write .ora/report.json (the agent handoff report)?', true);
-  const wireManifest = await prompter.confirm(
-    'Wire "prebuild": "ax manifest" (the serving manifest middleware imports)?',
-    true,
-  );
+  const setupSelected = (value: SetupOptionValue): boolean => setupValues.has(value);
 
   return {
     answers: {
       siteUrl,
-      scaffoldLlmsTxt,
-      scaffoldJsonLd,
-      scaffoldRobots,
-      scaffoldAgent404,
-      markdownTwins,
-      report,
+      scaffoldLlmsTxt: setupSelected('llmsTxt'),
+      scaffoldJsonLd: setupSelected('jsonLd'),
+      scaffoldRobots: setupSelected('robots'),
+      scaffoldAgent404: setupSelected('agent404'),
+      // Twin *intent* lands in config; generation happens at build (twins need the prerendered output).
+      markdownTwins: setupSelected('markdownTwins'),
+      report: setupSelected('report'),
     },
     gatedMounts,
     primaryMount,
-    wireManifest,
+    wireManifest: setupSelected('manifest'),
   };
 }
 
