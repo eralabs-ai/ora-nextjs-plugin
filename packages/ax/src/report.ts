@@ -134,6 +134,17 @@ export interface BuildReport {
     agentAware: boolean;
     source?: string;
   };
+  /**
+   * The negotiation middleware: whether a `middleware.{ts,js}` exists and whether it wires the
+   * `@ora-ai/ax/middleware` runtime entry. When it doesn't, the wiring instructions live in the
+   * `markdown-negotiation` ora-check note and in `recommendations` — ax never writes or edits the
+   * user's middleware singleton.
+   */
+  middleware: {
+    present: boolean;
+    wiredToAx: boolean;
+    source?: string;
+  };
   /** What the opt-in source-tree scaffolds wrote, appended, or skipped this run. */
   scaffolds: ReportScaffolds;
   /** The markdown-twin pass: what was written, what was refused and why (see the type). */

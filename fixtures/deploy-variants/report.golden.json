@@ -18,6 +18,10 @@
     "notFoundPresent": false,
     "agentAware": false
   },
+  "middleware": {
+    "present": false,
+    "wiredToAx": false
+  },
   "artifacts": {
     "robotsTxt": {
       "found": false
@@ -130,6 +134,18 @@
         "id": "mcp-server",
         "artifact": "mcp-server",
         "status": "actionable"
+      },
+      {
+        "id": "markdown-negotiation",
+        "artifact": "middleware",
+        "status": "actionable",
+        "note": "Serve agents the generated markdown automatically: First run `npx ax manifest` (and wire it as the \"prebuild\" script so it stays fresh — `middleware.ts` is compiled during `next build`, so the manifest must exist before the build starts). Then: add `import { withAx } from '@ora-ai/ax/middleware';` and `import { axManifest } from './ax-manifest';`, create middleware.ts with `export default withAx({ manifest: axManifest });`, and export the matcher literal `export const config = { matcher: ['/((?!_next|api|.*\\\\..*|favicon|robots|health|status).*)'] };`. The middleware rewrites a request to its markdown twin only when the manifest lists one, never touches gated paths, and answers unknown URLs from detected agents with a 200 markdown wayfinding body — it composes with (never replaces) your existing middleware."
+      },
+      {
+        "id": "markdown-negotiation-vary",
+        "artifact": "middleware",
+        "status": "actionable",
+        "note": "Serve agents the generated markdown automatically: First run `npx ax manifest` (and wire it as the \"prebuild\" script so it stays fresh — `middleware.ts` is compiled during `next build`, so the manifest must exist before the build starts). Then: add `import { withAx } from '@ora-ai/ax/middleware';` and `import { axManifest } from './ax-manifest';`, create middleware.ts with `export default withAx({ manifest: axManifest });`, and export the matcher literal `export const config = { matcher: ['/((?!_next|api|.*\\\\..*|favicon|robots|health|status).*)'] };`. The middleware rewrites a request to its markdown twin only when the manifest lists one, never touches gated paths, and answers unknown URLs from detected agents with a 200 markdown wayfinding body — it composes with (never replaces) your existing middleware."
       }
     ]
   },
@@ -146,6 +162,7 @@
     "basePath \"/app\" means the catalog is served at /app/.well-known/ai-catalog.json, not at the conventional /.well-known/ai-catalog.json a crawler probes. Point agents at it (ARD §6.1):",
     "  • Add to your root layout <head>: <link rel=\"ai-catalog\" href=\"/app/.well-known/ai-catalog.json\" />",
     "  • Add to robots.txt (app/robots.ts or public/robots.txt): Agentmap: /app/.well-known/ai-catalog.json",
-    "No app/not-found.tsx found — agents that hit a missing URL get Next.js’s bare default 404, a dead end that makes them give up or guess. Add one that tells agents why the 404 happened and how to continue (links to llms.txt, the ai-catalog, and your real routes), or set scaffoldAgent404: true in ax.config to have an agent-aware page (plus a build-time route manifest) written for you."
+    "No app/not-found.tsx found — agents that hit a missing URL get Next.js’s bare default 404, a dead end that makes them give up or guess. Add one that tells agents why the 404 happened and how to continue (links to llms.txt, the ai-catalog, and your real routes), or set scaffoldAgent404: true in ax.config to have an agent-aware page (plus a build-time route manifest) written for you.",
+    "Serve agents the generated markdown automatically: First run `npx ax manifest` (and wire it as the \"prebuild\" script so it stays fresh — `middleware.ts` is compiled during `next build`, so the manifest must exist before the build starts). Then: add `import { withAx } from '@ora-ai/ax/middleware';` and `import { axManifest } from './ax-manifest';`, create middleware.ts with `export default withAx({ manifest: axManifest });`, and export the matcher literal `export const config = { matcher: ['/((?!_next|api|.*\\\\..*|favicon|robots|health|status).*)'] };`. The middleware rewrites a request to its markdown twin only when the manifest lists one, never touches gated paths, and answers unknown URLs from detected agents with a 200 markdown wayfinding body — it composes with (never replaces) your existing middleware."
   ]
 }

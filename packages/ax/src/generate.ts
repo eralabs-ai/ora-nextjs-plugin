@@ -18,6 +18,7 @@ import { defaultIsGated, resolveGating, type GateTarget, type IsGated } from './
 import { loadProjectEnv } from './load-project-env.js';
 import { buildMarkdownAlternateRecommendation } from './markdown-alternate.js';
 import { planMarkdownTwins, type MarkdownTwinPlan } from './markdown-twins.js';
+import { buildMiddlewareWiringInstruction, detectMiddleware } from './middleware-wiring.js';
 import { loadNextConfig } from './next-config.js';
 import { buildOraChecks, type OraArtifact } from './ora-checks.js';
 import type { BuildReport, ReportArtifact, ReportScaffolds } from './report.js';
@@ -287,8 +288,13 @@ function oraCheckNotes(scaffolds: {
   twinPlan?: MarkdownTwinPlan;
   authMdMissing?: boolean;
   mcpCardMissing?: boolean;
+  middlewareWiring?: string;
 }): Partial<Record<OraArtifact, string>> {
   const notes: Partial<Record<OraArtifact, string>> = {};
+
+  if (scaffolds.middlewareWiring !== undefined) {
+    notes['middleware'] = scaffolds.middlewareWiring;
+  }
 
   if (scaffolds.mcpCardMissing === true) {
     notes['mcp-server-card'] =
@@ -598,6 +604,17 @@ export async function generateCatalog(
     router,
   });
 
+  // The negotiation middleware: detect-and-recommend only. `middleware.ts` is the user's singleton,
+  // so ax never writes or edits it — an unwired project gets the exact wiring lines (also carried
+  // as the negotiation checks' note), a wired one gets nothing. No page routes → nothing to
+  // negotiate, so no nudge either.
+  const middlewareStatus = detectMiddleware(cwd);
+  const middlewareWiring =
+    router.listPageRoutes().length > 0 && !middlewareStatus.wiredToAx
+      ? buildMiddlewareWiringInstruction(cwd, router, middlewareStatus)
+      : undefined;
+  if (middlewareWiring !== undefined) recommend(middlewareWiring);
+
   // Derive the `did:web:` host from the resolved origin so it's consistent whatever the origin's
   // source (config, env var, or Vercel domain), not just when `siteUrl` was set in config.
   const domain = siteUrl ? hostnameFromUrl(siteUrl) : site.domain;
@@ -649,6 +666,11 @@ export async function generateCatalog(
       notFoundPresent: agent404.notFoundPresent,
       agentAware: agent404.agentAware,
       ...(agent404.source !== undefined ? { source: agent404.source } : {}),
+    },
+    middleware: {
+      present: middlewareStatus.present,
+      wiredToAx: middlewareStatus.wiredToAx,
+      ...(middlewareStatus.source !== undefined ? { source: middlewareStatus.source } : {}),
     },
     artifacts: {
       robotsTxt: artifact(robots),
@@ -712,6 +734,10 @@ export async function generateCatalog(
           // With nothing gated there is nothing an auth guide could say — the checks are omitted,
           // never claimed addressed or held actionable.
           'auth.md': authMdCandidate === undefined ? 'not-applicable' : authMdPlan !== undefined,
+          // Negotiation is runtime behavior on page URLs: N/A with no page routes, addressed once
+          // a middleware file wires the ax runtime entry.
+          middleware:
+            router.listPageRoutes().length === 0 ? 'not-applicable' : middlewareStatus.wiredToAx,
         },
         oraCheckNotes({
           llmsTxtScaffolded: llmsTxtResult.scaffoldedPath,
@@ -719,6 +745,7 @@ export async function generateCatalog(
           twinPlan,
           authMdMissing: authMdCandidate !== undefined && authMdPlan === undefined,
           mcpCardMissing: mcpMounts.length > 0 && serverCardPlan === undefined,
+          ...(middlewareWiring !== undefined ? { middlewareWiring } : {}),
         }),
       ),
     },
