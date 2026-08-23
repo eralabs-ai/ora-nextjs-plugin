@@ -19,14 +19,16 @@ import { applyMarkdownTwinPlan, type ApplyTwinPlanResult } from './markdown-twin
 import type { BuildReport } from './report.js';
 import { renderRouteTree } from './route-tree.js';
 import { buildRouterModel } from './router-model.js';
-import type { McpServerCard } from './server-card.js';
+import type { McpServerCardEmission, McpServerCardPlan } from './server-card.js';
+import { buildArtifactUrl, servedPath } from './site-url.js';
 import type { AiCatalog } from './types.js';
 import {
   CATALOG_OUTPUT_PATH,
   jsonText,
+  namedServerCardUrlPath,
   writeCatalog,
   writeReport,
-  writeServerCard,
+  writeServerCards,
 } from './write.js';
 
 const HELP_TEXT = `ax — generate a spec-valid ai-catalog.json at build time
@@ -180,7 +182,7 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     throw err;
   }
 
-  const { catalog, emit, serverCard } = generated;
+  const { catalog, emit, serverCardPlan } = generated;
 
   // Machine-readable report: CLI flag wins over ax.config's `report`; both default to off. Resolved
   // up front because it also decides how chatty the terminal is — a report run records the full
@@ -199,22 +201,34 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   const interactive =
     io.confirm !== undefined || (process.stdout.isTTY === true && !process.env.CI);
 
-  // MCP gating decisions live in the committed server card; a detected mount that neither the card
-  // nor config covers has never been reviewed. Interactively, ask now — the answer lands in the
-  // card this run writes, so the question is asked once, not per build. Headless (--yes / CI) or
-  // --dry-run, warn and publish it as open (the zero-config default); the report's
-  // `mcp.unreviewedMounts` carries the action item for a coding agent.
+  // MCP gating and primary-server decisions live in the committed server cards; a detected mount
+  // that neither a card nor config covers has never been reviewed, and with several mounts the
+  // root card's owner is a judgment call too. Interactively, ask now — the answers land in the
+  // cards this run writes, so the questions are asked once, not per build. Headless (--yes / CI)
+  // or --dry-run, warn and apply the defaults (open, public server primary); the report's
+  // `mcp.unreviewedMounts` / `mcp.primaryUnreviewed` carry the action items for a coding agent.
   const unreviewedMounts = generated.report.mcp.unreviewedMounts;
-  if (unreviewedMounts.length > 0) {
+  const primaryUnreviewed = generated.report.mcp.primaryUnreviewed === true;
+  if (unreviewedMounts.length > 0 || primaryUnreviewed) {
     if (interactive && !args.yes && !args.dryRun) {
-      await reviewUnreviewedMounts(cwd, generated, unreviewedMounts, io.confirm, stdout);
+      await reviewMcpDecisions(cwd, generated, unreviewedMounts, io.confirm, stdout);
     } else {
-      const plural = unreviewedMounts.length !== 1;
-      stdout(
-        `[ax] ⚠ MCP server${plural ? 's' : ''} at ${unreviewedMounts.join(', ')} ` +
-          `ha${plural ? 've' : 's'} no gating decision on record — advertised as open. Run an ` +
-          'interactive build (or `ax init`) to record whether login is required.',
-      );
+      if (unreviewedMounts.length > 0) {
+        const plural = unreviewedMounts.length !== 1;
+        stdout(
+          `[ax] ⚠ MCP server${plural ? 's' : ''} at ${unreviewedMounts.join(', ')} ` +
+            `ha${plural ? 've' : 's'} no gating decision on record — advertised as open. Run an ` +
+            'interactive build (or `ax init`) to record whether login is required.',
+        );
+      }
+      if (primaryUnreviewed && generated.report.mcp.primaryMount !== undefined) {
+        stdout(
+          `[ax] ⚠ ${generated.report.mcp.mounts.length} MCP servers but no primary on record — ` +
+            `the root server card defaults to ` +
+            `${servedPath(generated.report.basePath, generated.report.mcp.primaryMount)}. Run an ` +
+            'interactive build (or `ax init`) to choose a different primary.',
+        );
+      }
     }
   }
 
@@ -292,16 +306,37 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     );
   }
 
-  // Agents discover a live MCP server via the well-known server card, not the ARD catalog entry, so
-  // emit it alongside the catalog when a mount was detected.
+  // Agents discover a live MCP server via the well-known server cards, not the ARD catalog
+  // entries, so emit them alongside the catalog when mounts were detected: the primary server's
+  // card at the root path, and — for a multi-server host — every server's card at its named slot.
   let serverCardPath: string | undefined;
-  if (serverCard) {
-    const cardResult = writeServerCard(cwd, serverCard, {
+  const namedServerCards: Array<{ mount: string; path: string }> = [];
+  const writtenCards: Array<{ emission: McpServerCardEmission; path: string }> = [];
+  if (serverCardPlan) {
+    const cardResult = writeServerCards(cwd, serverCardPlan, {
       target: emit,
       warn: (message) => stdout(`[ax] ⚠ ${message}`),
     });
-    serverCardPath = cardResult.path;
-    stdout(`[ax] ✓ wrote ${cardResult.path} (MCP server card)`);
+    serverCardPath = cardResult.rootPath;
+    const primary = serverCardPlan.cards.find((emission) => emission.primary);
+    if (primary !== undefined) writtenCards.push({ emission: primary, path: cardResult.rootPath });
+    stdout(
+      `[ax] ✓ wrote ${cardResult.rootPath} (MCP server card` +
+        (serverCardPlan.multi && primary !== undefined
+          ? ` — primary: ${servedPath(generated.report.basePath, primary.mountPathname)})`
+          : ')'),
+    );
+    cardResult.named.forEach((named, index) => {
+      const emission = serverCardPlan.cards[index];
+      if (emission !== undefined) {
+        namedServerCards.push({ mount: emission.mountPathname, path: named.path });
+        writtenCards.push({ emission, path: named.path });
+      }
+      stdout(`[ax] ✓ wrote ${named.path} (MCP server card)`);
+    });
+    for (const removed of cardResult.removed) {
+      stdout(`[ax] ✓ removed ${relative(cwd, removed)} (stale MCP server card)`);
+    }
   }
 
   // Markdown twins + the auth guide: planned during generation, applied only now — after the
@@ -324,8 +359,7 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   const sizes = measureGeneratedArtifacts(cwd, {
     catalog,
     catalogPath: result.path,
-    serverCard: generated.serverCard,
-    serverCardPath,
+    serverCards: writtenCards.map(({ emission, path }) => ({ card: emission.card, path })),
     llmsTxtBody: generated.scaffoldedLlmsTxtBody,
     report: generated.report,
   });
@@ -374,6 +408,7 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     generated.report.catalog.path = result.path;
     generated.report.catalog.target = result.target;
     if (serverCardPath !== undefined) generated.report.mcp.serverCardPath = serverCardPath;
+    if (namedServerCards.length > 0) generated.report.mcp.serverCards = namedServerCards;
     reportPath = writeReport(cwd, generated.report, reportTarget);
     stdout(`[ax] ✓ wrote ${reportPath} (machine-readable build report)`);
   }
@@ -383,15 +418,15 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
 }
 
 /**
- * The review-gate gating question for mounts with no decision on record. Shows the route tree (the
- * same layout `ax init` prints — this *is* the init experience arriving late, for the user who
- * added an MCP server after setup) and asks per server, since auth is declared per server in the
- * MCP conventions. A "requires login" answer is applied to this run's artifacts via
- * `markMountGated`; either answer is persisted by the server card written right after, so the
- * question never repeats — unless no single card can be written (several mounts), in which case
- * the mounts stay listed as unreviewed in the report.
+ * The review-gate questions for MCP decisions with nothing on record: per-server gating (auth is
+ * declared per server in the MCP conventions), then — with several mounts — which server is
+ * primary. Shows the route tree (the same layout `ax init` prints — this *is* the init experience
+ * arriving late, for the user who added an MCP server after setup). A "requires login" answer is
+ * applied to this run's artifacts via `markMountGated`, a primary answer via
+ * `applyPrimaryChoice`; every answer is persisted by the server cards written right after, so the
+ * questions never repeat.
  */
-async function reviewUnreviewedMounts(
+async function reviewMcpDecisions(
   cwd: string,
   generated: GenerateCatalogResult,
   unreviewedMounts: string[],
@@ -399,10 +434,10 @@ async function reviewUnreviewedMounts(
   stdout: (line: string) => void,
 ): Promise<void> {
   const confirm = injectedConfirm ?? defaultConfirm;
-  const plural = unreviewedMounts.length !== 1;
+  const plural = generated.report.mcp.mounts.length !== 1;
   stdout(
-    `[ax] Detected ${plural ? '' : 'an '}MCP server${plural ? 's' : ''} with no gating decision ` +
-      'on record:',
+    `[ax] Detected ${plural ? '' : 'an '}MCP server${plural ? 's' : ''} with ` +
+      `${unreviewedMounts.length > 0 ? 'no gating decision' : 'no primary'} on record:`,
   );
   stdout('[ax]');
   const router = buildRouterModel(cwd);
@@ -436,32 +471,120 @@ async function reviewUnreviewedMounts(
     if (!isPublic) markMountGated(generated, path);
   }
 
-  // The card written below records the answers, so these mounts are reviewed from the next build
-  // on. With no single card to write (several mounts), the decisions apply this run only and the
-  // report keeps carrying the mounts as unreviewed.
-  if (generated.serverCard !== undefined) generated.report.mcp.unreviewedMounts = [];
+  // The primary decision runs after gating so it can honor the answers just given. Exactly one
+  // public server is no judgment call — the root well-known path is probed blind by registries,
+  // so the one server usable without credentials is its only sensible owner, applied silently.
+  // Only the ambiguous cases (several public servers, or none) get asked: one y/N per candidate,
+  // public servers first, stopping at the first yes; declining every candidate keeps the default.
+  const plan = generated.serverCardPlan;
+  if (generated.report.mcp.primaryUnreviewed === true && plan !== undefined && plan.multi) {
+    const basePath = generated.report.basePath;
+    const publicCards = plan.cards.filter((card) => card.card.authentication === undefined);
+    if (publicCards.length === 1 && publicCards[0] !== undefined) {
+      applyPrimaryChoice(generated, publicCards[0].mountPathname);
+    } else {
+      const candidates = [...plan.cards].sort(
+        (a, b) =>
+          Number(a.card.authentication !== undefined) - Number(b.card.authentication !== undefined),
+      );
+      for (const candidate of candidates) {
+        const served = servedPath(basePath, candidate.mountPathname);
+        const chosen = await confirm(
+          `Should the MCP server at ${served} be the primary (the path agents probe first)?`,
+        );
+        if (chosen) {
+          applyPrimaryChoice(generated, candidate.mountPathname);
+          break;
+        }
+      }
+    }
+    const primary = plan.cards.find((emission) => emission.primary);
+    if (primary !== undefined) {
+      generated.report.mcp.primaryMount = primary.mountPathname;
+      stdout(
+        `[ax]   Primary MCP server: ${servedPath(basePath, primary.mountPathname)} — recorded ` +
+          'in the root server card.',
+      );
+    }
+  }
+
+  // The cards written below record the answers, so these decisions are on record from the next
+  // build on.
+  if (generated.serverCardPlan !== undefined) {
+    generated.report.mcp.unreviewedMounts = [];
+    delete generated.report.mcp.primaryUnreviewed;
+  }
 }
 
 /**
  * Applies a "requires login" answer from the review gate to this run's artifacts: the catalog
- * entry gets the secret-free auth descriptor and the server card the `authentication` block — the
- * same shape a detected `withMcpAuth` wrapper or a recorded card would have produced. The card
- * write is what persists the decision.
+ * entry gets the secret-free auth descriptor and the mount's server card the `authentication`
+ * block — the same shape a detected `withMcpAuth` wrapper or a recorded card would have produced.
+ * The card write is what persists the decision.
  */
 function markMountGated(generated: GenerateCatalogResult, path: string): void {
-  const { serverCard } = generated;
-  const cardMountPath =
-    serverCard !== undefined ? new URL(serverCard.serverUrl).pathname : undefined;
-  if (serverCard !== undefined && cardMountPath === path) {
-    serverCard.authentication = { required: true };
-  }
+  const basePath = generated.report.basePath;
+  const emission = generated.serverCardPlan?.cards.find(
+    (candidate) => servedPath(basePath, candidate.mountPathname) === path,
+  );
+  if (emission !== undefined) emission.card.authentication = { required: true };
   for (const entry of generated.catalog.entries) {
     if (entry.type !== 'application/mcp-server-card+json') continue;
     const entryPath = entryUrlPath(entry);
-    // A single-mount entry references the card (not the mount), so match either identity.
+    // The mount's entry references its card (not the mount), so match either identity.
     const referencesCard =
-      cardMountPath === path && entryPath !== undefined && entryPath.endsWith('/server-card.json');
-    if (entryPath === path || referencesCard) entry.auth = { status: 'unknown' };
+      emission !== undefined &&
+      entry.url === cardUrlFor(generated, emission) &&
+      entryPath !== undefined;
+    if (entryPath === path || entry.url === emission?.card.serverUrl || referencesCard) {
+      entry.auth = { status: 'unknown' };
+    }
+  }
+}
+
+/** The absolute URL an emission's card is served at (root for the primary, named slot otherwise). */
+function cardUrlFor(
+  generated: GenerateCatalogResult,
+  emission: McpServerCardEmission,
+): string | undefined {
+  const siteUrl = generated.report.siteUrl;
+  if (siteUrl === undefined) return undefined;
+  const cardPath = emission.primary
+    ? '/.well-known/mcp/server-card.json'
+    : namedServerCardUrlPath(emission.serverName);
+  return buildArtifactUrl(siteUrl, generated.report.basePath, cardPath);
+}
+
+/**
+ * Applies a primary answer from the review gate: the chosen mount's card takes the root
+ * well-known path and every catalog entry is re-pointed at the card URL its mount now serves
+ * from. The root card written right after is what persists the choice.
+ */
+function applyPrimaryChoice(generated: GenerateCatalogResult, pathname: string): void {
+  const plan = generated.serverCardPlan;
+  if (plan === undefined || !plan.cards.some((card) => card.mountPathname === pathname)) return;
+
+  // Capture each entry's current card URL before flipping, so entries can be re-pointed even
+  // though the generate-time rewrite already replaced their mount URLs.
+  const previousUrls = new Map(
+    plan.cards.map((emission) => [emission.mountPathname, cardUrlFor(generated, emission)]),
+  );
+  for (const emission of plan.cards) emission.primary = emission.mountPathname === pathname;
+  plan.cards.sort((a, b) => Number(b.primary) - Number(a.primary));
+
+  // One pass over the entries, matching against each entry's *original* URL: the root URL just
+  // changed owner, so rewriting per-card sequentially could re-rewrite an entry already moved
+  // onto the root path.
+  const rewrites = plan.cards.map((emission) => ({
+    previous: previousUrls.get(emission.mountPathname),
+    next: cardUrlFor(generated, emission),
+  }));
+  for (const entry of generated.catalog.entries) {
+    if (entry.type !== 'application/mcp-server-card+json') continue;
+    const rewrite = rewrites.find(
+      (candidate) => candidate.previous !== undefined && candidate.previous === entry.url,
+    );
+    if (rewrite?.next !== undefined) entry.url = rewrite.next;
   }
 }
 
@@ -502,9 +625,8 @@ interface MeasureArtifactsInput {
   catalog: AiCatalog;
   /** Absolute path the catalog was written to (a static file or a route handler). */
   catalogPath: string;
-  serverCard: McpServerCard | undefined;
-  /** Absolute path the server card was written to, if one was written. */
-  serverCardPath: string | undefined;
+  /** Every server card written this run (root + named), with where each landed. */
+  serverCards: Array<{ card: McpServerCardEmission['card']; path: string }>;
   /** The markdown body a scaffolded llms.txt serves, if one was scaffolded this run. */
   llmsTxtBody: string | undefined;
   report: BuildReport;
@@ -531,14 +653,8 @@ function measureGeneratedArtifacts(cwd: string, input: MeasureArtifactsInput): A
   sizes.push(
     measureContent(jsonText(input.catalog), 'ai-catalog.json', relative(cwd, input.catalogPath)),
   );
-  if (input.serverCard !== undefined && input.serverCardPath !== undefined) {
-    sizes.push(
-      measureContent(
-        jsonText(input.serverCard),
-        'mcp-server-card',
-        relative(cwd, input.serverCardPath),
-      ),
-    );
+  for (const { card, path } of input.serverCards) {
+    sizes.push(measureContent(jsonText(card), 'mcp-server-card', relative(cwd, path)));
   }
   if (input.llmsTxtBody !== undefined && scaffolds.llmsTxt?.path !== undefined) {
     sizes.push(
@@ -583,20 +699,31 @@ function printExposureSummary(
   stdout(
     `[ax] About to expose ${entries.length} catalog ${entries.length === 1 ? 'entry' : 'entries'}:`,
   );
+  // Card lookup by every URL an mcp entry might carry (the mount's endpoint, or the card URL the
+  // generate-time rewrite pointed it at), so each card gets its one line whatever the entry shows.
+  const plan = generated.serverCardPlan;
+  const cardByUrl = new Map<string, McpServerCardEmission>();
+  for (const emission of plan?.cards ?? []) {
+    cardByUrl.set(emission.card.serverUrl, emission);
+    const cardUrl = cardUrlFor(generated, emission);
+    if (cardUrl !== undefined) cardByUrl.set(cardUrl, emission);
+  }
   for (const entry of entries) {
-    const isMcp = entry.type === 'application/mcp-server-card+json';
+    const emission =
+      entry.type === 'application/mcp-server-card+json' && typeof entry.url === 'string'
+        ? cardByUrl.get(entry.url)
+        : undefined;
     const label =
-      isMcp && generated.serverCard !== undefined
-        ? 'MCP server card'
-        : (entry.displayName ?? entry.identifier);
+      emission !== undefined ? 'MCP server card' : (entry.displayName ?? entry.identifier);
     const where =
-      isMcp && generated.serverCard !== undefined
-        ? generated.serverCard.serverUrl
+      emission !== undefined
+        ? emission.card.serverUrl
         : typeof entry.url === 'string'
           ? entry.url
           : '(inline data)';
+    const primary = emission !== undefined && plan?.multi === true && emission.primary;
     const auth = entry.auth !== undefined && entry.auth.status !== 'none' ? ' (requires auth)' : '';
-    stdout(`[ax]   • ${label} → ${where}${auth}`);
+    stdout(`[ax]   • ${label} → ${where}${primary ? ' (primary)' : ''}${auth}`);
   }
 
   // Twins and the auth guide are public surface too, so the gate must show them: one short line

@@ -282,8 +282,15 @@ describe('generateCatalog zero-config artifact detection', () => {
       'utf8',
     );
 
-    const { serverCard } = await generateCatalog({ cwd: dir });
-    expect(serverCard).toEqual({
+    const { serverCardPlan } = await generateCatalog({ cwd: dir });
+    expect(serverCardPlan?.multi).toBe(false);
+    expect(serverCardPlan?.cards).toHaveLength(1);
+    expect(serverCardPlan?.cards[0]).toMatchObject({
+      mountPathname: '/mcp',
+      serverName: 'mcp',
+      primary: true,
+    });
+    expect(serverCardPlan?.cards[0]?.card).toEqual({
       name: 'com.example/demo',
       description: 'Demo app',
       version: '2.0.0',
@@ -297,8 +304,8 @@ describe('generateCatalog zero-config artifact detection', () => {
   });
 
   it('emits no server card when there is no MCP mount', async () => {
-    const { serverCard } = await generateCatalog({ cwd: dir });
-    expect(serverCard).toBeUndefined();
+    const { serverCardPlan } = await generateCatalog({ cwd: dir });
+    expect(serverCardPlan).toBeUndefined();
   });
 
   it('recommends adding an OpenAPI doc and a JSON-LD block when both are absent', async () => {
@@ -329,11 +336,11 @@ describe('generateCatalog zero-config artifact detection', () => {
       'utf8',
     );
 
-    const { catalog, serverCard, report } = await generateCatalog({ cwd: dir });
+    const { catalog, serverCardPlan, report } = await generateCatalog({ cwd: dir });
 
     expect(catalog.entries).toHaveLength(1);
     expect(catalog.entries[0]?.auth).toEqual({ status: 'unknown' });
-    expect(serverCard?.authentication).toEqual({ required: true });
+    expect(serverCardPlan?.cards[0]?.card.authentication).toEqual({ required: true });
     // A supplied isGated is a total policy — nothing is ever "unreviewed" under it.
     expect(report.mcp.unreviewedMounts).toEqual([]);
   });
@@ -418,10 +425,10 @@ describe('generateCatalog zero-config artifact detection', () => {
       'utf8',
     );
 
-    const { catalog, serverCard, report } = await generateCatalog({ cwd: dir });
+    const { catalog, serverCardPlan, report } = await generateCatalog({ cwd: dir });
 
     expect(catalog.entries[0]?.auth).toEqual({ status: 'unknown' });
-    expect(serverCard?.authentication).toEqual({ required: true });
+    expect(serverCardPlan?.cards[0]?.card.authentication).toEqual({ required: true });
     expect(report.mcp.unreviewedMounts).toEqual([]);
   });
 
@@ -448,10 +455,10 @@ describe('generateCatalog zero-config artifact detection', () => {
       'utf8',
     );
 
-    const { catalog, serverCard, report } = await generateCatalog({ cwd: dir });
+    const { catalog, serverCardPlan, report } = await generateCatalog({ cwd: dir });
 
     expect(catalog.entries[0]?.auth).toBeUndefined();
-    expect(serverCard?.authentication).toBeUndefined();
+    expect(serverCardPlan?.cards[0]?.card.authentication).toBeUndefined();
     expect(report.mcp.unreviewedMounts).toEqual([]);
   });
 
@@ -498,9 +505,9 @@ describe('generateCatalog zero-config artifact detection', () => {
       'utf8',
     );
 
-    const { catalog, serverCard } = await generateCatalog({ cwd: dir });
+    const { catalog, serverCardPlan } = await generateCatalog({ cwd: dir });
 
-    expect(serverCard?.serverUrl).toBe('https://example.com/mcp');
+    expect(serverCardPlan?.cards[0]?.card.serverUrl).toBe('https://example.com/mcp');
     expect(catalog.entries[0]?.url).toBe('https://example.com/.well-known/mcp/server-card.json');
   });
 
@@ -544,5 +551,150 @@ describe('generateCatalog zero-config artifact detection', () => {
       displayName: 'Demo API',
       description: 'Hand-written.',
     });
+  });
+});
+
+describe('generateCatalog multi-mount MCP', () => {
+  function writeTwoMounts(dir: string): void {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com' };\n",
+      'utf8',
+    );
+    const publicDir = join(dir, 'app', 'api', 'public', 'mcp');
+    mkdirSync(publicDir, { recursive: true });
+    writeFileSync(
+      join(publicDir, 'route.ts'),
+      "import { createMcpHandler } from 'mcp-handler';\n" +
+        "const handler = createMcpHandler((server) => { server.tool('search', 'd', {}, async () => ({})); });\n" +
+        'export { handler as GET };\n',
+      'utf8',
+    );
+    const gatedDir = join(dir, 'app', 'api', 'mcp');
+    mkdirSync(gatedDir, { recursive: true });
+    writeFileSync(
+      join(gatedDir, 'route.ts'),
+      "import { createMcpHandler, withMcpAuth } from 'mcp-handler';\n" +
+        "const handler = createMcpHandler((server) => { server.tool('pay', 'd', {}, async () => ({})); });\n" +
+        'const auth = withMcpAuth(handler, async () => undefined);\n' +
+        'export { auth as GET };\n',
+      'utf8',
+    );
+  }
+
+  it('plans one card per mount, public-server primary, and per-card entry URLs', async () => {
+    writeTwoMounts(dir);
+
+    const { catalog, serverCardPlan, report } = await generateCatalog({ cwd: dir });
+
+    expect(serverCardPlan?.multi).toBe(true);
+    expect(serverCardPlan?.cards.map((c) => c.serverName).sort()).toEqual([
+      'api-mcp',
+      'api-public-mcp',
+    ]);
+    // No root card on record, but exactly one PUBLIC server → it is the primary with nothing to
+    // review: the root path is probed blind, so the credential-free server is its only sensible
+    // owner.
+    expect(serverCardPlan?.cards[0]).toMatchObject({
+      mountPathname: '/api/public/mcp',
+      primary: true,
+    });
+    expect(report.mcp.primaryMount).toBe('/api/public/mcp');
+    expect(report.mcp.primaryUnreviewed).toBeUndefined();
+    // The public (unreviewed-gating) mount is listed; the withMcpAuth one is self-reviewed.
+    expect(report.mcp.unreviewedMounts).toEqual(['/api/public/mcp']);
+
+    const urls = catalog.entries
+      .filter((e) => e.type === 'application/mcp-server-card+json')
+      .map((e) => e.url)
+      .sort();
+    expect(urls).toEqual([
+      'https://example.com/.well-known/mcp/server-card.json',
+      'https://example.com/.well-known/mcp/server-card/api-mcp.json',
+    ]);
+  });
+
+  it('flags the primary unreviewed only when several servers are public (ambiguous)', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com' };\n",
+      'utf8',
+    );
+    for (const name of ['alpha', 'beta']) {
+      const mountDir = join(dir, 'app', 'api', name, 'mcp');
+      mkdirSync(mountDir, { recursive: true });
+      writeFileSync(
+        join(mountDir, 'route.ts'),
+        "import { createMcpHandler } from 'mcp-handler';\n" +
+          "const handler = createMcpHandler((server) => { server.tool('t', 'd', {}, async () => ({})); });\n" +
+          'export { handler as GET };\n',
+        'utf8',
+      );
+    }
+
+    const { report } = await generateCatalog({ cwd: dir });
+
+    expect(report.mcp.primaryMount).toBe('/api/alpha/mcp');
+    expect(report.mcp.primaryUnreviewed).toBe(true);
+  });
+
+  it('reads the primary and per-mount gating back from committed root + named cards', async () => {
+    writeTwoMounts(dir);
+    // Committed cards: the *gated* server owns the root path (a deliberate non-default primary),
+    // and the public server's named card records the reviewed-public answer.
+    mkdirSync(join(dir, 'public', '.well-known', 'mcp', 'server-card'), { recursive: true });
+    writeFileSync(
+      join(dir, 'public', '.well-known', 'mcp', 'server-card.json'),
+      JSON.stringify({
+        serverUrl: 'https://example.com/api/mcp',
+        authentication: { required: true },
+      }),
+      'utf8',
+    );
+    writeFileSync(
+      join(dir, 'public', '.well-known', 'mcp', 'server-card', 'api-public-mcp.json'),
+      JSON.stringify({ serverUrl: 'https://example.com/api/public/mcp' }),
+      'utf8',
+    );
+
+    const { serverCardPlan, report } = await generateCatalog({ cwd: dir });
+
+    expect(report.mcp.primaryMount).toBe('/api/mcp');
+    expect(report.mcp.primaryUnreviewed).toBeUndefined();
+    expect(report.mcp.unreviewedMounts).toEqual([]);
+    expect(serverCardPlan?.cards[0]).toMatchObject({ mountPathname: '/api/mcp', primary: true });
+  });
+
+  it('holds the mcp-server-card check actionable (with a note) when mounts exist but no card can be built', async () => {
+    // Mounts but no site origin: the mcp-server check is addressed, the card check is not.
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      "import { createMcpHandler } from 'mcp-handler';\n" +
+        "const handler = createMcpHandler((server) => { server.tool('roll_dice', 'd', {}, async () => ({})); });\n" +
+        'export { handler as GET };\n',
+      'utf8',
+    );
+
+    const { serverCardPlan, report } = await generateCatalog({ cwd: dir });
+
+    expect(serverCardPlan).toBeUndefined();
+    const serverCheck = report.ora.checks.find((c) => c.id === 'mcp-server');
+    const cardCheck = report.ora.checks.find((c) => c.id === 'mcp-server-card');
+    expect(serverCheck?.status).toBe('addressed');
+    expect(cardCheck?.status).toBe('actionable');
+    expect(cardCheck?.note).toContain('no site URL');
+  });
+
+  it('omits the mcp-server-card check entirely when there is no MCP mount', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+
+    const { report } = await generateCatalog({ cwd: dir });
+
+    expect(report.ora.checks.some((c) => c.id === 'mcp-server-card')).toBe(false);
   });
 });

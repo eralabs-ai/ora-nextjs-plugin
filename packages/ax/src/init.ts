@@ -21,10 +21,10 @@ import { writeServingManifest } from './manifest.js';
 import { createReadlinePrompter, type MultiSelectRow, type Prompter } from './prompt.js';
 import { buildRouteTreeLines, renderRouteTree, type RouteTreeInput } from './route-tree.js';
 import { buildRouterModel, type RouterKind } from './router-model.js';
-import { buildMcpServerCard } from './server-card.js';
+import { buildMcpServerCardPlan } from './server-card.js';
 import { readSiteMetadata } from './site-metadata.js';
 import { readSiteUrlFromEnv, servedPath } from './site-url.js';
-import { writeServerCard } from './write.js';
+import { writeServerCards } from './write.js';
 
 export interface InitIO {
   cwd?: string;
@@ -355,18 +355,64 @@ async function askGating(
 }
 
 /**
- * Writes the well-known MCP server card straight from the wizard — the actionable artifact `init`
- * exists to produce for an app that already has an MCP server, and the *persistence* for the
- * gating answer: the card's `authentication` block is what the next build reads back, so the
- * decision is asked once, not on every build. Only a single mount can own the single well-known
- * path; with several, `buildMcpServerCard` skips with its own recommendation and the build's
- * review gate asks per run instead.
+ * Resolves which MCP server is primary (owns the root well-known card path) — only for a host
+ * with several servers. With exactly one *public* server the answer isn't a judgment call at all:
+ * the root path is probed blind by registries, so the one server agents can use without
+ * credentials is its only sensible owner — picked silently, no question. The question is asked
+ * only when it's genuinely ambiguous (several public servers, or none). The gating question just
+ * rendered the full route tree, so the prompt lists only the MCP server rows (same markers,
+ * gating answers as annotations) — re-printing the identical tree back-to-back would be pure
+ * noise. Returns the chosen mount's pathname.
  */
-function writeGatingCard(
+async function askPrimary(
+  prompter: Prompter,
+  findings: InitFindings,
+  gatedMounts: Set<string>,
+  stdout: (line: string) => void,
+): Promise<string | undefined> {
+  if (findings.mcpMounts.length <= 1) return findings.mcpMounts[0]?.pathname;
+
+  const served = (pathname: string): string => servedPath(findings.basePath, pathname);
+  const mounts = [...findings.mcpMounts].sort((a, b) =>
+    served(a.pathname).localeCompare(served(b.pathname)),
+  );
+  const publics = mounts.filter((mount) => !gatedMounts.has(mount.pathname));
+
+  if (publics.length === 1 && publics[0] !== undefined) {
+    stdout(`[ax]   Primary MCP server: ${served(publics[0].pathname)} (the public one)`);
+    return publics[0].pathname;
+  }
+
+  const defaultMount = publics[0] ?? mounts[0];
+  const width = Math.max(...mounts.map((mount) => served(mount.pathname).length));
+  const rows: MultiSelectRow[] = mounts.map((mount) => ({
+    value: mount.pathname,
+    label:
+      `ƒ ${served(mount.pathname).padEnd(width + 2)}MCP server` +
+      (gatedMounts.has(mount.pathname) ? ' · requires login' : ''),
+    selected: mount.pathname === defaultMount?.pathname,
+  }));
+  const question = 'Which MCP server is the PRIMARY (the path agents probe first)?';
+  const chosen = (await prompter.select(question, rows)) ?? defaultMount?.pathname;
+  if (chosen !== undefined) {
+    stdout(`[ax]   Primary MCP server: ${served(chosen)}`);
+  }
+  return chosen;
+}
+
+/**
+ * Writes the well-known MCP server cards straight from the wizard — the actionable artifact
+ * `init` exists to produce for an app that already has an MCP server, and the *persistence* for
+ * the answers: each card's `authentication` block is what the next build reads back for that
+ * server's gating decision, and the root card's identity records which server is primary, so the
+ * questions are asked once, not on every build.
+ */
+function writeGatingCards(
   cwd: string,
   findings: InitFindings,
   siteUrl: string,
   gatedMounts: Set<string>,
+  primaryMount: string | undefined,
   stdout: (line: string) => void,
 ): void {
   if (findings.mcpMounts.length === 0) return;
@@ -375,19 +421,33 @@ function writeGatingCard(
       ? { ...mount, auth: { status: 'unknown' as const } }
       : mount,
   );
-  const card = buildMcpServerCard({
+  const plan = buildMcpServerCardPlan({
     mounts,
+    primaryPathname: primaryMount,
     siteUrl,
     basePath: findings.basePath,
     site: readSiteMetadata(cwd),
-    recommend: (message) => stdout(`[ax] ${message}`),
   });
-  if (card === undefined) return;
-  const { path } = writeServerCard(cwd, card);
+  if (plan === undefined) return;
+  const result = writeServerCards(cwd, plan);
+
+  const primary = plan.cards.find((emission) => emission.primary);
   stdout(
-    `[ax] ✓ wrote ${relative(cwd, path)} (MCP server card` +
-      `${card.authentication !== undefined ? ' — marked as requiring auth' : ''}). Commit it: ` +
-      'it records your gating decision, so builds never re-ask.',
+    `[ax] ✓ wrote ${relative(cwd, result.rootPath)} (MCP server card` +
+      (plan.multi && primary !== undefined
+        ? ` — primary: ${servedPath(findings.basePath, primary.mountPathname)})`
+        : `${primary?.card.authentication !== undefined ? ' — marked as requiring auth' : ''})`),
+  );
+  result.named.forEach((named, index) => {
+    const emission = plan.cards[index];
+    stdout(
+      `[ax] ✓ wrote ${relative(cwd, named.path)} (MCP server card` +
+        `${emission?.card.authentication !== undefined ? ' — marked as requiring auth' : ''})`,
+    );
+  });
+  stdout(
+    `[ax]   Commit ${plan.multi ? 'them: they record' : 'it: it records'} your gating ` +
+      `${plan.multi ? 'and primary decisions' : 'decision'}, so builds never re-ask.`,
   );
 }
 
@@ -401,10 +461,21 @@ async function collectInteractive(
   findings: InitFindings,
   siteUrlDefault: SiteUrlDefault,
   stdout: (line: string) => void,
-): Promise<{ answers: InitAnswers; gatedMounts: Set<string>; wireManifest: boolean } | undefined> {
+): Promise<
+  | {
+      answers: InitAnswers;
+      gatedMounts: Set<string>;
+      primaryMount: string | undefined;
+      wireManifest: boolean;
+    }
+  | undefined
+> {
   // Gating first: its prompt renders the route tree, so it reads as the continuation of the
-  // findings summary the user just saw — decide about the surface while looking at it.
+  // findings summary the user just saw — decide about the surface while looking at it. The
+  // primary question follows immediately (same tree, same context) so its public-server default
+  // can honor the gating answers just given.
   const gatedMounts = await askGating(prompter, findings, stdout);
+  const primaryMount = await askPrimary(prompter, findings, gatedMounts, stdout);
 
   // One line: the question names the prefill source inline, so "is this right?" is an informed
   // check rather than a mystery string. The value itself is prefilled as editable input.
@@ -459,6 +530,7 @@ async function collectInteractive(
       report,
     },
     gatedMounts,
+    primaryMount,
     wireManifest,
   };
 }
@@ -692,11 +764,11 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
       stderr('[ax] No valid site URL provided — aborting without writing anything.');
       return 1;
     }
-    const { answers, gatedMounts, wireManifest } = collected;
+    const { answers, gatedMounts, primaryMount, wireManifest } = collected;
 
     const fileName = writeConfigAndWire(cwd, answers, wireManifest, stdout);
     if (wireManifest) await createServingManifest(cwd, stdout);
-    writeGatingCard(cwd, findings, answers.siteUrl, gatedMounts, stdout);
+    writeGatingCards(cwd, findings, answers.siteUrl, gatedMounts, primaryMount, stdout);
 
     // Offer the first build so the report shows up immediately. Default no — spawning a full
     // `next build` is heavy and should never happen without an explicit yes.

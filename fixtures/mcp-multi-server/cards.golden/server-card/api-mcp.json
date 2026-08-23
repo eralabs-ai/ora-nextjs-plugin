@@ -1,0 +1,32 @@
+{
+  "name": "com.example.mcp-multi-fixture/api-mcp",
+  "description": "mcp-multi-server MCP server at /api/mcp",
+  "version": "0.0.0",
+  "serverUrl": "https://mcp-multi-fixture.example.com/api/mcp",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mcp-multi-fixture.example.com/api/mcp"
+    }
+  ],
+  "tools": [
+    {
+      "name": "place_order"
+    }
+  ],
+  "serverInfo": {
+    "name": "mcp-multi-server",
+    "version": "0.0.0"
+  },
+  "transport": {
+    "type": "streamable-http",
+    "endpoint": "https://mcp-multi-fixture.example.com/api/mcp"
+  },
+  "capabilities": {
+    "tools": {}
+  },
+  "authentication": {
+    "required": true,
+    "resourceMetadata": "https://mcp-multi-fixture.example.com/.well-known/oauth-protected-resource"
+  }
+}

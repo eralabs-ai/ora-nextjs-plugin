@@ -152,11 +152,6 @@
         "status": "actionable"
       },
       {
-        "id": "mcp-server-card",
-        "artifact": "mcp-server",
-        "status": "actionable"
-      },
-      {
         "id": "auth-md-exists",
         "artifact": "auth.md",
         "status": "addressed"

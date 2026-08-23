@@ -32,13 +32,15 @@ export {
 
 export {
   writeCatalog,
-  writeServerCard,
+  writeServerCards,
   writeReport,
+  namedServerCardUrlPath,
   CATALOG_OUTPUT_PATH,
   SERVER_CARD_OUTPUT_PATH,
+  SERVER_CARD_DIR_OUTPUT_PATH,
   REPORT_OUTPUT_PATH,
   type WriteCatalogResult,
-  type WriteServerCardResult,
+  type WriteServerCardsResult,
   type WriteCatalogOptions,
   type EmissionTarget,
 } from './write.js';
@@ -194,12 +196,15 @@ export {
 } from './detect-mcp.js';
 
 export {
-  buildMcpServerCard,
+  buildMcpServerCardPlan,
+  mountServerName,
   type McpServerCard,
   type McpServerCardTool,
   type McpServerCardRemote,
   type McpServerCardAuthentication,
-  type BuildMcpServerCardOptions,
+  type McpServerCardEmission,
+  type McpServerCardPlan,
+  type BuildMcpServerCardPlanOptions,
 } from './server-card.js';
 
 export { detectOpenApi, type DetectOpenApiOptions } from './detect-openapi.js';

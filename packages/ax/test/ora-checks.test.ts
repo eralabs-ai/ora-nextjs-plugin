@@ -19,6 +19,7 @@ function nothingPresent(): OraArtifactPresence {
     'json-ld': false,
     'openapi.json': false,
     'mcp-server': false,
+    'mcp-server-card': false,
     'auth.md': false,
   };
 }
@@ -48,6 +49,7 @@ describe('ORA_CHECK_MAP', () => {
       'json-ld',
       'openapi.json',
       'mcp-server',
+      'mcp-server-card',
       'auth.md',
     ]);
   });
@@ -76,8 +78,20 @@ describe('buildOraChecks', () => {
   it('carries the artifact each check was derived from, so a fix has an address', () => {
     const present = { ...nothingPresent(), 'mcp-server': true };
     const mcpChecks = buildOraChecks(present).filter((check) => check.artifact === 'mcp-server');
-    expect(mcpChecks.map((check) => check.id)).toEqual(['mcp-server', 'mcp-server-card']);
+    expect(mcpChecks.map((check) => check.id)).toEqual(['mcp-server']);
     expect(mcpChecks.every((check) => check.status === 'addressed')).toBe(true);
+  });
+
+  it('keeps the mcp-server-card check independent of the mount: a mount alone is not a card', () => {
+    // The exact drift this split fixes: a detected mount used to mark the card check addressed
+    // even when no card was written (several mounts, or no site origin).
+    const present = { ...nothingPresent(), 'mcp-server': true };
+    const cardChecks = buildOraChecks(present).filter(
+      (check) => check.artifact === 'mcp-server-card',
+    );
+    expect(cardChecks.map((check) => ({ id: check.id, status: check.status }))).toEqual([
+      { id: 'mcp-server-card', status: 'actionable' },
+    ]);
   });
 
   it('attaches a note to an actionable artifact, on every check it maps to', () => {

@@ -24,8 +24,8 @@ import type { BuildReport, ReportArtifact, ReportScaffolds } from './report.js';
 import { buildRouterModel } from './router-model.js';
 import type { JsonLdScaffoldResult } from './scaffold-json-ld.js';
 import { SPEC_VERSION } from './schema.js';
-import { buildMcpServerCard, type McpServerCard } from './server-card.js';
-import { readServerCardRecord } from './server-card-record.js';
+import { buildMcpServerCardPlan, type McpServerCardPlan } from './server-card.js';
+import { allServerCardRecords, readServerCardRecords } from './server-card-record.js';
 import { readSiteMetadata } from './site-metadata.js';
 import {
   buildArtifactUrl,
@@ -35,7 +35,7 @@ import {
   servedPath,
 } from './site-url.js';
 import type { AiCatalog, CatalogEntry, EntryAuth } from './types.js';
-import type { EmissionTarget } from './write.js';
+import { type EmissionTarget, namedServerCardUrlPath } from './write.js';
 
 export interface GenerateCatalogOptions {
   /** Project root to read `package.json` / `next.config.*` / `ax.config.*` from. Defaults to `process.cwd()`. */
@@ -55,11 +55,13 @@ export interface GenerateCatalogResult {
   /** Emission target resolved from `ax.config` `emit` — which output `writeCatalog` should write. */
   emit: EmissionTarget;
   /**
-   * The well-known MCP server card to emit alongside the catalog, or undefined when there's no
-   * (single, resolvable) `mcp-handler` mount to describe. Agents discover MCP via this card, not the
-   * ARD catalog entry, so it's written to `/.well-known/mcp/server-card.json` by the CLI.
+   * The well-known MCP server cards to emit alongside the catalog, or undefined when no resolvable
+   * `mcp-handler` mount (or no site origin) exists. Agents discover MCP via these cards, not the
+   * ARD catalog entries: the CLI writes the primary server's card to
+   * `/.well-known/mcp/server-card.json` and, for a multi-server host, every server's card to its
+   * named `/.well-known/mcp/server-card/<server-name>.json` slot.
    */
-  serverCard?: McpServerCard;
+  serverCardPlan?: McpServerCardPlan;
   /**
    * Distinct in-page WebMCP tool names detected (declarative + browser-reachable imperative) — for
    * the CLI's build summary. Empty when the app registers no WebMCP tools.
@@ -112,15 +114,21 @@ function gateKindForEntry(entry: CatalogEntry): GateTarget['kind'] {
  * declared per *server* in the MCP conventions, so this is a whole-mount decision, resolved in
  * precedence order:
  *   1. A developer-supplied `isGated` owns the whole policy (as everywhere else).
- *   2. Otherwise: the built-in floor, a detected `withMcpAuth` wrapper, or the decision the
- *      previously written server card records (`authentication.required`) — the committed card is
- *      the persistence layer for the user's answer from `ax init` or a build's review gate.
+ *   2. Otherwise: the built-in floor, a detected `withMcpAuth` wrapper, or the decision a
+ *      previously written server card records (`authentication.required`) — the committed cards
+ *      (the root one, and each named per-server one) are the persistence layer for the user's
+ *      answers from `ax init` or a build's review gate.
  * A gated mount is never dropped: "requires auth" *is* its description, so it's published with
  * `auth.status "unknown"` and its card carries `authentication.required` — more discoverable than
  * hiding it, and the write is what records the decision for the next build.
  *
  * A mount matched by none of the sources is *unreviewed*: advertised as open (the zero-config
  * default) but returned in `unreviewed` so the CLI can ask interactively or warn in CI.
+ *
+ * The same read-back resolves which mount is *primary* — whose card owns the root well-known path.
+ * That is a judgment call ax never guesses silently: the committed root card records the answer;
+ * without one, the first public mount is the default and `primaryUnreviewed` tells the CLI to ask
+ * interactively (or warn headless) before the write persists it.
  */
 function resolveMcpMountGating(options: {
   mounts: McpMount[];
@@ -128,12 +136,22 @@ function resolveMcpMountGating(options: {
   basePath: string;
   siteUrl: string | undefined;
   cwd: string;
-}): { mounts: McpMount[]; unreviewed: string[] } {
+}): {
+  mounts: McpMount[];
+  unreviewed: string[];
+  primaryPathname: string | undefined;
+  primaryUnreviewed: boolean;
+} {
   const { mounts, isGated, basePath, siteUrl, cwd } = options;
-  if (mounts.length === 0) return { mounts, unreviewed: [] };
+  if (mounts.length === 0) {
+    return { mounts, unreviewed: [], primaryPathname: undefined, primaryUnreviewed: false };
+  }
 
-  const record = readServerCardRecord(cwd);
+  const records = readServerCardRecords(cwd);
+  const allRecords = allServerCardRecords(records);
   const unreviewed: string[] = [];
+  const mountServerUrl = (mount: McpMount): string | undefined =>
+    siteUrl ? buildArtifactUrl(siteUrl, basePath, mount.pathname) : undefined;
 
   const resolved = mounts.map((mount) => {
     const path = servedPath(basePath, mount.pathname);
@@ -142,10 +160,10 @@ function resolveMcpMountGating(options: {
       path,
       ...(mount.capabilities.length > 0 ? { tools: mount.capabilities } : {}),
     };
-    const serverUrl = siteUrl ? buildArtifactUrl(siteUrl, basePath, mount.pathname) : undefined;
+    const serverUrl = mountServerUrl(mount);
     const recorded =
-      record !== undefined && serverUrl !== undefined && record.serverUrl === serverUrl
-        ? record
+      serverUrl !== undefined
+        ? allRecords.find((record) => record.serverUrl === serverUrl)
         : undefined;
 
     let gated: boolean;
@@ -162,7 +180,32 @@ function resolveMcpMountGating(options: {
       : mount;
   });
 
-  return { mounts: resolved, unreviewed };
+  // A single mount is trivially primary; several mounts take the root card's recorded answer.
+  // Without a record, exactly one *public* server is no judgment call either: the root path is
+  // the one registries probe blind, so the one server agents can use without credentials is its
+  // only sensible owner — picked silently. Only the ambiguous cases (several public servers, or
+  // none) fall back to the first candidate AND set `primaryUnreviewed`, so an interactive build
+  // asks and a headless one warns.
+  const sortedByPath = [...resolved].sort((a, b) =>
+    servedPath(basePath, a.pathname).localeCompare(servedPath(basePath, b.pathname)),
+  );
+  const publicMounts = sortedByPath.filter((mount) => mount.auth === undefined);
+  let primaryPathname = resolved[0]?.pathname;
+  let primaryUnreviewed = false;
+  if (resolved.length > 1) {
+    const rootMatch =
+      records.root !== undefined
+        ? resolved.find((mount) => mountServerUrl(mount) === records.root?.serverUrl)
+        : undefined;
+    if (rootMatch !== undefined) {
+      primaryPathname = rootMatch.pathname;
+    } else {
+      primaryPathname = (publicMounts[0] ?? sortedByPath[0])?.pathname;
+      primaryUnreviewed = publicMounts.length !== 1;
+    }
+  }
+
+  return { mounts: resolved, unreviewed, primaryPathname, primaryUnreviewed };
 }
 
 /**
@@ -243,8 +286,16 @@ function oraCheckNotes(scaffolds: {
   jsonLd?: JsonLdScaffoldResult;
   twinPlan?: MarkdownTwinPlan;
   authMdMissing?: boolean;
+  mcpCardMissing?: boolean;
 }): Partial<Record<OraArtifact, string>> {
   const notes: Partial<Record<OraArtifact, string>> = {};
+
+  if (scaffolds.mcpCardMissing === true) {
+    notes['mcp-server-card'] =
+      'MCP server mounts were detected but no server card could be written because no site URL ' +
+      'is known — set siteUrl in ax.config (or SITE_URL / NEXT_PUBLIC_SITE_URL) and rebuild to ' +
+      'publish the card agents probe.';
+  }
 
   const twinPlan = scaffolds.twinPlan;
   if (twinPlan !== undefined) {
@@ -353,15 +404,20 @@ export async function generateCatalog(
   });
 
   // Scan route handlers for MCP mounts once, resolve each mount's gated status (config isGated,
-  // the built-in floor, a detected withMcpAuth wrapper, or the decision the previously written
-  // server card records), then feed the same resolved mounts to both the catalog entry and the
-  // well-known server card. A gated mount is published everywhere *with* its auth marker — the
-  // entry carries auth.status "unknown" and the card carries authentication.required — never
-  // dropped: the committed card is the persistence layer for the gating decision, so it must
-  // exist to record it.
+  // the built-in floor, a detected withMcpAuth wrapper, or the decision a previously written
+  // server card records), then feed the same resolved mounts to both the catalog entries and the
+  // well-known server cards. A gated mount is published everywhere *with* its auth marker — the
+  // entry carries auth.status "unknown" and its card carries authentication.required — never
+  // dropped: the committed cards are the persistence layer for the gating decisions, so they must
+  // exist to record them.
   const gating = resolveGating(config.isGated);
   const detectedMounts = detectMcpMounts({ cwd, warn, router });
-  const { mounts: mcpMounts, unreviewed: unreviewedMcpMounts } = resolveMcpMountGating({
+  const {
+    mounts: mcpMounts,
+    unreviewed: unreviewedMcpMounts,
+    primaryPathname,
+    primaryUnreviewed,
+  } = resolveMcpMountGating({
     mounts: detectedMounts,
     isGated: config.isGated,
     basePath,
@@ -371,7 +427,13 @@ export async function generateCatalog(
   const inferredEntries: CatalogEntry[] = [
     ...buildMcpEntries({ mounts: mcpMounts, siteUrl, basePath, warn }),
   ];
-  const serverCard = buildMcpServerCard({ mounts: mcpMounts, siteUrl, basePath, site, recommend });
+  const serverCardPlan = buildMcpServerCardPlan({
+    mounts: mcpMounts,
+    primaryPathname,
+    siteUrl,
+    basePath,
+    site,
+  });
 
   const openApiEntry = detectOpenApi({ cwd, siteUrl, basePath, warn, recommend });
   if (openApiEntry) inferredEntries.push(openApiEntry);
@@ -440,15 +502,24 @@ export async function generateCatalog(
   const { entries: overridden } = applyEntryOverrides(inferredEntries, config.entries);
   const entries = applyGating(overridden, gating, warn);
 
-  // Reference the server card from the catalog: the mcp entry's type promises card JSON, and the
+  // Reference the server cards from the catalog: an mcp entry's type promises card JSON, and the
   // card — not the raw endpoint — is the discovery document agents read, so when a card is emitted
-  // the entry points at it. Rewritten only *after* gating, which must match on the mount's own
-  // served path, never the card's.
-  if (serverCard !== undefined && siteUrl !== undefined) {
-    const cardUrl = buildArtifactUrl(siteUrl, basePath, '/.well-known/mcp/server-card.json');
-    for (const entry of entries) {
-      if (entry.type === 'application/mcp-server-card+json' && entry.url === serverCard.serverUrl) {
-        entry.url = cardUrl;
+  // its entry points at it: the primary server's entry at the root well-known path, every other
+  // server's at its named per-server slot. Rewritten only *after* gating, which must match on the
+  // mount's own served path, never the card's.
+  if (serverCardPlan !== undefined && siteUrl !== undefined) {
+    for (const emission of serverCardPlan.cards) {
+      const cardPath = emission.primary
+        ? '/.well-known/mcp/server-card.json'
+        : namedServerCardUrlPath(emission.serverName);
+      const cardUrl = buildArtifactUrl(siteUrl, basePath, cardPath);
+      for (const entry of entries) {
+        if (
+          entry.type === 'application/mcp-server-card+json' &&
+          entry.url === emission.card.serverUrl
+        ) {
+          entry.url = cardUrl;
+        }
       }
     }
   }
@@ -570,6 +641,9 @@ export async function generateCatalog(
     mcp: {
       mounts: mcpMounts.map((mount) => ({ pathname: mount.pathname, tools: mount.capabilities })),
       unreviewedMounts: unreviewedMcpMounts,
+      ...(mcpMounts.length > 1 && primaryPathname !== undefined
+        ? { primaryMount: primaryPathname, ...(primaryUnreviewed ? { primaryUnreviewed } : {}) }
+        : {}),
     },
     agent404: {
       notFoundPresent: agent404.notFoundPresent,
@@ -631,6 +705,10 @@ export async function generateCatalog(
           'json-ld': jsonLd.found,
           'openapi.json': openApi.found,
           'mcp-server': mcpMounts.length > 0,
+          // The card check is answered by the card, not the mount: addressed only when this run
+          // actually has cards to write (mounts + a known site origin), N/A with no mounts at all.
+          'mcp-server-card':
+            mcpMounts.length === 0 ? 'not-applicable' : serverCardPlan !== undefined,
           // With nothing gated there is nothing an auth guide could say — the checks are omitted,
           // never claimed addressed or held actionable.
           'auth.md': authMdCandidate === undefined ? 'not-applicable' : authMdPlan !== undefined,
@@ -640,6 +718,7 @@ export async function generateCatalog(
           jsonLd: jsonLd.scaffold,
           twinPlan,
           authMdMissing: authMdCandidate !== undefined && authMdPlan === undefined,
+          mcpCardMissing: mcpMounts.length > 0 && serverCardPlan === undefined,
         }),
       ),
     },
@@ -655,7 +734,7 @@ export async function generateCatalog(
     reportTarget: config.report,
     twinPlan,
     ...(authMdPlan !== undefined ? { authMdPlan } : {}),
-    ...(serverCard ? { serverCard } : {}),
+    ...(serverCardPlan ? { serverCardPlan } : {}),
     ...(llmsTxtResult.scaffoldedBody !== undefined
       ? { scaffoldedLlmsTxtBody: llmsTxtResult.scaffoldedBody }
       : {}),

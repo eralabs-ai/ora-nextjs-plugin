@@ -38,6 +38,11 @@ export interface Prompter {
   confirm(question: string, defaultValue: boolean): Promise<boolean>;
   /** Returns the `value`s of the chosen choices; empty input keeps whatever was pre-selected. */
   multiSelect(question: string, rows: MultiSelectRow[]): Promise<string[]>;
+  /**
+   * Picks exactly one choice; empty input accepts the row whose `selected` is true (the default).
+   * Same row model as {@link multiSelect}, so the choice can render inside the route-tree layout.
+   */
+  select(question: string, rows: MultiSelectRow[]): Promise<string | undefined>;
 }
 
 /**
@@ -99,6 +104,44 @@ export async function createReadlinePrompter(): Promise<Prompter & { close(): vo
         if (index >= 0 && index < choices.length) selected[index] = !selected[index];
       }
       return choices.filter((_, i) => selected[i]).map((choice) => choice.value);
+    },
+
+    async select(question, rows) {
+      const choices = rows.filter(isMultiSelectChoice);
+      if (choices.length === 0) return undefined;
+      const defaultIndex = Math.max(
+        choices.findIndex((choice) => choice.selected),
+        0,
+      );
+
+      // Raw-mode single-select: the cursor *is* the selection — ↑/↓ move it, Enter picks the
+      // focused row. Reuses the multi-select machinery with radio semantics (moving re-selects),
+      // so the row layout (tree connectors, display rows) renders identically.
+      if (process.stdin.isTTY === true && process.stdout.isTTY === true) {
+        const picked = await interactiveSelect(rl, question, rows, choices, defaultIndex);
+        return picked;
+      }
+
+      // No raw-mode TTY (dumb terminal): a numbered list on plain line input.
+      let n = 0;
+      const rendered = rows
+        .map((row) => {
+          if (!isMultiSelectChoice(row)) return `         ${row.text}`.trimEnd();
+          const index = n++;
+          return ` ${String(index + 1).padStart(2)}. ${index === defaultIndex ? '(default) ' : ''}${row.label}`;
+        })
+        .join('\n');
+      const answer = (
+        await rl.question(
+          `${question}\n${rendered}\nEnter a number to choose, or press Enter to accept the default: `,
+        )
+      ).trim();
+      const index = Number.parseInt(answer, 10) - 1;
+      const chosen =
+        answer !== '' && index >= 0 && index < choices.length
+          ? choices[index]
+          : choices[defaultIndex];
+      return chosen?.value;
     },
 
     close() {
@@ -184,6 +227,85 @@ function interactiveMultiSelect(
           draw();
         } else if (keys[i] === ' ') {
           selected[focus] = !(selected[focus] ?? false);
+          draw();
+        } else if (keys[i] === '\r' || keys[i] === '\n') {
+          finish();
+          return;
+        }
+        if (keys[i] === '\x1b') i += 2; // skip the rest of a parsed escape sequence
+      }
+    };
+    input.on('data', onData);
+  });
+}
+
+/**
+ * The raw-mode selector behind {@link Prompter.select}: single-choice radio semantics on the same
+ * row layout as {@link interactiveMultiSelect} — ↑/↓ (or j/k, tab) move the cursor between the
+ * choice rows, and the focused row *is* the selection (`(•)`), so Enter simply accepts it. Same
+ * terminal handling as the multi-select: the shared readline interface is paused, raw mode and the
+ * cursor are restored on the way out, Ctrl-C exits the process.
+ */
+function interactiveSelect(
+  rl: { pause(): void; resume(): void },
+  question: string,
+  rows: MultiSelectRow[],
+  choices: MultiSelectChoice[],
+  defaultIndex: number,
+): Promise<string | undefined> {
+  const input = process.stdin;
+  const output = process.stdout;
+
+  let focus = defaultIndex;
+  const renderRegion = (): string[] => {
+    let n = -1;
+    const body = rows.map((row) => {
+      // Display rows get exactly the choice prefix's width (` ❯ (•) ` = 7 chars) so tree
+      // connectors line up across selectable and inert rows.
+      if (!isMultiSelectChoice(row)) return `       ${row.text}`.trimEnd();
+      n++;
+      return `${n === focus ? ' ❯' : '  '} (${n === focus ? '•' : ' '}) ${row.label}`;
+    });
+    return [...body, '', '↑/↓ move · enter accept'];
+  };
+
+  output.write(`${question}\n`);
+  let regionHeight = 0;
+  const draw = (): void => {
+    const lines = renderRegion();
+    if (regionHeight > 0) output.write(`\x1b[${regionHeight}A`);
+    for (const line of lines) output.write(`\x1b[2K${line}\n`);
+    regionHeight = lines.length;
+  };
+
+  rl.pause();
+  const wasRaw = input.isRaw === true;
+  input.setRawMode(true);
+  input.resume();
+  output.write('\x1b[?25l');
+  draw();
+
+  return new Promise((resolve) => {
+    const finish = (): void => {
+      input.removeListener('data', onData);
+      input.setRawMode(wasRaw);
+      output.write('\x1b[?25h');
+      rl.resume();
+      resolve(choices[focus]?.value);
+    };
+    const onData = (chunk: Buffer): void => {
+      const keys = chunk.toString('utf8');
+      for (let i = 0; i < keys.length; i++) {
+        if (keys[i] === '\x03') {
+          input.setRawMode(wasRaw);
+          output.write('\x1b[?25h\n');
+          process.exit(130);
+        }
+        if (keys.startsWith('\x1b[A', i) || keys[i] === 'k') {
+          focus = (focus - 1 + choices.length) % choices.length;
+          draw();
+        } else if (keys.startsWith('\x1b[B', i) || keys[i] === 'j' || keys[i] === '\t') {
+          focus = (focus + 1) % choices.length;
           draw();
         } else if (keys[i] === '\r' || keys[i] === '\n') {
           finish();

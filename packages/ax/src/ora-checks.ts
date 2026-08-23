@@ -42,6 +42,7 @@ export type OraArtifact =
   | 'json-ld'
   | 'openapi.json'
   | 'mcp-server'
+  | 'mcp-server-card'
   | 'auth.md';
 
 export interface OraArtifactChecks {
@@ -65,7 +66,12 @@ export const ORA_CHECK_MAP: readonly OraArtifactChecks[] = [
   { artifact: 'agents.md', checks: ['agent-instruction'] },
   { artifact: 'json-ld', checks: ['json-ld', 'org-schema-completeness'] },
   { artifact: 'openapi.json', checks: ['openapi-spec'] },
-  { artifact: 'mcp-server', checks: ['mcp-server', 'mcp-server-card'] },
+  { artifact: 'mcp-server', checks: ['mcp-server'] },
+  // The card is its own artifact, not a free rider on the mount: Ora probes the well-known card
+  // path itself, so the check is addressed only when this build actually has a card to write
+  // (a mount alone isn't one — e.g. no known site origin), and N/A when there's no MCP server
+  // for a card to describe.
+  { artifact: 'mcp-server-card', checks: ['mcp-server-card'] },
   // The generated gated-surface guide. Only emitted when the site actually has gated surfaces —
   // with nothing gated, the caller marks it 'not-applicable' and the checks are omitted entirely
   // (an absent check is "this build can't speak to it", never a claim the site fails it).

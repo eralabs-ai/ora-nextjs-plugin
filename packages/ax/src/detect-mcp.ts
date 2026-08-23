@@ -72,7 +72,7 @@ export interface McpMount {
  * and returns one `McpMount` per file that both imports the package and calls the handler factory,
  * once its route resolves to a stable URL pathname. Ambiguous mounts (an unrecognized dynamic route
  * segment) are skipped with a warning, never guessed. This is the shared detection step behind both
- * the catalog entry (`buildMcpEntries`) and the well-known server card (`buildMcpServerCard`).
+ * the catalog entry (`buildMcpEntries`) and the well-known server card (`buildMcpServerCardPlan`).
  */
 export function detectMcpMounts(options: DetectMcpMountsOptions): McpMount[] {
   const router = options.router ?? buildRouterModel(options.cwd);
@@ -135,7 +135,7 @@ export interface BuildMcpEntriesOptions {
 
 /**
  * Turns resolved `McpMount`s into catalog entries. Kept separate from `detectMcpMounts` so
- * `generateCatalog` can scan once and feed the same mounts to both this and `buildMcpServerCard`.
+ * `generateCatalog` can scan once and feed the same mounts to both this and `buildMcpServerCardPlan`.
  * With no known site origin, emits no entry (warning instead) rather than a relative/guessed URL.
  */
 export function buildMcpEntries(options: BuildMcpEntriesOptions): CatalogEntry[] {

@@ -325,6 +325,43 @@ importers:
         specifier: ^5.7.3
         version: 5.9.3
 
+  fixtures/mcp-multi-server:
+    dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: 1.26.0
+        version: 1.26.0(zod@3.25.76)
+      mcp-handler:
+        specifier: ^1.1.0
+        version: 1.1.0(@modelcontextprotocol/sdk@1.26.0(zod@3.25.76))(next@15.5.20(react-dom@19.2.7(react@19.2.7))(react@19.2.7))
+      next:
+        specifier: ^15.1.0
+        version: 15.5.20(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.7
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.7(react@19.2.7)
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      '@ora-ai/ax':
+        specifier: workspace:*
+        version: link:../../packages/ax
+      '@types/node':
+        specifier: ^20.17.12
+        version: 20.19.43
+      '@types/react':
+        specifier: ^19.0.7
+        version: 19.2.17
+      '@types/react-dom':
+        specifier: ^19.0.3
+        version: 19.2.3(@types/react@19.2.17)
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+
   fixtures/mdx-content:
     dependencies:
       '@mdx-js/loader':

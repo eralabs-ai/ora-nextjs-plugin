@@ -12,13 +12,14 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import type { McpServerCard } from '../src/server-card.js';
+import type { McpServerCard, McpServerCardPlan } from '../src/server-card.js';
 import type { AiCatalog } from '../src/types.js';
 import {
   CATALOG_OUTPUT_PATH,
+  SERVER_CARD_DIR_OUTPUT_PATH,
   SERVER_CARD_OUTPUT_PATH,
   writeCatalog,
-  writeServerCard,
+  writeServerCards,
 } from '../src/write.js';
 
 let dir: string;
@@ -29,16 +30,46 @@ const validCatalog: AiCatalog = {
   entries: [],
 };
 
-const serverCard: McpServerCard = {
-  name: 'com.example/demo',
-  description: 'Demo MCP server',
-  version: '1.0.0',
-  serverUrl: 'https://example.com/mcp',
-  remotes: [{ type: 'streamable-http', url: 'https://example.com/mcp' }],
-  tools: [{ name: 'roll_dice' }],
-  serverInfo: { name: 'Demo', version: '1.0.0' },
-  transport: { type: 'streamable-http', endpoint: 'https://example.com/mcp' },
-  capabilities: { tools: {} },
+function card(pathname: string, name: string): McpServerCard {
+  const url = `https://example.com${pathname}`;
+  return {
+    name: `com.example/${name}`,
+    description: 'Demo MCP server',
+    version: '1.0.0',
+    serverUrl: url,
+    remotes: [{ type: 'streamable-http', url }],
+    tools: [{ name: 'roll_dice' }],
+    serverInfo: { name: 'Demo', version: '1.0.0' },
+    transport: { type: 'streamable-http', endpoint: url },
+    capabilities: { tools: {} },
+  };
+}
+
+const serverCard = card('/mcp', 'demo');
+
+/** A single-mount plan: the root card only, no named slots. */
+const singlePlan: McpServerCardPlan = {
+  multi: false,
+  cards: [{ card: serverCard, mountPathname: '/mcp', serverName: 'mcp', primary: true }],
+};
+
+/** A two-mount plan: root card for the primary plus a named slot per server. */
+const multiPlan: McpServerCardPlan = {
+  multi: true,
+  cards: [
+    {
+      card: card('/api/public/mcp', 'api-public-mcp'),
+      mountPathname: '/api/public/mcp',
+      serverName: 'api-public-mcp',
+      primary: true,
+    },
+    {
+      card: card('/api/mcp', 'api-mcp'),
+      mountPathname: '/api/mcp',
+      serverName: 'api-mcp',
+      primary: false,
+    },
+  ],
 };
 
 beforeEach(() => {
@@ -170,17 +201,18 @@ describe("writeCatalog — 'route' emission target", () => {
   });
 });
 
-describe('writeServerCard', () => {
+describe('writeServerCards', () => {
   it('writes the static card to public/.well-known/mcp/server-card.json', () => {
-    const result = writeServerCard(dir, serverCard);
+    const result = writeServerCards(dir, singlePlan);
     expect(result.target).toBe('static');
-    expect(result.path).toBe(join(dir, SERVER_CARD_OUTPUT_PATH));
-    const written = JSON.parse(readFileSync(result.path, 'utf8'));
+    expect(result.rootPath).toBe(join(dir, SERVER_CARD_OUTPUT_PATH));
+    expect(result.named).toEqual([]);
+    const written = JSON.parse(readFileSync(result.rootPath, 'utf8'));
     expect(written).toEqual(serverCard);
   });
 
   it('leaves no temp file behind on a successful static write', () => {
-    writeServerCard(dir, serverCard);
+    writeServerCards(dir, singlePlan);
     const files = readdirSync(join(dir, 'public', '.well-known', 'mcp'));
     expect(files).toEqual(['server-card.json']);
   });
@@ -189,11 +221,11 @@ describe('writeServerCard', () => {
     mkdirSync(join(dir, 'app'), { recursive: true });
     writeFileSync(join(dir, 'tsconfig.json'), '{}', 'utf8');
 
-    const result = writeServerCard(dir, serverCard, { target: 'route' });
+    const result = writeServerCards(dir, singlePlan, { target: 'route' });
 
     expect(result.target).toBe('route');
     const expectedPath = join(dir, 'app', '.well-known', 'mcp', 'server-card.json', 'route.ts');
-    expect(result.path).toBe(expectedPath);
+    expect(result.rootPath).toBe(expectedPath);
 
     const source = readFileSync(expectedPath, 'utf8');
     expect(source).toContain("export const dynamic = 'force-static'");
@@ -207,12 +239,67 @@ describe('writeServerCard', () => {
 
   it('falls back to the static target (with a warning) when there is no app/ directory', () => {
     const warnings: string[] = [];
-    const result = writeServerCard(dir, serverCard, {
+    const result = writeServerCards(dir, singlePlan, {
       target: 'route',
       warn: (m) => warnings.push(m),
     });
     expect(result.target).toBe('static');
-    expect(result.path).toBe(join(dir, SERVER_CARD_OUTPUT_PATH));
+    expect(result.rootPath).toBe(join(dir, SERVER_CARD_OUTPUT_PATH));
     expect(warnings.some((w) => w.includes('no App Router directory'))).toBe(true);
+  });
+
+  it('writes the primary card at the root path AND a named card per server for a multi plan', () => {
+    const result = writeServerCards(dir, multiPlan);
+
+    const root = JSON.parse(readFileSync(join(dir, SERVER_CARD_OUTPUT_PATH), 'utf8'));
+    expect(root.serverUrl).toBe('https://example.com/api/public/mcp');
+
+    expect(result.named.map((n) => n.serverName)).toEqual(['api-public-mcp', 'api-mcp']);
+    const namedDir = join(dir, SERVER_CARD_DIR_OUTPUT_PATH);
+    expect(readdirSync(namedDir).sort()).toEqual(['api-mcp.json', 'api-public-mcp.json']);
+    const gatedCard = JSON.parse(readFileSync(join(namedDir, 'api-mcp.json'), 'utf8'));
+    expect(gatedCard.serverUrl).toBe('https://example.com/api/mcp');
+  });
+
+  it('removes stale named cards whose server is no longer in the plan', () => {
+    writeServerCards(dir, multiPlan);
+    const shrunk: McpServerCardPlan = {
+      multi: true,
+      cards: multiPlan.cards.filter((c) => c.serverName !== 'api-mcp'),
+    };
+
+    const result = writeServerCards(dir, shrunk);
+
+    expect(result.removed).toHaveLength(1);
+    expect(readdirSync(join(dir, SERVER_CARD_DIR_OUTPUT_PATH))).toEqual(['api-public-mcp.json']);
+  });
+
+  it('removes the whole named-card directory when the plan shrinks to a single mount', () => {
+    writeServerCards(dir, multiPlan);
+
+    writeServerCards(dir, singlePlan);
+
+    expect(existsSync(join(dir, SERVER_CARD_DIR_OUTPUT_PATH))).toBe(false);
+    expect(existsSync(join(dir, SERVER_CARD_OUTPUT_PATH))).toBe(true);
+  });
+
+  it("writes named route handlers under app/.well-known/mcp/server-card/ on target 'route'", () => {
+    mkdirSync(join(dir, 'app'), { recursive: true });
+    writeFileSync(join(dir, 'tsconfig.json'), '{}', 'utf8');
+
+    const result = writeServerCards(dir, multiPlan, { target: 'route' });
+
+    expect(result.target).toBe('route');
+    const namedHandler = join(
+      dir,
+      'app',
+      '.well-known',
+      'mcp',
+      'server-card',
+      'api-mcp.json',
+      'route.ts',
+    );
+    expect(existsSync(namedHandler)).toBe(true);
+    expect(result.named.map((n) => n.path)).toContain(namedHandler);
   });
 });

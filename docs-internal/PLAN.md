@@ -634,6 +634,34 @@ authors judgment content. **This is the immediate work.**
       Precision over recall: no `$schema` URL is guessed and no `authentication` block is asserted (auth
       is Phase 2.8). Emitted via the same `emit` (static/route) logic as the catalog (`write.ts`
       `writeServerCard`); the card is gitignored fixture build output like the catalog.
+      **Update (2026-08-23): multi-server hosts + path divergence, verified before changing anything.**
+      Phase 9 demo testing (a real app with a public `/api/public/mcp` and a `withMcpAuth`-gated
+      `/api/mcp`) showed ax skipped the card entirely with >1 mount ("publish one by hand") — designed
+      against an older draft. Both moving targets were re-verified on 2026-08-23:
+      1. **SEP-2127** (superseded SEP-1649; PR modelcontextprotocol/modelcontextprotocol#2127, still
+         OPEN, last updated 2026-08-20) has moved *again*: the `/.well-known/mcp-server-card/{name}`
+         scheme from the interim draft is gone. The current revision hosts cards at any URI with
+         `<streamable-http-url>/server-card` as the recommended location, and does domain-level
+         multi-server discovery via an **AI Catalog at `/.well-known/ai-catalog.json`** (the
+         `experimental-ext-server-card` repo owns the schema + `docs/discovery.md`).
+      2. **Ora's `mcp-server-card` check** (live `list_checks`, 2026-08-23) still probes
+         `/.well-known/mcp/server-card.json` — the path ax already emits.
+      Since Ora's probed path is load-bearing for the score and *every* draft path has churned, ax
+      keeps the Ora namespace and extends it: the **primary** server's card stays at
+      `/.well-known/mcp/server-card.json`, and every server's card also lands at
+      `/.well-known/mcp/server-card/<server-name>.json` (`<server-name>` = the mount pathname
+      slugified, e.g. `api-public-mcp` — unique, stable, and the read-back key for per-mount gating
+      persistence). "Primary": with exactly one *public* server it is picked silently — the root
+      path is probed blind, so the credential-free server is its only sensible owner (not a guess).
+      Only the ambiguous cases (several public servers, or none) are asked — in `ax init` and at
+      the build review gate (default = first public) — persisted by the root card's `serverUrl`.
+      **Known divergence + revisit trigger:** the named sub-path scheme is ax's own (neither the
+      current SEP revision nor Ora define one). When **SEP-2127 merges** (watch the PR) or **Ora's
+      `mcp-server-card`/`mcp-well-known-discovery` checks change their probed path**, revisit: likely
+      additions are `<mount>/server-card` route aliases and a `/.well-known/ai-catalog.json`-shaped
+      card listing — note ax's ARD catalog *already* lives at `/.well-known/ai-catalog.json`, so if
+      the SEP's AI-Catalog format and the ARD catalog converge, the existing entries may satisfy it
+      outright.
 - [x] Fixture + tests for each: OpenAPI-absent recommendation, JSON-LD detect/recommend, and a
       server-card emission fixture. Re-scan a deployed MCP fixture to confirm the `mcp-*` checks flip
       (the 0-point result becomes a measured win). (Unit tests per module + generate/cli wiring tests +
