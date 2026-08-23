@@ -68,6 +68,16 @@ function writeFullyAgentReadyApp(dir: string): void {
       '}\n',
     'utf8',
   );
+
+  // A wired negotiation middleware (detection is textual — the import specifier is the signal),
+  // so the markdown-negotiation checks read as addressed.
+  writeFileSync(
+    join(dir, 'middleware.ts'),
+    "import { withAx } from '@ora-ai/ax/middleware';\n" +
+      "import { axManifest } from './ax-manifest';\n" +
+      'export default withAx({ manifest: axManifest });\n',
+    'utf8',
+  );
 }
 
 let dir: string;

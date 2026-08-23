@@ -77,6 +77,12 @@ jobs:
       - name: Verify report snapshots
         run: pnpm reports:verify
 
+      # Dogfood the negotiation middleware over HTTP: `next start` on the built middleware fixture,
+      # then the dual-fetch probes (Ora's markdown-negotiation-vary semantics), the cloaking
+      # guards, and the gated/dynamic/unknown-path branches — the Edge bundle serving for real.
+      - name: Middleware dual-fetch dogfood
+        run: pnpm dogfood:middleware
+
       # Official ARD conformance tool (vendored from ards-project/ard-spec — spec/ard/README.md)
       # over every catalog the fixture builds just generated. jsonschema enables the tool's strict
       # JSON Schema layer on top of its semantic checks.

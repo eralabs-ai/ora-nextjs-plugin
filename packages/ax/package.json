@@ -11,8 +11,13 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./middleware": {
+      "types": "./dist/middleware.d.ts",
+      "import": "./dist/middleware.js"
     }
   },
+  "sideEffects": false,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
@@ -40,9 +45,18 @@
     "turndown": "^7.2.4",
     "turndown-plugin-gfm": "^1.0.2"
   },
+  "peerDependencies": {
+    "next": ">=14"
+  },
+  "peerDependenciesMeta": {
+    "next": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/node": "^20.17.12",
     "@types/turndown": "^5.0.6",
+    "next": "^15.1.0",
     "tsup": "^8.3.5",
     "typescript": "^5.7.3",
     "vitest": "^3.0.2"

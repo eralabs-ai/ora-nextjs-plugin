@@ -1,11 +1,12 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   findPagesDir,
+  listDynamicPagesRoutePrefixes,
   listPagesApiEndpoints,
   listStaticPagesRoutes,
   resolvePagesPathname,
@@ -129,5 +130,27 @@ describe('listPagesApiEndpoints', () => {
   it('returns nothing when there is no pages/api directory', () => {
     write('pages/index.tsx');
     expect(listPagesApiEndpoints(join(dir, 'pages'))).toEqual([]);
+  });
+});
+
+describe('listDynamicPagesRoutePrefixes', () => {
+  function page(relPath: string): void {
+    const abs = join(dir, 'pages', relPath);
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, 'export default () => null;', 'utf8');
+  }
+
+  it('records the static prefix of each dynamic route', () => {
+    page('blog/[slug].tsx');
+    page('docs/[...path]/index.tsx');
+    page('about.tsx');
+    expect(listDynamicPagesRoutePrefixes(join(dir, 'pages'))).toEqual(['/blog', '/docs']);
+  });
+
+  it('maps a root-level dynamic page to / and skips api/private files', () => {
+    page('[slug].tsx');
+    page('api/[transport].ts');
+    page('_app.tsx');
+    expect(listDynamicPagesRoutePrefixes(join(dir, 'pages'))).toEqual(['/']);
   });
 });

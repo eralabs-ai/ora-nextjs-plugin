@@ -92,6 +92,37 @@ export function listStaticPageRoutes(appDir: string): string[] {
   return [...routes].sort();
 }
 
+/**
+ * The static URL prefix of every dynamic page route, sorted and deduplicated:
+ * `app/blog/[slug]/page.tsx` → `/blog`, `app/[locale]/page.tsx` → `/`. The static route list
+ * refuses to guess a dynamic URL; this is the complementary honesty for consumers that answer
+ * *misses* (the negotiation middleware's wayfinding): under one of these prefixes a URL may well
+ * be a real page, so "not found" must never be claimed there. Parallel/intercepting/private
+ * segments still contribute nothing — they aren't URL-addressable at a knowable prefix.
+ */
+export function listDynamicRoutePrefixes(appDir: string): string[] {
+  const prefixes = new Set<string>();
+  for (const file of walkFiles(appDir, (name) => PAGE_FILE_RE.test(name))) {
+    const rel = relative(appDir, file.absolutePath);
+    const prefix = dynamicRoutePrefix(pathSegments(join(rel, '..')));
+    if (prefix !== undefined) prefixes.add(prefix);
+  }
+  return [...prefixes].sort();
+}
+
+/** The URL segments before the first dynamic one, or undefined when the route has none. */
+function dynamicRoutePrefix(segments: string[]): string | undefined {
+  const resolved: string[] = [];
+  for (const segment of segments) {
+    if (segment === '.' || segment === '') continue;
+    if (segment.startsWith('(') && segment.endsWith(')')) continue; // route group — no URL segment
+    if (segment.startsWith('[')) return `/${resolved.join('/')}` || '/';
+    if (/^[@_(]/.test(segment)) return undefined; // parallel/private/intercepting
+    resolved.push(segment);
+  }
+  return undefined;
+}
+
 /** An App Router route handler (`route.*`) file paired with the URL it mounts at. */
 export interface AppApiEndpoint {
   file: string;

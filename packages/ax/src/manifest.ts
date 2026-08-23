@@ -35,6 +35,12 @@ export interface ServingManifestData {
   basePath: string;
   /** Every statically addressable page route, served-path form. */
   routes: string[];
+  /**
+   * Static served-path prefixes under which *dynamic* routes live (`/blog/[slug]` → `/blog`). The
+   * middleware must never claim "not found" for a URL under one of these — whether it exists is
+   * only knowable at request time, so such misses stay the app's to answer.
+   */
+  dynamicRoutePrefixes: string[];
   /** Served route path → served markdown-twin path, for every route with a twin on disk. */
   markdownTwins: Record<string, string>;
   /** Served paths (routes and API endpoints) the gating policy marks gated — never rewrite these to markdown, never advertise them as open. */
@@ -72,6 +78,9 @@ export function buildServingManifest(options: BuildServingManifestOptions): Serv
 
   const routes = router.listPageRoutes();
   const servedRoutes = routes.map((route) => servedPath(basePath, route));
+  const dynamicRoutePrefixes = router
+    .listDynamicRoutePrefixes()
+    .map((prefix) => servedPath(basePath, prefix));
 
   // Twin files present in public/ (generated or user-authored), keyed back to the routes they
   // shadow. A stray .md with no corresponding route is served by Next but is nobody's twin.
@@ -164,6 +173,7 @@ export function buildServingManifest(options: BuildServingManifestOptions): Serv
   return {
     basePath,
     routes: servedRoutes,
+    dynamicRoutePrefixes,
     markdownTwins,
     gatedPaths: [...gatedPaths].sort(),
     artifacts,
