@@ -27,7 +27,9 @@
         ]
       }
     ],
-    "unreviewedMounts": [],
+    "unreviewedMounts": [
+      "/mcp"
+    ],
     "serverCardPath": "public/.well-known/mcp/server-card.json"
   },
   "agent404": {
