@@ -12,6 +12,7 @@ import {
 import { applyAuthMdPlan, type ApplyAuthMdResult } from './auth-md.js';
 import { AxConfigError, findExistingConfig } from './config.js';
 import { entryUrlPath } from './entries.js';
+import { type FileTreeEntry, renderFileTree } from './file-tree.js';
 import { generateCatalog, type GenerateCatalogResult } from './generate.js';
 import { runInit } from './init.js';
 import { refreshServingManifestIfPresent, writeServingManifest } from './manifest.js';
@@ -276,6 +277,8 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
       stdout('[ax] Aborted — nothing written.');
       return 1;
     }
+    // Separate the y/N answer from the output block that follows so they don't run together.
+    stdout('[ax]');
   }
 
   const result = writeCatalog(cwd, catalog, {
@@ -290,8 +293,19 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     return 1;
   }
 
-  stdout(`[ax] ✓ wrote ${result.path}`);
+  // Everything this run writes is collected into one file tree printed near the end, rather than a
+  // "✓ wrote <path>" line per artifact. `writeNotes` holds each artifact's *non-size* annotation
+  // keyed by its cwd-relative path (the same key `sizes` uses), so the size measured later and the
+  // note collected here join by path when the tree is built.
+  const writeNotes = new Map<string, string>();
   const entryCount = catalog.entries.length;
+  writeNotes.set(
+    relative(cwd, result.path),
+    `${entryCount} ${entryCount === 1 ? 'entry' : 'entries'}`,
+  );
+
+  // The catalog headline stays a standalone line before the tree: entry and warning counts are the
+  // build's top-level result, not a per-file detail.
   const warningSuffix =
     warnings.length > 0 ? `, ${warnings.length} warning${warnings.length === 1 ? '' : 's'}` : '';
   stdout(
@@ -320,19 +334,27 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     serverCardPath = cardResult.rootPath;
     const primary = serverCardPlan.cards.find((emission) => emission.primary);
     if (primary !== undefined) writtenCards.push({ emission: primary, path: cardResult.rootPath });
-    stdout(
-      `[ax] ✓ wrote ${cardResult.rootPath} (MCP server card` +
-        (serverCardPlan.multi && primary !== undefined
-          ? ` — primary: ${servedPath(generated.report.basePath, primary.mountPathname)})`
-          : ')'),
-    );
+    // The card writes go into the file tree; record only their notes here (primary path for the
+    // root card of a multi-server host, "requires auth" for any gated card).
+    const rootNoteParts: string[] = [];
+    if (serverCardPlan.multi && primary !== undefined) {
+      rootNoteParts.push(
+        `primary: ${servedPath(generated.report.basePath, primary.mountPathname)}`,
+      );
+    }
+    if (primary?.card.authentication !== undefined) rootNoteParts.push('requires auth');
+    if (rootNoteParts.length > 0) {
+      writeNotes.set(relative(cwd, cardResult.rootPath), rootNoteParts.join(' · '));
+    }
     cardResult.named.forEach((named, index) => {
       const emission = serverCardPlan.cards[index];
       if (emission !== undefined) {
         namedServerCards.push({ mount: emission.mountPathname, path: named.path });
         writtenCards.push({ emission, path: named.path });
+        if (emission.card.authentication !== undefined) {
+          writeNotes.set(relative(cwd, named.path), 'requires auth');
+        }
       }
-      stdout(`[ax] ✓ wrote ${named.path} (MCP server card)`);
     });
     for (const removed of cardResult.removed) {
       stdout(`[ax] ✓ removed ${relative(cwd, removed)} (stale MCP server card)`);
@@ -372,18 +394,6 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     sizes.push(measureContent(generated.authMdPlan.content, 'auth.md', authMdResult.written));
   }
   generated.report.sizes = sizes;
-  if (sizes.length > 0) {
-    stdout('[ax] Generated artifact sizes (estimated tokens = chars ÷ 4):');
-    for (const size of sizes) stdout(`[ax]   • ${size.path} — ${formatArtifactSize(size)}`);
-    for (const size of sizes) {
-      if (exceedsTruncationLimit(size.chars)) {
-        stdout(
-          `[ax] ⚠ ${size.path} is ${size.chars.toLocaleString()} chars (${formatTokens(size.tokens)}) — ` +
-            'Claude Code truncates responses over 100K chars.',
-        );
-      }
-    }
-  }
 
   // Recommendations print to the terminal only when no report is being written — a report run
   // carries every recommendation in the file the handoff line points at, so repeating the whole
@@ -400,7 +410,7 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     stdout(`[ax] ⚠ ${message}`),
   );
   if (manifestResult !== undefined) {
-    stdout(`[ax] ✓ refreshed ${manifestResult.path} (serving manifest)`);
+    writeNotes.set(relative(cwd, manifestResult.path), 'serving manifest (refreshed)');
   }
 
   let reportPath: string | undefined;
@@ -410,7 +420,39 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     if (serverCardPath !== undefined) generated.report.mcp.serverCardPath = serverCardPath;
     if (namedServerCards.length > 0) generated.report.mcp.serverCards = namedServerCards;
     reportPath = writeReport(cwd, generated.report, reportTarget);
-    stdout(`[ax] ✓ wrote ${reportPath} (machine-readable build report)`);
+    writeNotes.set(relative(cwd, reportPath), 'machine-readable build report');
+  }
+
+  // One consolidated file tree of everything this run wrote, in place of a "✓ wrote" line per
+  // artifact. Each measured artifact contributes a `<size>` annotation joined to any note collected
+  // for its path (entry count, primary/auth, "refreshed"…); note-only artifacts with no measured
+  // size (the manifest refresh, the report) are appended after.
+  const treeEntries: FileTreeEntry[] = [];
+  const measuredPaths = new Set<string>();
+  for (const size of sizes) {
+    const note = writeNotes.get(size.path);
+    const annotation =
+      note !== undefined ? `${formatArtifactSize(size)} · ${note}` : formatArtifactSize(size);
+    treeEntries.push({ path: size.path, annotation });
+    measuredPaths.add(size.path);
+  }
+  for (const [path, note] of writeNotes) {
+    if (!measuredPaths.has(path)) treeEntries.push({ path, annotation: note });
+  }
+  if (treeEntries.length > 0) {
+    stdout('[ax] ✓ wrote (sizes show estimated tokens, chars ÷ 4):');
+    for (const line of renderFileTree(treeEntries)) stdout(`[ax]   ${line}`.trimEnd());
+  }
+
+  // Oversize warnings print after the tree so they don't break its layout: an artifact an agent is
+  // meant to read whole is useless past the truncation limit, so this stays a loud, separate line.
+  for (const size of sizes) {
+    if (exceedsTruncationLimit(size.chars)) {
+      stdout(
+        `[ax] ⚠ ${size.path} is ${size.chars.toLocaleString()} chars (${formatTokens(size.tokens)}) — ` +
+          'Claude Code truncates responses over 100K chars.',
+      );
+    }
   }
 
   printAgentHandoff(generated.report, reportPath, stdout);
@@ -770,13 +812,9 @@ function reportMarkdownTwinOutcome(
   twins.deleted = twinResult.deleted;
   if (authMdResult.written === undefined) delete twins.authMd;
 
-  const wrote: string[] = [];
-  if (twinResult.written.length > 0) {
-    const count = twinResult.written.length;
-    wrote.push(`${count} markdown twin${count === 1 ? '' : 's'}`);
-  }
-  if (authMdResult.written !== undefined) wrote.push(`${authMdResult.written} (auth guide)`);
-  if (wrote.length > 0) stdout(`[ax] ✓ wrote ${wrote.join(' + ')}`);
+  // The twins and auth guide written this run are shown (with their sizes) in the consolidated file
+  // tree the caller prints, so no "✓ wrote" summary line here. Removals and the skipped-route
+  // warning stay: they aren't files that landed on disk, so the tree has no row for them.
   if (authMdResult.deleted !== undefined) {
     stdout(`[ax] ✓ removed ${authMdResult.deleted} (no gated surfaces remain)`);
   }

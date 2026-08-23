@@ -290,6 +290,9 @@ describe('runInit gating respects basePath', () => {
     );
     expect(card.serverUrl).toBe('https://acme.com/app/mcp');
     expect(card.authentication).toEqual({ required: true });
+    // A single card is a one-liner, not a tree — the "wrote the MCP server cards" header is
+    // reserved for multi-card runs (see the multi-mount describe block below).
+    expect(stdout.some((l) => l.includes('✓ wrote the MCP server cards:'))).toBe(false);
   });
 });
 
@@ -367,6 +370,13 @@ describe('runInit multi-mount primary question', () => {
     const gated = JSON.parse(readFileSync(join(namedDir, 'api-mcp.json'), 'utf8'));
     expect(gated.authentication).toEqual({ required: true });
     expect(existsSync(join(namedDir, 'api-public-mcp.json'))).toBe(true);
+
+    // Multiple cards land in one run, so the printed output is a "wrote the MCP server cards"
+    // header followed by a file tree — not a one-liner per card.
+    expect(stdout.some((l) => l.includes('✓ wrote the MCP server cards:'))).toBe(true);
+    expect(stdout.some((l) => l.includes('server-card.json'))).toBe(true);
+    expect(stdout.some((l) => l.includes('primary: /api/public/mcp'))).toBe(true);
+    expect(stdout.some((l) => l.includes('requires auth'))).toBe(true);
   });
 
   it('asks (server rows only, first public default) when several servers are public', async () => {

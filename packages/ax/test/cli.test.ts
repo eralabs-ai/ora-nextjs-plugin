@@ -345,7 +345,9 @@ describe('runCli', () => {
     const code = await runCli(['--report'], { ...io, cwd: dir });
 
     expect(code).toBe(0);
-    expect(stdout.some((l) => l.includes('Generated artifact sizes'))).toBe(true);
+    expect(
+      stdout.some((l) => l.includes('✓ wrote (sizes show estimated tokens, chars ÷ 4):')),
+    ).toBe(true);
     expect(stdout.some((l) => /ai-catalog\.json — \d+ B \(~\d+ tokens\)/.test(l))).toBe(true);
 
     const report = JSON.parse(readFileSync(join(dir, REPORT_OUTPUT_PATH), 'utf8'));

@@ -4,6 +4,7 @@ import { join, relative, resolve } from 'node:path';
 
 import { findExistingConfig } from './config.js';
 import { detectMcpMounts, type McpMount } from './detect-mcp.js';
+import { type FileTreeEntry, renderFileTree } from './file-tree.js';
 import { generateCatalog } from './generate.js';
 import {
   configFileName,
@@ -305,8 +306,9 @@ function printFindings(
  * Selected means **public**: pressing Enter with everything selected says "none require logging
  * in", and an unselected server is published as *requiring auth* (recorded in its server card),
  * never advertised as open. A `withMcpAuth`-wrapped mount starts deselected — its own code already
- * demands auth. The built-in auth/webhook floor always applies on top. Returns the pathnames of
- * the gated mounts.
+ * demands auth, which the tree's per-row "auth detected" annotation already says, so the question
+ * itself stays short. The built-in auth/webhook floor always applies on top. Returns the pathnames
+ * of the gated mounts.
  */
 async function askGating(
   prompter: Prompter,
@@ -319,23 +321,20 @@ async function askGating(
   const authDetected = new Map(
     findings.mcpMounts.map((mount) => [mount.pathname, mount.auth !== undefined]),
   );
-  const rows: MultiSelectRow[] = buildRouteTreeLines(findingsTreeInput(findings)).map((line) =>
-    line.mountPathname !== undefined
-      ? {
-          value: line.mountPathname,
-          label: line.text,
-          selected: authDetected.get(line.mountPathname) !== true,
-        }
-      : { text: line.text },
-  );
+  const rows: MultiSelectRow[] = [
+    { text: '' },
+    ...buildRouteTreeLines(findingsTreeInput(findings)).map((line): MultiSelectRow =>
+      line.mountPathname !== undefined
+        ? {
+            value: line.mountPathname,
+            label: line.text,
+            selected: authDetected.get(line.mountPathname) !== true,
+          }
+        : { text: line.text },
+    ),
+  ];
 
-  const preDeselected = findings.mcpMounts.filter((mount) => mount.auth !== undefined).length;
-  const question =
-    "Select only the PUBLIC MCP servers (those that don't require being logged in) — press " +
-    "Enter if they're all public:" +
-    (preDeselected > 0
-      ? ` (ax pre-deselected ${preDeselected} whose code already demands auth.)`
-      : '');
+  const question = 'Select only the PUBLIC MCP servers — press Enter to save:';
   const publicValues = new Set(await prompter.multiSelect(question, rows));
 
   const gated = new Set(
@@ -432,19 +431,37 @@ function writeGatingCards(
   const result = writeServerCards(cwd, plan);
 
   const primary = plan.cards.find((emission) => emission.primary);
-  stdout(
-    `[ax] ✓ wrote ${relative(cwd, result.rootPath)} (MCP server card` +
-      (plan.multi && primary !== undefined
-        ? ` — primary: ${servedPath(findings.basePath, primary.mountPathname)})`
-        : `${primary?.card.authentication !== undefined ? ' — marked as requiring auth' : ''})`),
-  );
-  result.named.forEach((named, index) => {
-    const emission = plan.cards[index];
+  if (plan.multi) {
+    // Several cards land at once (the root card plus a per-server named slot each), so a file tree
+    // shows the shape — which is primary, which require auth — far more legibly than one "✓ wrote"
+    // line per card. A single-card write skips the tree below: a tree of one file is just noise.
+    const rootParts: string[] = [];
+    if (primary !== undefined) {
+      rootParts.push(`primary: ${servedPath(findings.basePath, primary.mountPathname)}`);
+    }
+    if (primary?.card.authentication !== undefined) rootParts.push('requires auth');
+    const treeEntries: FileTreeEntry[] = [
+      {
+        path: relative(cwd, result.rootPath),
+        ...(rootParts.length > 0 ? { annotation: rootParts.join(' · ') } : {}),
+      },
+      ...result.named.map((named, index) => {
+        const emission = plan.cards[index];
+        return {
+          path: relative(cwd, named.path),
+          ...(emission?.card.authentication !== undefined ? { annotation: 'requires auth' } : {}),
+        };
+      }),
+    ];
+    stdout('[ax] ✓ wrote the MCP server cards:');
+    for (const line of renderFileTree(treeEntries)) stdout(`[ax]   ${line}`.trimEnd());
+  } else {
     stdout(
-      `[ax] ✓ wrote ${relative(cwd, named.path)} (MCP server card` +
-        `${emission?.card.authentication !== undefined ? ' — marked as requiring auth' : ''})`,
+      `[ax] ✓ wrote ${relative(cwd, result.rootPath)} (MCP server card` +
+        `${primary?.card.authentication !== undefined ? ' — marked as requiring auth' : ''})`,
     );
-  });
+  }
+  stdout('[ax]');
   stdout(
     `[ax]   Commit ${plan.multi ? 'them: they record' : 'it: it records'} your gating ` +
       `${plan.multi ? 'and primary decisions' : 'decision'}, so builds never re-ask.`,
@@ -463,9 +480,9 @@ type SetupOptionValue =
 /**
  * The seven setup choices, each pre-selected — replaces what used to be seven sequential y/n
  * confirms. One question reads faster than seven, and a list makes the *shape* of what's on offer
- * visible at a glance instead of trickling out one item at a time. Every label states the "why" in
- * one clause so a user who's never read the README still knows what they'd be giving up by
- * deselecting it.
+ * visible at a glance instead of trickling out one item at a time. Labels stay short; a clause is
+ * added only where the name alone doesn't say what the user would be giving up by deselecting it,
+ * and that clause states the value to the user/agents, not the mechanism.
  */
 const SETUP_OPTIONS: Array<{ value: SetupOptionValue; label: string; selected: true }> = [
   {
@@ -487,26 +504,23 @@ const SETUP_OPTIONS: Array<{ value: SetupOptionValue; label: string; selected: t
   },
   {
     value: 'agent404',
-    label:
-      'Scaffold an agent-aware 404 page — steers lost agents back to your catalog instead of a dead end',
+    label: 'Scaffold an agent-aware 404 page — steers lost agents back',
     selected: true,
   },
   {
     value: 'markdownTwins',
-    label:
-      'Markdown twins on every build (/docs → /docs.md) — clean markdown agents parse far better than HTML',
+    label: 'Markdown twins on every build (/docs → /docs.md)',
     selected: true,
   },
   {
     value: 'report',
-    label:
-      'Write .ora/report.json — the handoff report a coding agent reads to close your remaining gaps',
+    label: 'Write .ora/report.json',
     selected: true,
   },
   {
     value: 'manifest',
     label:
-      'Wire "prebuild": "ax manifest" — keeps the serving-manifest middleware imports in sync each build',
+      'Wire "prebuild": "ax manifest" — so your middleware always serves agents the current surface',
     selected: true,
   },
 ];
@@ -539,6 +553,7 @@ async function collectInteractive(
 
   // One line: the question names the prefill source inline, so "is this right?" is an informed
   // check rather than a mystery string. The value itself is prefilled as editable input.
+  stdout('[ax]');
   const siteUrlQuestion =
     siteUrlDefault.value !== undefined && siteUrlDefault.source !== undefined
       ? `Your public production site URL (prefilled from ${siteUrlDefault.source} — press Enter to approve, or edit)`
@@ -557,11 +572,9 @@ async function collectInteractive(
   // present to deselect anything they don't want. Same yes-when-asked / no-when-silent policy the
   // README documents — just collapsed from seven yes/no questions into one list, since none of these
   // choices depend on another's answer.
+  stdout('[ax]');
   const setupValues = new Set(
-    await prompter.multiSelect(
-      "What should ax set up? All are recommended — deselect anything you don't want, then press Enter:",
-      SETUP_OPTIONS,
-    ),
+    await prompter.multiSelect('What should ax set up? (All are recommended)', SETUP_OPTIONS),
   );
   const setupSelected = (value: SetupOptionValue): boolean => setupValues.has(value);
 
@@ -749,6 +762,7 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
   // On an interactive run the gating question renders the route tree itself (checkbox on the MCP
   // server node), so the findings summary skips it rather than showing the same tree twice.
   printFindings(findings, stdout, { tree: args.yes || !interactive });
+  stdout('[ax]');
 
   if (!args.yes && !interactive) {
     stderr(
@@ -819,6 +833,7 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
 
     // Offer the first build so the report shows up immediately. Default no — spawning a full
     // `next build` is heavy and should never happen without an explicit yes.
+    stdout('[ax]');
     const wantBuild = await prompter.confirm(
       'Run the first build now so you can see the report?',
       false,

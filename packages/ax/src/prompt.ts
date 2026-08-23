@@ -151,6 +151,37 @@ export async function createReadlinePrompter(): Promise<Prompter & { close(): vo
 }
 
 /**
+ * The terminal width to wrap the redraw region against, re-read on every draw (not cached) so a
+ * resize mid-prompt is honored on the very next keystroke instead of corrupting the layout.
+ * `output.columns` is `undefined` on a stream that isn't actually a TTY column-aware pipe; 80 is
+ * the same conservative fallback `process.stdout.columns` callers elsewhere assume.
+ */
+function terminalColumns(output: NodeJS.WriteStream): number {
+  return output.columns ?? 80;
+}
+
+/**
+ * Truncates a rendered row to fit one physical terminal row. These rows carry no ANSI escapes, so
+ * `.length` is exactly the visible width the terminal will lay out — a row at or past `columns`
+ * wraps onto a second physical row that the redraw below doesn't know about. Truncating here is the
+ * first of two defenses (paired with the physical-row accounting in `draw`): it keeps every logical
+ * row to exactly one physical row, so the cursor-up arithmetic never has to reconstruct a wrap.
+ */
+function truncateToWidth(line: string, columns: number): string {
+  return line.length > columns - 1 ? line.slice(0, Math.max(0, columns - 1)) : line;
+}
+
+/**
+ * How many physical terminal rows a (already-visible-width) line occupies. Kept as a second,
+ * independent defense alongside {@link truncateToWidth}: even if a line ever slipped through
+ * untruncated (a stale `columns` read, an edge-case width), the cursor-up math below still moves by
+ * the true number of physical rows instead of assuming one row per line.
+ */
+function physicalRowCount(line: string, columns: number): number {
+  return Math.max(1, Math.ceil(line.length / columns));
+}
+
+/**
  * The raw-mode selector behind {@link Prompter.multiSelect}: a cursor (`❯`) sits on a choice row,
  * ↑/↓ (or j/k, tab) move it between the choice rows only — display rows are inert layout — space
  * toggles, Enter accepts. The question is printed once above the redraw region (a long question
@@ -187,12 +218,20 @@ function interactiveMultiSelect(
   };
 
   output.write(`${question}\n`);
+  // `regionHeight` is tracked in *physical* terminal rows, not logical lines: a line as long as (or
+  // longer than) the terminal width wraps onto a second physical row that the naive "one row per
+  // line" count misses, so the next draw's cursor-up would land above the true region top — inside
+  // whatever was printed before the prompt — and `\x1b[2K` + the rewrites would clobber it, with
+  // stray physical rows left behind to corrupt whatever prints after. Truncating every line to the
+  // terminal width (so it can never wrap) and re-deriving `columns` on every draw (so a resize
+  // mid-prompt can't desync the two) are both applied so the arithmetic stays exact.
   let regionHeight = 0;
   const draw = (): void => {
-    const lines = renderRegion();
+    const columns = terminalColumns(output);
+    const lines = renderRegion().map((line) => truncateToWidth(line, columns));
     if (regionHeight > 0) output.write(`\x1b[${regionHeight}A`);
     for (const line of lines) output.write(`\x1b[2K${line}\n`);
-    regionHeight = lines.length;
+    regionHeight = lines.reduce((sum, line) => sum + physicalRowCount(line, columns), 0);
   };
 
   rl.pause();
@@ -270,12 +309,19 @@ function interactiveSelect(
   };
 
   output.write(`${question}\n`);
+  // `regionHeight` is tracked in *physical* terminal rows, not logical lines — see the identical
+  // reasoning in `interactiveMultiSelect`'s `draw`: a line as long as (or longer than) the terminal
+  // width would otherwise wrap onto a second physical row the cursor-up math doesn't know about,
+  // corrupting whatever was printed before (and after) the prompt. Truncating every line to the
+  // terminal width plus re-deriving `columns` on every draw are both applied so a resize mid-prompt
+  // can't desync the arithmetic either.
   let regionHeight = 0;
   const draw = (): void => {
-    const lines = renderRegion();
+    const columns = terminalColumns(output);
+    const lines = renderRegion().map((line) => truncateToWidth(line, columns));
     if (regionHeight > 0) output.write(`\x1b[${regionHeight}A`);
     for (const line of lines) output.write(`\x1b[2K${line}\n`);
-    regionHeight = lines.length;
+    regionHeight = lines.reduce((sum, line) => sum + physicalRowCount(line, columns), 0);
   };
 
   rl.pause();
