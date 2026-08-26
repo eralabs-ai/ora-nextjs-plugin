@@ -531,25 +531,31 @@ async function askAuthEndpoints(
         if (tokenEndpoint !== undefined) oauth.tokenEndpoint = tokenEndpoint;
       }
     }
-    // Prefilled with the site origin so the user only types the path. An unedited prefill (or a
-    // cleared line) means skip — a bare homepage is never a docs URL someone chose on purpose.
-    const docsPrefill = `${siteUrl}/`;
-    const docsAnswer = await askUrl(
-      `Docs URL${where} — the page where a human gets access; agents send their user there when ` +
-        'they hit the auth wall (add the path, or Enter to skip)',
-      docsPrefill,
-    );
-    const docsUrl = docsAnswer === docsPrefill || docsAnswer === siteUrl ? undefined : docsAnswer;
+    // The docs question exists only for api_key — the one scheme where a human must fetch a
+    // credential from somewhere. OAuth is self-service (the agent's client runs the sign-in
+    // flow), so there is no page to ask about. Prefilled with the site origin so the user only
+    // types the path; submitting it unchanged (or clearing it) skips, and the wording says so —
+    // the prompt never pretends an unedited prefill would be saved.
+    let docsUrl: string | undefined;
+    if (scheme === 'api_key') {
+      const docsPrefill = `${siteUrl}/`;
+      const docsAnswer = await askUrl(
+        `Docs URL${where} — the page where a human gets the credential; agents send their user ` +
+          'there (complete the path; submitting it unchanged skips)',
+        docsPrefill,
+      );
+      docsUrl = docsAnswer === docsPrefill || docsAnswer === siteUrl ? undefined : docsAnswer;
+    }
 
     const hasEndpoints = Object.keys(oauth).length > 0;
     // "api_key" is a declaration by itself; "oauth2" becomes one once an endpoint backs it — or
     // when the source tree itself does (a wired protected-resource route / committed metadata):
     // agents then discover the endpoints at runtime, so a bare "oauth2" status is accurate and
-    // strictly better than "unknown". Without either kind of backing, an endpoint-less OAuth
-    // answer falls back to the honest "unknown" — and with no docs link either, to nothing.
+    // strictly better than "unknown". An OAuth answer with neither kind of backing declares
+    // nothing at all.
     const oauthBacked = hasEndpoints || oauthEvidence;
-    const status = scheme === 'api_key' ? 'api_key' : oauthBacked ? 'oauth2' : 'unknown';
-    if (scheme === 'oauth2' && !oauthBacked && docsUrl === undefined) continue;
+    const status = scheme === 'api_key' ? 'api_key' : 'oauth2';
+    if (scheme === 'oauth2' && !oauthBacked) continue;
 
     overrides.push({
       identifier: mcpMountIdentifier(siteUrl, mount.pathname, findings.mcpMounts.length > 1),

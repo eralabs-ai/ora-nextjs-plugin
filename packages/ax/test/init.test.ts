@@ -859,12 +859,7 @@ describe('auth-endpoint questions (declared auth for gated MCP servers)', () => 
     addGatedMcpMount(dir);
 
     const prompter = new ScriptedPrompter({
-      text: [
-        'https://acme.com',
-        'https://auth.acme.com/authorize',
-        'https://auth.acme.com/token',
-        'https://acme.com/docs/access',
-      ],
+      text: ['https://acme.com', 'https://auth.acme.com/authorize', 'https://auth.acme.com/token'],
       multiSelect: [[], []],
       // No OAuth evidence → the default is api_key; choosing OAuth is what asks the endpoints.
       select: ['oauth2'],
@@ -878,7 +873,8 @@ describe('auth-endpoint questions (declared auth for gated MCP servers)', () => 
     expect(source).toContain('identifier: "urn:air:acme.com:mcp-server"');
     expect(source).toContain('authorizationEndpoint: "https://auth.acme.com/authorize"');
     expect(source).toContain('tokenEndpoint: "https://auth.acme.com/token"');
-    expect(source).toContain('docsUrl: "https://acme.com/docs/access"');
+    // No docs question for OAuth — it is self-service, there is no credential page to point at.
+    expect(source).not.toContain('docsUrl');
     // Round-trip: the written config passes the real loader/schema gate and carries the auth.
     const { config } = await loadAxConfig(dir);
     expect(config.entries[0]?.auth).toEqual({
@@ -887,7 +883,6 @@ describe('auth-endpoint questions (declared auth for gated MCP servers)', () => 
         authorizationEndpoint: 'https://auth.acme.com/authorize',
         tokenEndpoint: 'https://auth.acme.com/token',
       },
-      docsUrl: 'https://acme.com/docs/access',
     });
   });
 
@@ -911,14 +906,14 @@ describe('auth-endpoint questions (declared auth for gated MCP servers)', () => 
         return super.text(question, defaultValue);
       }
     })({
-      text: ['https://acme.com', 'https://acme.com/docs/access'],
+      text: ['https://acme.com'],
       multiSelect: [[], []],
       confirm: [false],
     });
 
     expect(await runInit([], { ...io(), prompter })).toBe(0);
-    // siteUrl and the docs URL — the endpoint questions never ran.
-    expect(textQuestions.some((q) => q.includes('endpoint'))).toBe(false);
+    // Only the siteUrl question ran — OAuth with a declared server has nothing left to ask.
+    expect(textQuestions).toHaveLength(1);
     expect(
       stdout.some(
         (l) =>
@@ -927,10 +922,7 @@ describe('auth-endpoint questions (declared auth for gated MCP servers)', () => 
       ),
     ).toBe(true);
     const { config } = await loadAxConfig(dir);
-    expect(config.entries[0]?.auth).toEqual({
-      status: 'oauth2',
-      docsUrl: 'https://acme.com/docs/access',
-    });
+    expect(config.entries[0]?.auth).toEqual({ status: 'oauth2' });
   });
 
   it('adopts the endpoints a committed RFC 8414 metadata document already declares (never asked)', async () => {
@@ -970,27 +962,23 @@ describe('auth-endpoint questions (declared auth for gated MCP servers)', () => 
     expect(stdout.some((l) => l.includes('Using the OAuth endpoints your public'))).toBe(true);
   });
 
-  it('a docs URL alone keeps the honest "unknown" status; an Enter-through declares api_key', async () => {
+  it('an unbacked OAuth answer declares nothing; an Enter-through declares api_key', async () => {
     writeBareApp(dir);
     addGatedMcpMount(dir);
 
+    // No OAuth evidence, OAuth chosen, both endpoints skipped → nothing to declare, no entries.
     const prompter = new ScriptedPrompter({
-      text: ['https://acme.com', '', '', 'https://acme.com/docs/access'],
+      text: ['https://acme.com', '', ''],
       multiSelect: [[], []],
-      // No OAuth evidence in this fixture, so the scheme default is "skip" — choose OAuth actively.
       select: ['oauth2'],
       confirm: [false],
     });
     expect(await runInit([], { ...io(), prompter })).toBe(0);
-    const { config } = await loadAxConfig(dir);
-    expect(config.entries[0]?.auth).toEqual({
-      status: 'unknown',
-      docsUrl: 'https://acme.com/docs/access',
-    });
+    expect(readFileSync(join(dir, 'ax.config.ts'), 'utf8')).not.toContain('entries:');
 
     // Fresh project, pure Enter-through: with no OAuth evidence the scheme defaults to api_key —
     // the declaration nearly every gated surface can truthfully make — so accepting every default
-    // declares it (docs URL skipped). Choosing "skip" is the explicit way to write nothing.
+    // declares it (the docs prefill, submitted unchanged, skips the docsUrl).
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
     writeBareApp(dir);
