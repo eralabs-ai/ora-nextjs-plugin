@@ -54,7 +54,10 @@ way — become discoverable to agents, generating an ai-catalog from what the ap
 - MCP servers configured the Next.js way (`mcp-handler`) → `application/mcp-server-card+json`.
 - A static `public/openapi.json` → `application/vnd.oai.openapi+json`.
 - A configurable way for the developer to declare where their **docs** and **skills** live (URLs in
-  `ax.config`) → `text/html` / `application/ai-skill+md` entries.
+  `ax.config`) → `text/html` / `application/ai-skill+md` entries. (**Superseded, see Phase 11:**
+  docs now also come from `ax init`-approved route sections, tagged `ax:docs`; skills gained an
+  opt-in publish pipeline; the legacy `application/ai-skill+md` type is superseded by the spec's
+  `application/agent-skills+md`/`+json`.)
 - **`llms.txt`** served the Next.js way — reference an existing one (a route handler at
   `app/llms.txt/route.ts`, or a static `public/llms.txt`), and scaffold a starter route handler when
   absent → `text/markdown`. (Idiomatic Next.js pattern; cheap.)
@@ -108,6 +111,12 @@ permissive schema):
 | `application/ai-skill+md` | Agent skills, often many, from a GitHub repo | a skills repo the org publishes |
 | `text/markdown` | `llms.txt` | served `llms.txt` |
 | `text/html` | docs pointers: developer portal, API docs, pricing, rate limits, auth docs | ordinary pages/files |
+
+(`application/ai-skill+md` is what Ora's crawler observed in the wild as of 2026-07-16 — kept here
+verbatim as historical ground truth; it lives on as an open, still-valid entry type a developer can
+hand-declare (see the `config-overrides` fixture), but per Phase 11 it is legacy. What the plugin
+itself writes going forward is the spec's own `application/agent-skills+md` (external skills-repo
+entries) and `application/agent-skills+json` (the discovery index it can publish and generate).)
 
 **Correction (2026-07-19, from the ARD spec §4.2):** most of what this section originally called
 "Ora extension fields" are **first-class ARD entry fields**: `capabilities`,
@@ -473,7 +482,12 @@ already rewards. Zero-config, in rough priority order:
       developer **declares in `ax.config`**. Config-driven, not guessed — the developer knows
       where their docs and skills live; the plugin doesn't spider for them. (Already covered by the
       generic `entries` override mechanism from 2.1 — see the `config-overrides` fixture, which
-      already declares exactly this shape. No new config surface needed.)
+      already declares exactly this shape. No new config surface needed.) **Superseded (see Phase
+      11, 2026-08-26):** raw config URLs are no longer the only source — docs entries also come
+      from route sections `ax init` detected and the developer approved (tagged `ax:docs`, never
+      build-guessed), and skills gained a real `publishSkills` build pipeline (copy + discovery
+      index) alongside the still-supported hand-declared external-repo pointer, now typed
+      `application/agent-skills+md`.
 - [x] Reference an existing **`llms.txt`** served the Next.js way — a route handler at
       `app/llms.txt/route.ts` (often `dynamic = 'force-static'`) or a static `public/llms.txt` →
       `text/markdown`. Scaffold a starter route handler when absent (v1; cheap, idiomatic).
@@ -1552,6 +1566,96 @@ the existing deploy steps.
 
 ---
 
+## Phase 11 — Docs & skills publishing (added 2026-08-26)
+
+Goal: close the gap Phase 2.2 left open (open question #15) between "the developer declares a docs
+or skills URL by hand" and what the top-ranked Ora catalogs actually show — real docs sections and a
+real, checkable skills surface. The posture stays **detect-and-reference, never detect-and-guess**:
+`ax` still never decides on its own that a route is documentation or that a directory of skills
+should go public — a human (via `ax init`) or a hand-written config entry is the only way either
+surface is asserted.
+
+**Docs — confirmed, not guessed:**
+
+- [x] `src/docs-candidates.ts`: groups the router's static page routes by first path segment and
+      flags the segments that read as documentation (`docs`, `guides`, `help`, `api-reference`,
+      `reference`, `documentation`) — display-only, never imported by the build (`generate.ts`).
+- [x] `ax init` shows the flagged sections pre-selected in a multi-select; each one the developer
+      approves becomes a `text/html` `entries` override tagged `ax:docs` — the one signal the build
+      trusts to mean "this route is documentation" (never inferred from a route path at build time).
+- [x] An optional external docs URL (a docs site hosted elsewhere) is collected the same way and
+      appended as another `ax:docs`-tagged `text/html` entry.
+- [x] Report gained an `artifacts.docs` presence flag and an `ora-checks.ts` mapping
+      (`docs` → `public-api-docs`) — addressed only when an `ax:docs` entry exists.
+
+**Skills — detect-and-reference plus an opt-in publish pipeline:**
+
+- [x] New config surface: `publishSkills?: boolean | string[]` (default `false`).
+      (`src/config-schema.ts`.) `true` auto-discovers every `skills/<name>/SKILL.md` one level deep
+      at the project root; a `string[]` names explicit root-relative directories instead — the only
+      way a `.claude/skills/` skill is published, and how `ax init` persists a subset selection.
+      Auto-discovery deliberately never reaches into `.claude/skills/` on its own: that directory is
+      for local agent sessions, not necessarily content meant for public discovery.
+- [x] `src/detect-skills.ts` (scan + reference) and `src/publish-skills.ts` (pure planning): scans
+      `skills/` and `.claude/skills/` for candidates, resolves the selected set, and — pure, no
+      writes — plans exactly what a build should create, update, leave unchanged, or refuse to
+      overwrite. Hand-edit detection reads the *previously published index itself* as the record
+      (`src/skills-index-record.ts`, the same idiom `server-card-record.ts` uses for MCP cards) —
+      no sidecar state file, so the persisted record and the served artifact can never drift apart.
+- [x] Applying the plan (`write.ts` `applySkillsPublishPlan`) copies each selected `SKILL.md` to
+      `public/.well-known/agent-skills/<name>/SKILL.md` and writes
+      `/.well-known/agent-skills/index.json` — an Agent Skills discovery spec v0.2.0 document
+      (`$schema https://schemas.agentskills.io/discovery/0.2.0/schema.json`,
+      `skills: [{ name, type: "skill-md", description, url, digest }]`, `digest` a `sha256:` hash of
+      the served content). Regenerated every build; a name no longer selected has its published dir
+      removed as stale; a published copy whose on-disk digest no longer matches the record is a
+      human edit and is never overwritten (warned; the index still reports that copy's *actual*
+      served digest rather than lying about it). A pre-existing served index `ax` didn't write is
+      referenced, never touched or regenerated. Like the catalog, only `index.json` follows
+      `emit: 'route'` — the `SKILL.md` copies are always static files under `public/`, since they're
+      plain assets an agent fetches by URL, not something a route needs to compute.
+- [x] When repo skills exist but nothing serves them, the build recommends turning `publishSkills`
+      on rather than acting unbidden. Once something serves an index, the catalog gains an
+      `application/agent-skills+json` entry pointing at it; `ora-checks.ts` maps
+      `agent-skills-index` → `agent-skills-index-v2` (addressed whenever an index is served, with no
+      `not-applicable` rung — a site with no skills simply has this actionable, matching Ora's own
+      "this is a scored surface" framing).
+- [x] Report gained a `skillsPublish` block (`written` / `removed` / `skippedHandEdited`) alongside
+      the existing `artifacts.agentSkills` presence flag.
+- [x] `scaffoldLlmsTxt`'s starter gained a **Docs** section (linking `ax:docs` entries) and an
+      **Agent skills** line under **Machine-readable resources** (linking a served skills index) —
+      `src/detect-llms-txt.ts`. Docs links come from config directly (never the merged catalog):
+      like everywhere else, docs are a declaration, not something to re-derive.
+- [x] `ax init` question order (see `collectDocsAndSkills` in `src/init.ts`): after the site URL is
+      confirmed and before the generic setup checklist — detected docs sections (pre-selected) →
+      external docs URL (blank skips) → skills to publish (repo pre-selected, `.claude/skills/`
+      offered unchecked) → external skills-repo URL (blank skips), each becoming a
+      `text/html`/`ax:docs` or `application/agent-skills+md` entry, or the resolved `publishSkills`
+      value. `--yes` gets no docs entries at all (guessing "is this route documentation" without a
+      human is exactly the guess `ax` refuses to make) but does set `publishSkills: true` when repo
+      skills exist (never `.claude/skills/`, which needs a deliberate choice the headless path can't
+      make).
+
+**Media-type migration:** the taxonomy observed from Ora's index (2026-07-16) used
+`application/ai-skill+md`; the AI Catalog spec's own Known Artifact Types section lists
+`application/agent-skills+json`/`+md`/`+zip`/`+gzip`. Everything this phase writes uses the spec's
+types (`+json` for the discovery index, `+md` for an external skills-repo pointer); the older type
+still validates (an open string, never a closed enum) and is preserved as-is in the pre-existing
+`config-overrides` fixture, but is legacy going forward.
+
+**Fixtures:** `fixtures/agent-skills/` (`skills.golden/` snapshots of published `SKILL.md` copies +
+`index.json`, mirroring the `twins.golden/` idiom); `markdown-twins`/`mcp-adapter`/`mcp-multi-server`
+report goldens regenerated for the new `artifacts.agentSkills`/`artifacts.docs`/`skillsPublish`
+report fields.
+
+**Done when:** `publishSkills: true`/`string[]` round-trips through a build (copy, index, hand-edit
+guard, stale removal) with fixture coverage; `ax init` asks the docs/skills questions in order and
+persists exactly what was approved; the report and Ora-check mapping speak to both artifacts; docs
+say all of this without inventing a build-time guess the design never makes. All hold — 732 tests
+green, including the new `agent-skills` fixture and the regenerated report goldens.
+
+---
+
 ## Open product questions for Ora (resolve in Phase 0.1)
 
 | # | Question | Recommendation | Decision |
@@ -1570,7 +1674,7 @@ the existing deploy steps.
 | 12 | Does Ora's crawler/scorer use an internal ai-catalog schema or validator? | **Resolved (2026-07-19):** the ARD spec now publishes an official JSON Schema + conformance CLI (ards-project/ard-spec) — vendored in `spec/ard/` as the strict emission oracle and run in CI. Remaining sub-question for Ora: do they validate with the official tool too, or something stricter? | **resolved** |
 | 13 | Is the agent-readiness score essentially a **checklist of artifact types** (OpenAPI / MCP / GraphQL / llms.txt / docs / skills)? Top-site data suggests breadth drives the grade. | If yes, target the checklist directly and report per-artifact coverage in the build summary. | _pending_ |
 | 14 | Which entry fields should a first-party catalog self-declare? (`auth`, `capabilities`, `representativeQueries`, `provenance`, `trustManifest.attestations`) | **Partly resolved by the spec (2026-07-19):** `capabilities` / `representativeQueries` / `trustManifest` are first-class ARD fields, not Ora extensions — `representativeQueries` (2–5 items) drives registry search embeddings, so it's plainly worth self-declaring; supported via `ax.config` `entries`. `capabilities` emitted zero-config for MCP. Only `auth` / entry-level `provenance` are true extensions — confirm with Ora how they weigh those. | _mostly resolved_ |
-| 15 | Agent **skills** (`application/ai-skill+md`): does Ora expect skills in a published GitHub repo, and should the plugin help scaffold/reference one? | Detect-and-reference a skills repo if present; do not invent skills. Scaffolding = later. | _pending_ |
+| 15 | Agent **skills** (`application/ai-skill+md`): does Ora expect skills in a published GitHub repo, and should the plugin help scaffold/reference one? | Detect-and-reference a skills repo if present; do not invent skills. Scaffolding = later. | **Resolved (2026-08-26, see Phase 11):** detect-and-reference stays the baseline — `skills/` and `.claude/skills/` are only ever *candidates* the `ax init` wizard shows a human (auto-discovery never reaches into `.claude/skills/` on its own), and a pre-existing served discovery index ax didn't write is referenced, never touched. Scaffolding did land, narrower than "a repo": an opt-in `publishSkills` (`true` or an explicit `string[]`) copies each selected `SKILL.md` to `public/.well-known/agent-skills/<name>/SKILL.md` and generates the `/.well-known/agent-skills/index.json` discovery index (Agent Skills discovery spec v0.2.0, sha256 digests per skill) — regenerated every build, with stale entries removed and hand-edited published copies never overwritten. Docs got the same detect-and-confirm treatment: `ax init` proposes route sections that look like docs, the developer approves them, and only then do they become `text/html` entries tagged `ax:docs` (the one signal the build trusts — it never guesses docs from routes). External docs/skills URLs are collected by `ax init` the same way. |
 | 16 | Once the skill's `api-catalog`→`ai-catalog` bug is fixed, do the **registry crawler and the score scanner** both key on ARD `/.well-known/ai-catalog.json`? | Confirm they agree — the plugin's headline output depends on it | _pending (Ora aware of the skill bug 2026-07-22, fix expected)_ |
 | 17 | What `User-agent` token does **Ora's crawler** send? | Needed to detect a blocking robots.txt and to author the scoped `Allow` recommendation | _pending_ |
 | 18 | Does the plugin/companion skill scope include `agents.md` content and the robots.txt policy, or does Ora expect those from its own `agent-ready-website` skill? | Plugin detects/scaffolds structure; companion skill authors content and defers to Ora's skill for the scan loop | _pending_ |
