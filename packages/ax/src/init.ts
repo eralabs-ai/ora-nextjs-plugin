@@ -6,6 +6,7 @@ import { credentialQueryParam, safeHttpUrl } from './auth.js';
 import { AxConfigError, findExistingConfig } from './config.js';
 import type { AxEntryOverride } from './config-schema.js';
 import { detectAuthMetadata, type AuthMetadataSuggestion } from './detect-auth-metadata.js';
+import type { EntryAuthOAuth } from './types.js';
 import { detectMcpMounts, mcpMountIdentifier, type McpMount } from './detect-mcp.js';
 import { generateCatalog } from './generate.js';
 import {
@@ -447,8 +448,8 @@ async function askAuthEndpoints(
   if (suggestion.issuers.length > 0 && suggestion.issuersSource !== undefined) {
     stdout(
       `[ax]   Detected OAuth authorization server${suggestion.issuers.length === 1 ? '' : 's'}: ` +
-        `${suggestion.issuers.join(', ')} (from ${suggestion.issuersSource}) — its ` +
-        '/.well-known/oauth-authorization-server document lists the endpoints to paste below.',
+        `${suggestion.issuers.join(', ')} (from ${suggestion.issuersSource}) — agents discover ` +
+        'its endpoints from the metadata chain at runtime.',
     );
   } else if (suggestion.resourceMetadataRoute !== undefined) {
     stdout(
@@ -483,11 +484,6 @@ async function askAuthEndpoints(
     }
     return undefined;
   };
-  const prefillNote =
-    suggestion.oauthSource !== undefined
-      ? ` (prefilled from ${suggestion.oauthSource} — Enter to approve, clear to skip)`
-      : ' (Enter to skip)';
-
   // Default the scheme to OAuth when the source tree shows OAuth actually exists (committed
   // metadata, a declared authorization server, or a wired protected-resource route); otherwise to
   // API key — the scheme most real apps actually have. A wizard that leads with OAuth questions a
@@ -517,18 +513,29 @@ async function askAuthEndpoints(
       ])) ?? 'skip';
     if (scheme === 'skip') continue;
 
-    const oauth: { authorizationEndpoint?: string; tokenEndpoint?: string } = {};
+    // Endpoint questions run only when the user chose OAuth and the source tree has nothing to
+    // say — the one case where a declaration is the sole way agents learn the endpoints.
+    // Committed RFC 8414 metadata already *states* them, so they're adopted, not asked; a wired
+    // protected-resource route (or a declared authorization server) means agents discover them
+    // at runtime, so there is nothing to ask at all.
+    const oauth: EntryAuthOAuth = {};
     if (scheme === 'oauth2') {
-      const authorizationEndpoint = await askUrl(
-        `OAuth authorization endpoint${where}${prefillNote}`,
-        suggestion.oauth?.authorizationEndpoint,
-      );
-      if (authorizationEndpoint !== undefined) oauth.authorizationEndpoint = authorizationEndpoint;
-      const tokenEndpoint = await askUrl(
-        `OAuth token endpoint${where}${prefillNote}`,
-        suggestion.oauth?.tokenEndpoint,
-      );
-      if (tokenEndpoint !== undefined) oauth.tokenEndpoint = tokenEndpoint;
+      if (suggestion.oauth !== undefined && suggestion.oauthSource !== undefined) {
+        Object.assign(oauth, suggestion.oauth);
+        stdout(
+          `[ax]   Using the OAuth endpoints your ${suggestion.oauthSource} already declares — ` +
+            'edit entries[].auth in ax.config to change them.',
+        );
+      } else if (!oauthEvidence) {
+        const authorizationEndpoint = await askUrl(
+          `OAuth authorization endpoint${where} (Enter to skip)`,
+        );
+        if (authorizationEndpoint !== undefined) {
+          oauth.authorizationEndpoint = authorizationEndpoint;
+        }
+        const tokenEndpoint = await askUrl(`OAuth token endpoint${where} (Enter to skip)`);
+        if (tokenEndpoint !== undefined) oauth.tokenEndpoint = tokenEndpoint;
+      }
     }
     const docsUrl = await askUrl(
       `Docs URL${where} — the page where a human gets access; agents send their user there when ` +

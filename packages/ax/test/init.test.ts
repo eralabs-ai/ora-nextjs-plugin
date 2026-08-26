@@ -854,19 +854,9 @@ describe('auth-endpoint questions (declared auth for gated MCP servers)', () => 
     );
   }
 
-  it('collects endpoints + docs URL and writes them as an entries auth override that loads', async () => {
+  it('collects manually-entered endpoints + docs URL when the source tree has no OAuth to read', async () => {
     writeBareApp(dir);
     addGatedMcpMount(dir);
-    // A protectedResourceHandler route declares the authorization server — shown as context.
-    const metaDir = join(dir, 'app', '.well-known', 'oauth-protected-resource');
-    mkdirSync(metaDir, { recursive: true });
-    writeFileSync(
-      join(metaDir, 'route.ts'),
-      "import { protectedResourceHandler } from 'mcp-handler';\n" +
-        "const handler = protectedResourceHandler({ authServerUrls: ['https://auth.acme.com'] });\n" +
-        'export { handler as GET };\n',
-      'utf8',
-    );
 
     const prompter = new ScriptedPrompter({
       text: [
@@ -876,6 +866,8 @@ describe('auth-endpoint questions (declared auth for gated MCP servers)', () => 
         'https://acme.com/docs/access',
       ],
       multiSelect: [[], []],
+      // No OAuth evidence → the default is api_key; choosing OAuth is what asks the endpoints.
+      select: ['oauth2'],
       confirm: [false],
     });
 
@@ -883,18 +875,10 @@ describe('auth-endpoint questions (declared auth for gated MCP servers)', () => 
 
     expect(code).toBe(0);
     const source = readFileSync(join(dir, 'ax.config.ts'), 'utf8');
-    expect(source).toContain('entries: [');
     expect(source).toContain('identifier: "urn:air:acme.com:mcp-server"');
     expect(source).toContain('authorizationEndpoint: "https://auth.acme.com/authorize"');
     expect(source).toContain('tokenEndpoint: "https://auth.acme.com/token"');
     expect(source).toContain('docsUrl: "https://acme.com/docs/access"');
-    // The declared authorization server was surfaced as context before the questions.
-    expect(
-      stdout.some(
-        (l) => l.includes('Detected OAuth authorization server') && l.includes('auth.acme.com'),
-      ),
-    ).toBe(true);
-    expect(stdout.some((l) => l.includes('will declare auth for /mcp'))).toBe(true);
     // Round-trip: the written config passes the real loader/schema gate and carries the auth.
     const { config } = await loadAxConfig(dir);
     expect(config.entries[0]?.auth).toEqual({
@@ -907,7 +891,49 @@ describe('auth-endpoint questions (declared auth for gated MCP servers)', () => 
     });
   });
 
-  it('prefills the endpoint questions from committed RFC 8414 metadata (Enter approves them)', async () => {
+  it('never asks endpoint questions when an authorization server is declared (runtime-discoverable)', async () => {
+    writeBareApp(dir);
+    addGatedMcpMount(dir);
+    const metaDir = join(dir, 'app', '.well-known', 'oauth-protected-resource');
+    mkdirSync(metaDir, { recursive: true });
+    writeFileSync(
+      join(metaDir, 'route.ts'),
+      "import { protectedResourceHandler } from 'mcp-handler';\n" +
+        "const handler = protectedResourceHandler({ authServerUrls: ['https://auth.acme.com'] });\n" +
+        'export { handler as GET };\n',
+      'utf8',
+    );
+
+    const textQuestions: string[] = [];
+    const prompter = new (class extends ScriptedPrompter {
+      override async text(question: string, defaultValue?: string): Promise<string> {
+        textQuestions.push(question);
+        return super.text(question, defaultValue);
+      }
+    })({
+      text: ['https://acme.com', 'https://acme.com/docs/access'],
+      multiSelect: [[], []],
+      confirm: [false],
+    });
+
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+    // siteUrl and the docs URL — the endpoint questions never ran.
+    expect(textQuestions.some((q) => q.includes('endpoint'))).toBe(false);
+    expect(
+      stdout.some(
+        (l) =>
+          l.includes('Detected OAuth authorization server') &&
+          l.includes('discover its endpoints from the metadata chain'),
+      ),
+    ).toBe(true);
+    const { config } = await loadAxConfig(dir);
+    expect(config.entries[0]?.auth).toEqual({
+      status: 'oauth2',
+      docsUrl: 'https://acme.com/docs/access',
+    });
+  });
+
+  it('adopts the endpoints a committed RFC 8414 metadata document already declares (never asked)', async () => {
     writeBareApp(dir);
     addGatedMcpMount(dir);
     const wellKnown = join(dir, 'public', '.well-known');
@@ -922,8 +948,7 @@ describe('auth-endpoint questions (declared auth for gated MCP servers)', () => 
       'utf8',
     );
 
-    // Only the siteUrl is scripted: the endpoint questions fall through to their defaults — the
-    // prefills — exactly like pressing Enter to approve them.
+    // Only the siteUrl is scripted: the endpoints come from the committed document, not questions.
     const prompter = new ScriptedPrompter({
       text: ['https://acme.com'],
       multiSelect: [[], []],
@@ -941,7 +966,8 @@ describe('auth-endpoint questions (declared auth for gated MCP servers)', () => 
         tokenEndpoint: 'https://acme.com/oauth/token',
       },
     });
-    // The question named the prefill's source, so approving it is an informed check.
+    // The adoption names its source, so the config value is traceable, not magic.
+    expect(stdout.some((l) => l.includes('Using the OAuth endpoints your public'))).toBe(true);
     expect(stdout.some((l) => l.includes('will declare auth for /mcp'))).toBe(true);
   });
 
