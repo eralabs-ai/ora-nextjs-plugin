@@ -762,4 +762,31 @@ describe('generateCatalog — agent skills and docs report', () => {
     expect(report.ora.checks.find((c) => c.id === 'public-api-docs')?.status).toBe('addressed');
     expect(report.recommendations.some((r) => r.includes('No docs declared'))).toBe(false);
   });
+
+  it('lists the ax:docs entry and the skills index in a scaffolded llms.txt', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(join(dir, 'tsconfig.json'), '{}', 'utf8');
+    mkdirSync(join(dir, 'app'), { recursive: true });
+    mkdirSync(join(dir, 'skills', 'alpha'), { recursive: true });
+    writeFileSync(join(dir, 'skills', 'alpha', 'SKILL.md'), SKILL, 'utf8');
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      'export default {\n' +
+        "  siteUrl: 'https://example.com',\n" +
+        '  scaffoldLlmsTxt: true,\n' +
+        '  publishSkills: true,\n' +
+        "  entries: [{ identifier: 'urn:air:example.com:docs', type: 'text/html', " +
+        "displayName: 'Docs', url: 'https://example.com/docs', tags: ['ax:docs'] }],\n" +
+        '};\n',
+      'utf8',
+    );
+
+    const { scaffoldedLlmsTxtBody } = await generateCatalog({ cwd: dir });
+
+    expect(scaffoldedLlmsTxtBody).toContain('## Docs\n\n- [Docs](https://example.com/docs)');
+    expect(scaffoldedLlmsTxtBody).toContain(
+      '- [Agent skills](https://example.com/.well-known/agent-skills/index.json) — ' +
+        "this site's published agent skills",
+    );
+  });
 });

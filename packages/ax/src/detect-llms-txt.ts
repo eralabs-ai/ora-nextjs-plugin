@@ -22,6 +22,14 @@ export interface LlmsTxtResources {
   twinPaths?: string[];
   /** Whether a generated `/auth.md` (the gated-surface guide) is being written this run. */
   authMd?: boolean;
+  /**
+   * The site's hand-declared docs — entries tagged `ax:docs` in `ax.config`'s `entries` (written by
+   * `ax init` or declared by hand). Sourced from config directly rather than the merged catalog: docs
+   * are a declaration, never a guess, so config is the only place they can come from.
+   */
+  docsEntries?: Array<{ url: string; displayName?: string }>;
+  /** URL of the published agent-skills discovery index (`/.well-known/agent-skills/index.json`), if any. */
+  skillsIndexUrl?: string;
 }
 
 export interface DetectLlmsTxtOptions {
@@ -285,6 +293,11 @@ function buildLlmsTxtBody(options: DetectLlmsTxtOptions, router: RouterModel): s
     sections.push(`## Key pages\n\n${keyPages.join('\n')}`);
   }
 
+  const docsLinks = buildDocsLinks(options);
+  if (docsLinks.length > 0) {
+    sections.push(`## Docs\n\n${docsLinks.join('\n')}`);
+  }
+
   sections.push(`## Machine-readable resources\n\n${buildResourceLinks(options).join('\n')}`);
 
   return `${sections.join('\n\n')}\n`;
@@ -296,6 +309,13 @@ function buildKeyPages(options: DetectLlmsTxtOptions, router: RouterModel): stri
     .listPageRoutes()
     .slice(0, MAX_KEY_PAGES)
     .map((route) => `- [${route}](${absoluteOrServed(options, route)})`);
+}
+
+/** Links to the site's hand-declared docs — nothing invented, since docs are a declaration, not a guess. */
+function buildDocsLinks(options: DetectLlmsTxtOptions): string[] {
+  return (options.resources?.docsEntries ?? []).map(
+    (entry) => `- [${entry.displayName ?? 'Documentation'}](${entry.url})`,
+  );
 }
 
 /** Links to the artifacts this build actually produced or detected — nothing speculative. */
@@ -321,6 +341,11 @@ function buildResourceLinks(options: DetectLlmsTxtOptions): string[] {
     links.push(
       `- [Authentication guide](${absoluteOrServed(options, '/auth.md')}) — how to obtain ` +
         'access to the gated surfaces',
+    );
+  }
+  if (options.resources?.skillsIndexUrl !== undefined) {
+    links.push(
+      `- [Agent skills](${options.resources.skillsIndexUrl}) — this site's published agent skills`,
     );
   }
   // Markdown twins are per-page, so they're capped like "Key pages" — an orientation aid, not an

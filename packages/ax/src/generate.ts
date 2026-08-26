@@ -509,6 +509,17 @@ export async function generateCatalog(
   });
   if (skills.entry) inferredEntries.push(skills.entry);
 
+  // Docs entries come from config directly, not the merged catalog: `applyEntryOverrides` (below)
+  // runs after this detector, and `ax:docs` entries only ever come from config (hand-declared or
+  // written by `ax init`) anyway, so reading `config.entries` here is correct, not a shortcut.
+  const docsEntries = config.entries
+    .filter((entry) => Array.isArray(entry.tags) && entry.tags.includes('ax:docs'))
+    .filter((entry): entry is CatalogEntry & { url: string } => typeof entry.url === 'string')
+    .map((entry) => ({
+      url: entry.url,
+      ...(entry.displayName !== undefined ? { displayName: entry.displayName } : {}),
+    }));
+
   const llmsTxtResult = detectLlmsTxt({
     cwd,
     siteUrl,
@@ -526,6 +537,8 @@ export async function generateCatalog(
       mcpPathnames: mcpMounts.map((mount) => mount.pathname),
       twinPaths: twinPlan.servedPaths,
       authMd: authMdLikely,
+      docsEntries,
+      skillsIndexUrl: skills.entry?.url,
     },
   });
   if (llmsTxtResult.entry) inferredEntries.push(llmsTxtResult.entry);
