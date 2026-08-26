@@ -146,7 +146,13 @@ describe('planSkillsPublish — index shape', () => {
 
     const index = JSON.parse(plan.indexJson) as {
       $schema: string;
-      skills: Array<{ name: string; type: string; description: string; url: string; digest: string }>;
+      skills: Array<{
+        name: string;
+        type: string;
+        description: string;
+        url: string;
+        digest: string;
+      }>;
     };
     expect(index.$schema).toBe('https://schemas.agentskills.io/discovery/0.2.0/schema.json');
     expect(index.skills).toEqual([

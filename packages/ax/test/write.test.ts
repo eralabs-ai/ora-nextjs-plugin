@@ -8,16 +8,19 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import type { SkillsPublishPlan } from '../src/publish-skills.js';
 import type { McpServerCard, McpServerCardPlan } from '../src/server-card.js';
 import type { AiCatalog } from '../src/types.js';
 import {
+  applySkillsPublishPlan,
   CATALOG_OUTPUT_PATH,
   SERVER_CARD_DIR_OUTPUT_PATH,
   SERVER_CARD_OUTPUT_PATH,
+  SKILLS_INDEX_OUTPUT_PATH,
   writeCatalog,
   writeServerCards,
 } from '../src/write.js';
@@ -301,5 +304,127 @@ describe('writeServerCards', () => {
     );
     expect(existsSync(namedHandler)).toBe(true);
     expect(result.named.map((n) => n.path)).toContain(namedHandler);
+  });
+});
+
+/** Where a published SKILL.md copy lands (always static under public/, whatever the emit target). */
+function skillTarget(name: string): string {
+  return join('public', '.well-known', 'agent-skills', name, 'SKILL.md');
+}
+
+/** Builds a plan skill of a given action; content is what an apply would write. */
+function plannedSkill(name: string, action: SkillsPublishPlan['skills'][number]['action']) {
+  const content = `---\ndescription: ${name}\n---\n\n# ${name}\n`;
+  return {
+    name,
+    sourcePath: join('skills', name, 'SKILL.md'),
+    targetPath: skillTarget(name),
+    content,
+    description: name,
+    digest: `sha256:${name}`,
+    action,
+  };
+}
+
+const INDEX_JSON = `${JSON.stringify({ $schema: 'x', skills: [] }, null, 2)}\n`;
+
+describe('applySkillsPublishPlan', () => {
+  it('writes create/update copies, leaves unchanged and hand-edited ones untouched', () => {
+    // A hand-edited copy already on disk must survive the apply verbatim.
+    const handEdited = '# edited by a human\n';
+    mkdirSync(dirname(join(dir, skillTarget('edited'))), { recursive: true });
+    writeFileSync(join(dir, skillTarget('edited')), handEdited, 'utf8');
+
+    const plan: SkillsPublishPlan = {
+      skills: [
+        plannedSkill('fresh', 'create'),
+        plannedSkill('changed', 'update'),
+        plannedSkill('same', 'unchanged'),
+        plannedSkill('edited', 'skip-hand-edited'),
+      ],
+      staleDirs: [],
+      indexJson: INDEX_JSON,
+      servedIndexPath: '/.well-known/agent-skills/index.json',
+    };
+
+    const result = applySkillsPublishPlan(dir, plan);
+
+    expect(result.written.map((w) => w.name).sort()).toEqual(['changed', 'fresh']);
+    expect(result.skipped.map((s) => s.name)).toEqual(['edited']);
+    // create/update copies are on disk with the plan's content...
+    expect(readFileSync(join(dir, skillTarget('fresh')), 'utf8')).toContain('# fresh');
+    // ...unchanged is never written (no file created for it)...
+    expect(existsSync(join(dir, skillTarget('same')))).toBe(false);
+    // ...and the hand-edited copy is left exactly as the human left it.
+    expect(readFileSync(join(dir, skillTarget('edited')), 'utf8')).toBe(handEdited);
+    // The static discovery index landed at the well-known path.
+    expect(result.indexPath).toBe(join(dir, SKILLS_INDEX_OUTPUT_PATH));
+    expect(readFileSync(result.indexPath, 'utf8')).toBe(INDEX_JSON);
+  });
+
+  it('removes stale published dirs the plan no longer describes', () => {
+    mkdirSync(join(dir, 'public', '.well-known', 'agent-skills', 'gone'), { recursive: true });
+    writeFileSync(
+      join(dir, 'public', '.well-known', 'agent-skills', 'gone', 'SKILL.md'),
+      '# gone\n',
+      'utf8',
+    );
+    const plan: SkillsPublishPlan = {
+      skills: [],
+      staleDirs: [join('public', '.well-known', 'agent-skills', 'gone')],
+      indexJson: INDEX_JSON,
+      servedIndexPath: '/.well-known/agent-skills/index.json',
+    };
+
+    const result = applySkillsPublishPlan(dir, plan);
+
+    expect(result.removed).toEqual([join(dir, 'public', '.well-known', 'agent-skills', 'gone')]);
+    expect(existsSync(join(dir, 'public', '.well-known', 'agent-skills', 'gone'))).toBe(false);
+  });
+
+  it("writes the index as a route handler on target 'route', copies still static", () => {
+    mkdirSync(join(dir, 'app'), { recursive: true });
+    writeFileSync(join(dir, 'tsconfig.json'), '{}', 'utf8');
+
+    const plan: SkillsPublishPlan = {
+      skills: [plannedSkill('fresh', 'create')],
+      staleDirs: [],
+      indexJson: INDEX_JSON,
+      servedIndexPath: '/.well-known/agent-skills/index.json',
+    };
+
+    const result = applySkillsPublishPlan(dir, plan, { target: 'route' });
+
+    const handler = join(dir, 'app', '.well-known', 'agent-skills', 'index.json', 'route.ts');
+    expect(result.indexPath).toBe(handler);
+    const source = readFileSync(handler, 'utf8');
+    expect(source).toContain('application/json; charset=utf-8');
+    // The route-handler body literal round-trips back to the index JSON (the read-back the record
+    // reader relies on).
+    const bodyLiteral = /^const body = (".*");$/m.exec(source)?.[1];
+    if (bodyLiteral === undefined) throw new Error('expected an embedded body literal');
+    expect(JSON.parse(bodyLiteral)).toBe(INDEX_JSON);
+    // The static index was NOT written when targeting the route.
+    expect(existsSync(join(dir, SKILLS_INDEX_OUTPUT_PATH))).toBe(false);
+    // SKILL.md copies stay static in public/ regardless of emit target.
+    expect(existsSync(join(dir, skillTarget('fresh')))).toBe(true);
+  });
+
+  it("falls back to the static index (with a warning) when target 'route' has no app/", () => {
+    const warnings: string[] = [];
+    const plan: SkillsPublishPlan = {
+      skills: [],
+      staleDirs: [],
+      indexJson: INDEX_JSON,
+      servedIndexPath: '/.well-known/agent-skills/index.json',
+    };
+
+    const result = applySkillsPublishPlan(dir, plan, {
+      target: 'route',
+      warn: (m) => warnings.push(m),
+    });
+
+    expect(result.indexPath).toBe(join(dir, SKILLS_INDEX_OUTPUT_PATH));
+    expect(warnings.some((w) => w.includes('no App Router directory'))).toBe(true);
   });
 });

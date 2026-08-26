@@ -698,3 +698,68 @@ describe('generateCatalog multi-mount MCP', () => {
     expect(report.ora.checks.some((c) => c.id === 'mcp-server-card')).toBe(false);
   });
 });
+
+describe('generateCatalog — agent skills and docs report', () => {
+  const SKILL = '---\ndescription: A skill\n---\n\n# A\n\nBody.\n';
+
+  it('records both artifacts absent and both new checks actionable with zero config', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+
+    const { report, skillsPlan } = await generateCatalog({ cwd: dir });
+
+    expect(report.artifacts.agentSkills).toEqual({ found: false });
+    expect(report.artifacts.docs).toEqual({ found: false });
+    expect(report.skillsPublish).toEqual({
+      enabled: false,
+      written: [],
+      removed: [],
+      skippedHandEdited: [],
+    });
+    expect(skillsPlan).toBeUndefined();
+    const skillsCheck = report.ora.checks.find((c) => c.id === 'agent-skills-index-v2');
+    const docsCheck = report.ora.checks.find((c) => c.id === 'public-api-docs');
+    expect(skillsCheck?.status).toBe('actionable');
+    expect(docsCheck?.status).toBe('actionable');
+    expect(report.recommendations.some((r) => r.includes('No docs declared'))).toBe(true);
+  });
+
+  it('plans a publish, references the index entry, and addresses the skills check when opted in', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com', publishSkills: true };\n",
+      'utf8',
+    );
+    mkdirSync(join(dir, 'skills', 'alpha'), { recursive: true });
+    writeFileSync(join(dir, 'skills', 'alpha', 'SKILL.md'), SKILL, 'utf8');
+
+    const { catalog, report, skillsPlan } = await generateCatalog({ cwd: dir });
+
+    expect(skillsPlan?.skills.map((s) => s.name)).toEqual(['alpha']);
+    expect(report.skillsPublish.enabled).toBe(true);
+    expect(report.artifacts.agentSkills.found).toBe(true);
+    expect(catalog.entries.some((e) => e.type === 'application/agent-skills+json')).toBe(true);
+    expect(report.ora.checks.find((c) => c.id === 'agent-skills-index-v2')?.status).toBe(
+      'addressed',
+    );
+  });
+
+  it('addresses the docs check and stops recommending when an entry is tagged ax:docs', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      'export default {\n' +
+        "  siteUrl: 'https://example.com',\n" +
+        "  entries: [{ identifier: 'urn:air:example.com:docs', type: 'text/html', " +
+        "displayName: 'Docs', url: 'https://example.com/docs', tags: ['ax:docs'] }],\n" +
+        '};\n',
+      'utf8',
+    );
+
+    const { report } = await generateCatalog({ cwd: dir });
+
+    expect(report.artifacts.docs.found).toBe(true);
+    expect(report.ora.checks.find((c) => c.id === 'public-api-docs')?.status).toBe('addressed');
+    expect(report.recommendations.some((r) => r.includes('No docs declared'))).toBe(false);
+  });
+});

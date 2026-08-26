@@ -44,7 +44,9 @@ export type OraArtifact =
   | 'mcp-server'
   | 'mcp-server-card'
   | 'auth.md'
-  | 'middleware';
+  | 'middleware'
+  | 'agent-skills-index'
+  | 'docs';
 
 export interface OraArtifactChecks {
   artifact: OraArtifact;
@@ -83,6 +85,17 @@ export const ORA_CHECK_MAP: readonly OraArtifactChecks[] = [
   // runtime entry (whose header helper makes the Vary check unfailable by construction); N/A on a
   // site with no page routes, where there is nothing to negotiate.
   { artifact: 'middleware', checks: ['markdown-negotiation', 'markdown-negotiation-vary'] },
+  // The agent-skills discovery index (Agent Skills spec) — a well-known document coding agents
+  // probe to find and load a site's skills. Addressed when this build serves one (published this
+  // run, or a pre-existing served index ax references); the index's presence is the whole signal,
+  // so there is no 'not-applicable' rung — a site with no skills simply has this actionable.
+  { artifact: 'agent-skills-index', checks: ['agent-skills-index-v2'] },
+  // Whether the catalog says where the site's docs live. Mechanical and conservative: addressed
+  // only when an entry is explicitly tagged `ax:docs` (written by `ax init` or declared in config)
+  // — the build never guesses docs from routes, so no other signal turns this on. Only
+  // 'public-api-docs' maps here; 'agentic-search-specific' is deliberately unmapped, as it isn't a
+  // single build-detectable artifact.
+  { artifact: 'docs', checks: ['public-api-docs'] },
   // No 'webmcp' entry for now: WebMCP is still a W3C draft, and steering a coding agent toward a
   // non-official spec confuses more than it helps — until it is official we don't recommend it,
   // so the report carries no check for it. Re-add `{ artifact: 'webmcp', checks: ['webmcp'] }`

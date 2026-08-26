@@ -34,14 +34,17 @@ export {
   writeCatalog,
   writeServerCards,
   writeReport,
+  applySkillsPublishPlan,
   namedServerCardUrlPath,
   CATALOG_OUTPUT_PATH,
   SERVER_CARD_OUTPUT_PATH,
   SERVER_CARD_DIR_OUTPUT_PATH,
+  SKILLS_INDEX_OUTPUT_PATH,
   REPORT_OUTPUT_PATH,
   type WriteCatalogResult,
   type WriteServerCardsResult,
   type WriteCatalogOptions,
+  type ApplySkillsPublishResult,
   type EmissionTarget,
 } from './write.js';
 
@@ -50,6 +53,7 @@ export type {
   ReportArtifact,
   ReportScaffolds,
   ReportMarkdownTwins,
+  ReportSkillsPublish,
   OraReport,
 } from './report.js';
 

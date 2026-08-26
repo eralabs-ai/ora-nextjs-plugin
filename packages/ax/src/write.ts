@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync }
 import { dirname, join, resolve } from 'node:path';
 
 import { findAppDir } from './app-dir.js';
+import type { SkillsPublishPlan } from './publish-skills.js';
 import type { BuildReport } from './report.js';
 import type { McpServerCardPlan } from './server-card.js';
 import type { AiCatalog } from './types.js';
@@ -23,6 +24,12 @@ export function namedServerCardUrlPath(serverName: string): string {
 
 /** Default path for the opt-in machine-readable build report — build output, never `public/`. */
 export const REPORT_OUTPUT_PATH = join('.ora', 'report.json');
+
+/** Where the static agent-skills discovery index lands, relative to the project root. */
+export const SKILLS_INDEX_OUTPUT_PATH = join('public', '.well-known', 'agent-skills', 'index.json');
+
+/** App Router route segments that serve the discovery index for the `'route'` emission target. */
+const SKILLS_INDEX_ROUTE_SEGMENTS = ['.well-known', 'agent-skills', 'index.json'];
 
 /** App Router route segments that serve the catalog for the `'route'` emission target. */
 const CATALOG_ROUTE_SEGMENTS = ['.well-known', 'ai-catalog.json'];
@@ -208,6 +215,77 @@ function removeStaleNamedCards(
   }
 
   return removed;
+}
+
+export interface ApplySkillsPublishResult {
+  /** Published SKILL.md copies written this run (created or updated), with their absolute paths. */
+  written: Array<{ name: string; path: string }>;
+  /** Absolute paths of published skill dirs removed this run. */
+  removed: string[];
+  /** Skills left untouched because their published copy was hand-edited (absolute target paths). */
+  skipped: Array<{ name: string; path: string }>;
+  /** Where the discovery index landed (a static file or a route handler). */
+  indexPath: string;
+}
+
+/**
+ * Applies an agent-skills publish plan after the review gate: writes each created/updated SKILL.md
+ * copy, removes published dirs the plan no longer describes, and writes the discovery index. Only
+ * `create`/`update` skills are written — an `unchanged` copy is already correct, and a
+ * `skip-hand-edited` one is a human's file the build must not clobber (its served digest is already
+ * baked into `plan.indexJson`, so the index still lists it honestly).
+ *
+ * The SKILL.md copies are always static files under `public/`, whatever the emission target —
+ * they're plain assets an agent fetches by URL. The index follows `emit`, exactly like
+ * `writeCatalog`: static `public/.well-known/agent-skills/index.json` by default, or an App Router
+ * route handler serving `application/json` under `'route'` (falling back to static, with a warning,
+ * on a project with no app/ directory). Like `writeCatalog`, switching emission target leaves the
+ * previous target's index in place rather than sweeping it — the two never both serve the well-known
+ * path in a real deployment, and a silent cross-target delete isn't this pass's call to make.
+ */
+export function applySkillsPublishPlan(
+  cwd: string,
+  plan: SkillsPublishPlan,
+  options: WriteCatalogOptions = {},
+): ApplySkillsPublishResult {
+  const written: ApplySkillsPublishResult['written'] = [];
+  const skipped: ApplySkillsPublishResult['skipped'] = [];
+  for (const skill of plan.skills) {
+    const target = join(cwd, skill.targetPath);
+    if (skill.action === 'create' || skill.action === 'update') {
+      written.push({ name: skill.name, path: atomicWrite(target, skill.content) });
+    } else if (skill.action === 'skip-hand-edited') {
+      skipped.push({ name: skill.name, path: target });
+    }
+    // 'unchanged' copies are already on disk and correct — never rewritten.
+  }
+
+  const removed: string[] = [];
+  for (const staleDir of plan.staleDirs) {
+    const abs = join(cwd, staleDir);
+    rmSync(abs, { recursive: true, force: true });
+    removed.push(abs);
+  }
+
+  const target = options.target ?? 'static';
+  const warn = options.warn ?? (() => {});
+  let indexPath: string;
+  if (target === 'route') {
+    const appDir = findAppDir(cwd);
+    if (appDir !== undefined) {
+      indexPath = writeRouteHandler(cwd, appDir, SKILLS_INDEX_ROUTE_SEGMENTS, plan.indexJson, {
+        contentType: 'application/json',
+        served: plan.servedIndexPath,
+      });
+      return { written, removed, skipped, indexPath };
+    }
+    warn(
+      "emit: 'route' was requested but no App Router directory (app/ or src/app/) was found — " +
+        'falling back to the static public/.well-known/agent-skills/index.json target.',
+    );
+  }
+  indexPath = atomicWrite(join(cwd, SKILLS_INDEX_OUTPUT_PATH), plan.indexJson);
+  return { written, removed, skipped, indexPath };
 }
 
 /** Atomically writes the static `public/.well-known/ai-catalog.json`. */
