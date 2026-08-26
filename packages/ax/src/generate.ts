@@ -7,10 +7,12 @@ import { loadAxConfig } from './config.js';
 import { detectAgentsMd } from './detect-agents-md.js';
 import { detectJsonLd } from './detect-json-ld.js';
 import { detectLlmsTxt } from './detect-llms-txt.js';
+import { detectAuthProvider } from './detect-auth-provider.js';
 import {
   applyDeclaredMountAuth,
   buildMcpEntries,
   detectMcpMounts,
+  mcpMountIdentifier,
   type McpMount,
 } from './detect-mcp.js';
 import { detectOpenApi } from './detect-openapi.js';
@@ -26,7 +28,7 @@ import { planMarkdownTwins, type MarkdownTwinPlan } from './markdown-twins.js';
 import { buildMiddlewareWiringInstruction, detectMiddleware } from './middleware-wiring.js';
 import { loadNextConfig } from './next-config.js';
 import { buildOraChecks, type OraArtifact } from './ora-checks.js';
-import type { BuildReport, ReportArtifact, ReportScaffolds } from './report.js';
+import type { BuildReport, ReportArtifact, ReportAuth, ReportScaffolds } from './report.js';
 import { buildRouterModel } from './router-model.js';
 import type { JsonLdScaffoldResult } from './scaffold-json-ld.js';
 import { SPEC_VERSION } from './schema.js';
@@ -279,6 +281,74 @@ function applyGating(
   }
 
   return kept;
+}
+
+/**
+ * Builds the report's structured auth section from the final published surface — the same
+ * post-gating mounts and entries auth.md reads, so the report and the guide can never disagree.
+ * Each gated surface carries its published scheme, whether it was config-declared, and (when
+ * there is one) the actionable gap as a `note` an agent can work directly.
+ */
+function buildReportAuth(options: {
+  cwd: string;
+  mounts: McpMount[];
+  entries: readonly CatalogEntry[];
+  basePath: string;
+  siteUrl: string | undefined;
+  /** Identifiers whose auth came from an ax.config declaration. */
+  declaredIds: ReadonlySet<string>;
+}): ReportAuth {
+  const { cwd, mounts, entries, basePath, siteUrl, declaredIds } = options;
+  const surfaces: ReportAuth['gatedSurfaces'] = [];
+
+  const surfaceNote = (auth: EntryAuth): string | undefined => {
+    if (auth.status === 'unknown') {
+      return (
+        'Gated but the scheme is undeclared — declare entries[].auth in ax.config (the ax init ' +
+        'wizard collects this) so agents know how to authenticate.'
+      );
+    }
+    if (auth.docsUrl === undefined) {
+      return (
+        'No docsUrl — declare where a human obtains access (entries[].auth.docsUrl) so an agent ' +
+        'can hand the sign-up step to its human.'
+      );
+    }
+    return undefined;
+  };
+
+  const push = (path: string, auth: EntryAuth, declared: boolean): void => {
+    const note = surfaceNote(auth);
+    surfaces.push({
+      path,
+      status: auth.status,
+      declared,
+      oauthEndpoints:
+        auth.oauth?.authorizationEndpoint !== undefined || auth.oauth?.tokenEndpoint !== undefined,
+      ...(auth.docsUrl !== undefined ? { docsUrl: auth.docsUrl } : {}),
+      ...(note !== undefined ? { note } : {}),
+    });
+  };
+
+  const multiple = mounts.length > 1;
+  for (const mount of mounts) {
+    if (mount.auth === undefined) continue;
+    const declared =
+      siteUrl !== undefined &&
+      declaredIds.has(mcpMountIdentifier(siteUrl, mount.pathname, multiple));
+    push(servedPath(basePath, mount.pathname), mount.auth, declared);
+  }
+  for (const entry of entries) {
+    if (entry.type === 'application/mcp-server-card+json') continue; // covered by its mount above
+    if (entry.auth === undefined || entry.auth.status === 'none') continue;
+    const path = entryUrlPath(entry);
+    if (path === undefined) continue;
+    push(path, entry.auth, declaredIds.has(entry.identifier));
+  }
+  surfaces.sort((a, b) => a.path.localeCompare(b.path));
+
+  const provider = detectAuthProvider(cwd);
+  return { gatedSurfaces: surfaces, ...(provider !== undefined ? { provider } : {}) };
 }
 
 /**
@@ -591,6 +661,21 @@ export async function generateCatalog(
     siteDisplayName: site.displayName,
   });
   const authMdPlan = config.markdownTwins ? authMdCandidate : undefined;
+
+  // The report's structured auth section — same inputs as auth.md, plus which descriptors were
+  // config-declared and which known auth-provider dependency the app carries.
+  const reportAuth = buildReportAuth({
+    cwd,
+    mounts: mcpMounts,
+    entries,
+    basePath,
+    siteUrl,
+    declaredIds: new Set(
+      entryOverrides
+        .filter((override) => override.auth !== undefined)
+        .map((override) => override.identifier),
+    ),
+  });
   if (authMdPlan !== undefined) {
     recommend(
       'Gated routes should keep their honest 401/403 status and point agents at the auth guide: ' +
@@ -703,6 +788,7 @@ export async function generateCatalog(
       },
       openapi: openApi,
     },
+    auth: reportAuth,
     scaffolds,
     // Planned values; the CLI reconciles `written`/`deleted`/`authMd` after it applies the plan
     // (post-review-gate), the same way it patches in the catalog path.

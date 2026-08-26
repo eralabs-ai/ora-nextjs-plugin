@@ -344,7 +344,7 @@ describe('runInit multi-mount primary question', () => {
     writeBareApp(dir);
     addTwoMounts(dir);
 
-    let selectCalls = 0;
+    let primaryQuestions = 0;
     const prompter: Prompter = {
       text: async () => 'https://acme.com',
       confirm: async () => false,
@@ -354,8 +354,10 @@ describe('runInit multi-mount primary question', () => {
           .filter(isMultiSelectChoice)
           .filter((choice) => choice.selected)
           .map((choice) => choice.value),
-      select: async () => {
-        selectCalls++;
+      // The gated mount's auth-scheme question also arrives here — answer undefined (= skip);
+      // this test is about the primary question specifically.
+      select: async (question) => {
+        if (question.includes('PRIMARY')) primaryQuestions++;
         return undefined;
       },
     };
@@ -363,7 +365,7 @@ describe('runInit multi-mount primary question', () => {
     expect(await runInit([], { ...io(), prompter })).toBe(0);
 
     // Exactly one public server → it is the primary, silently: no question asked.
-    expect(selectCalls).toBe(0);
+    expect(primaryQuestions).toBe(0);
     expect(
       stdout.some((l) => l.includes('Primary MCP server: /api/public/mcp') && l.includes('public')),
     ).toBe(true);
@@ -408,8 +410,12 @@ describe('runInit multi-mount primary question', () => {
           .map((choice) => choice.value),
       select: async (question, rows) => {
         selectQuestions.push(question);
-        selectRows.push(...rows);
-        return rows.filter(isMultiSelectChoice).find((choice) => choice.selected)?.value;
+        // Capture only the primary question's rows — the gated mount's auth-scheme select (asked
+        // later, and answered "skip" here via its default-less undefined) has its own rows.
+        if (question.includes('PRIMARY')) selectRows.push(...rows);
+        return question.includes('PRIMARY')
+          ? rows.filter(isMultiSelectChoice).find((choice) => choice.selected)?.value
+          : undefined;
       },
     };
 
@@ -418,9 +424,9 @@ describe('runInit multi-mount primary question', () => {
     // Two public servers → ambiguous, so the question runs. It lists only the MCP server rows
     // (the gating question just showed the full tree — repeating it would be noise), defaults to
     // the first public one, and annotates the gated row with the gating answer.
-    expect(selectQuestions).toEqual([
+    expect(selectQuestions[0]).toBe(
       'Which MCP server is the PRIMARY (the path agents probe first)?',
-    ]);
+    );
     expect(selectRows.every(isMultiSelectChoice)).toBe(true);
     const choices = selectRows.filter(isMultiSelectChoice);
     expect(choices.map((c) => c.value)).toEqual(['/api/mcp', '/api/public/mcp', '/api/tools/mcp']);
@@ -946,6 +952,8 @@ describe('auth-endpoint questions (declared auth for gated MCP servers)', () => 
     const prompter = new ScriptedPrompter({
       text: ['https://acme.com', '', '', 'https://acme.com/docs/access'],
       multiSelect: [[], []],
+      // No OAuth evidence in this fixture, so the scheme default is "skip" — choose OAuth actively.
+      select: ['oauth2'],
       confirm: [false],
     });
     expect(await runInit([], { ...io(), prompter })).toBe(0);
@@ -984,6 +992,7 @@ describe('auth-endpoint questions (declared auth for gated MCP servers)', () => 
         '', // docs: skipped
       ],
       multiSelect: [[], []],
+      select: ['oauth2'],
       confirm: [false],
     });
     expect(await runInit([], { ...io(), prompter })).toBe(0);
@@ -1013,6 +1022,86 @@ describe('auth-endpoint questions (declared auth for gated MCP servers)', () => 
     expect(await runInit([], { ...io(), prompter })).toBe(0);
     // Only the siteUrl question was asked.
     expect(textQuestions).toBe(1);
+    expect(readFileSync(join(dir, 'ax.config.ts'), 'utf8')).not.toContain('entries:');
+  });
+});
+
+describe('auth-scheme question (api_key and skip branches)', () => {
+  function addGatedMount(dir2: string): void {
+    const routeDir = join(dir2, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      `import { createMcpHandler, withMcpAuth } from 'mcp-handler';\n` +
+        `const handler = createMcpHandler((server) => {});\n` +
+        `const authed = withMcpAuth(handler, verifyToken, {});\n` +
+        `export { authed as GET };\n`,
+      'utf8',
+    );
+  }
+
+  it('choosing API key declares status "api_key" (with the docs URL) and skips the OAuth questions', async () => {
+    writeBareApp(dir);
+    addGatedMount(dir);
+
+    const textQuestions: string[] = [];
+    const prompter = new (class extends ScriptedPrompter {
+      override async text(question: string, defaultValue?: string): Promise<string> {
+        textQuestions.push(question);
+        return super.text(question, defaultValue);
+      }
+    })({
+      text: ['https://acme.com', 'https://acme.com/docs/api-keys'],
+      multiSelect: [[], []],
+      select: ['api_key'],
+      confirm: [false],
+    });
+
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+    const { config } = await loadAxConfig(dir);
+    expect(config.entries[0]?.auth).toEqual({
+      status: 'api_key',
+      docsUrl: 'https://acme.com/docs/api-keys',
+    });
+    // The OAuth endpoint questions never ran — only siteUrl and the docs URL were asked.
+    expect(textQuestions.some((q) => q.includes('OAuth'))).toBe(false);
+    expect(stdout.some((l) => l.includes('API key/bearer + docs link'))).toBe(true);
+  });
+
+  it('choosing API key with no docs URL still declares the scheme (an active choice is a declaration)', async () => {
+    writeBareApp(dir);
+    addGatedMount(dir);
+
+    const prompter = new ScriptedPrompter({
+      text: ['https://acme.com', ''],
+      multiSelect: [[], []],
+      select: ['api_key'],
+      confirm: [false],
+    });
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+    const { config } = await loadAxConfig(dir);
+    expect(config.entries[0]?.auth).toEqual({ status: 'api_key' });
+  });
+
+  it('choosing skip asks nothing further and writes no entries', async () => {
+    writeBareApp(dir);
+    addGatedMount(dir);
+
+    const textQuestions: string[] = [];
+    const prompter = new (class extends ScriptedPrompter {
+      override async text(question: string, defaultValue?: string): Promise<string> {
+        textQuestions.push(question);
+        return super.text(question, defaultValue);
+      }
+    })({
+      text: ['https://acme.com'],
+      multiSelect: [[], []],
+      select: ['skip'],
+      confirm: [false],
+    });
+
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+    expect(textQuestions).toHaveLength(1); // only siteUrl
     expect(readFileSync(join(dir, 'ax.config.ts'), 'utf8')).not.toContain('entries:');
   });
 });

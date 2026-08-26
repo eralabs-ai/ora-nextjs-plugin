@@ -405,12 +405,19 @@ async function askPrimary(
 }
 
 /**
- * Runs the auth-endpoint questions — for gated MCP servers only, right after the siteUrl answer
- * (the entry identifiers need it). Gating recorded *that* a server requires login; this collects
- * *how* an agent authenticates — the endpoints detection can never see (a `withMcpAuth` wrapper
+ * Runs the auth-scheme/endpoint questions — for gated MCP servers only, right after the siteUrl
+ * answer (the entry identifiers need it). Gating recorded *that* a server requires login; this
+ * collects *how* an agent authenticates — which detection can never see (a `withMcpAuth` wrapper
  * only ever says "requires auth, scheme unknown") — as a declared `auth` entry override in the
- * generated ax.config. Every question is optional: Enter with no value skips, and skipping
- * everything writes nothing (the build then keeps its "declare it in ax.config" nudge).
+ * generated ax.config.
+ *
+ * The scheme select comes first because the follow-ups depend on it: OAuth 2.0 (the MCP-spec
+ * path, and the default) asks for the two endpoints; API key / bearer token has no endpoint
+ * fields in the secret-free EntryAuth shape, so it declares `status "api_key"` and asks only for
+ * the docs URL; skip asks nothing. Enter-through stays safe by construction: OAuth is the default
+ * choice, but a bare `status "oauth2"` is only declared when at least one endpoint is actually
+ * given — so a user who defaults through every question still writes nothing, while `api_key` (an
+ * active, non-default choice) is a declaration by itself.
  *
  * Same prefill posture as siteUrl: a value the source tree already states (a committed RFC 8414
  * authorization-server metadata document) becomes the editable default, named with its source. A
@@ -462,42 +469,70 @@ async function askAuthEndpoints(
       ? ` (prefilled from ${suggestion.oauthSource} — Enter to approve, clear to skip)`
       : ' (Enter to skip)';
 
+  // Default the scheme to OAuth only when the source tree shows OAuth actually exists (committed
+  // metadata or a declared authorization server). Most real apps have something more basic — an
+  // API key behind their existing login — and a wizard that leads with OAuth questions they can't
+  // answer just teaches them to skip. With no evidence the default is "skip": Enter-through stays
+  // a no-op, and api_key (the realistic common declaration) is one active keystroke away.
+  const oauthEvidence = suggestion.oauth !== undefined || suggestion.issuers.length > 0;
+
   const overrides: AxEntryOverride[] = [];
   for (const mount of gated) {
     const where = gated.length > 1 ? ` for ${served(mount.pathname)}` : '';
-    const authorizationEndpoint = await askUrl(
-      `OAuth authorization endpoint${where}${prefillNote}`,
-      suggestion.oauth?.authorizationEndpoint,
-    );
-    const tokenEndpoint = await askUrl(
-      `OAuth token endpoint${where}${prefillNote}`,
-      suggestion.oauth?.tokenEndpoint,
-    );
+    const scheme =
+      (await prompter.select(`How do agents authenticate to ${served(mount.pathname)}?`, [
+        {
+          value: 'oauth2',
+          label:
+            'OAuth 2.0 — agents discover your authorization server and sign in (the MCP-spec path)',
+          selected: oauthEvidence,
+        },
+        {
+          value: 'api_key',
+          label: 'API key / bearer token — a human obtains a credential and gives it to the agent',
+          selected: false,
+        },
+        { value: 'skip', label: 'Skip — declare later in ax.config', selected: !oauthEvidence },
+      ])) ?? 'skip';
+    if (scheme === 'skip') continue;
+
+    const oauth: { authorizationEndpoint?: string; tokenEndpoint?: string } = {};
+    if (scheme === 'oauth2') {
+      const authorizationEndpoint = await askUrl(
+        `OAuth authorization endpoint${where}${prefillNote}`,
+        suggestion.oauth?.authorizationEndpoint,
+      );
+      if (authorizationEndpoint !== undefined) oauth.authorizationEndpoint = authorizationEndpoint;
+      const tokenEndpoint = await askUrl(
+        `OAuth token endpoint${where}${prefillNote}`,
+        suggestion.oauth?.tokenEndpoint,
+      );
+      if (tokenEndpoint !== undefined) oauth.tokenEndpoint = tokenEndpoint;
+    }
     const docsUrl = await askUrl(`Docs URL where a human obtains access${where} (Enter to skip)`);
 
-    const oauth = {
-      ...(authorizationEndpoint !== undefined ? { authorizationEndpoint } : {}),
-      ...(tokenEndpoint !== undefined ? { tokenEndpoint } : {}),
-    };
     const hasEndpoints = Object.keys(oauth).length > 0;
-    if (!hasEndpoints && docsUrl === undefined) continue;
+    // "api_key" is a declaration by itself; "oauth2" only becomes one once an endpoint backs it
+    // (see the scheme-select rationale above), so an endpoint-less OAuth answer falls back to the
+    // honest "unknown" — and with no docs link either, to nothing at all.
+    const status = scheme === 'api_key' ? 'api_key' : hasEndpoints ? 'oauth2' : 'unknown';
+    if (scheme !== 'api_key' && !hasEndpoints && docsUrl === undefined) continue;
 
     overrides.push({
       identifier: mcpMountIdentifier(siteUrl, mount.pathname, findings.mcpMounts.length > 1),
       auth: {
-        // Endpoints given → the scheme is OAuth 2.0 by declaration; a docs link alone refines
-        // nothing about the scheme, so the status stays the honest "unknown".
-        status: hasEndpoints ? 'oauth2' : 'unknown',
+        status,
         ...(hasEndpoints ? { oauth } : {}),
         ...(docsUrl !== undefined ? { docsUrl } : {}),
       },
     });
-    stdout(
-      `[ax]   ✓ will declare auth for ${served(mount.pathname)} in ax.config` +
-        `${hasEndpoints ? ' (OAuth 2.0 endpoints' : ' (docs link'}${
-          hasEndpoints && docsUrl !== undefined ? ' + docs link)' : ')'
-        }`,
-    );
+    const what =
+      status === 'api_key'
+        ? `API key/bearer${docsUrl !== undefined ? ' + docs link' : ''}`
+        : status === 'oauth2'
+          ? `OAuth 2.0 endpoints${docsUrl !== undefined ? ' + docs link' : ''}`
+          : 'docs link';
+    stdout(`[ax]   ✓ will declare auth for ${served(mount.pathname)} in ax.config (${what})`);
   }
   return overrides;
 }

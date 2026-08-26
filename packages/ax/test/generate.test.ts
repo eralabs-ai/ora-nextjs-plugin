@@ -802,3 +802,84 @@ describe('generateCatalog with config-declared entry auth', () => {
     expect(warnings.some((w) => w.includes('"oauth2"') && w.includes('"api_key"'))).toBe(true);
   });
 });
+
+describe('report auth section', () => {
+  it('lists a gated undeclared mount with an actionable note, and the detected provider', async () => {
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({ name: 'demo', dependencies: { '@clerk/nextjs': '^6.0.0' } }),
+      'utf8',
+    );
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com' };\n",
+      'utf8',
+    );
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      "import { createMcpHandler, withMcpAuth } from 'mcp-handler';\n" +
+        'const handler = createMcpHandler((server) => {});\n' +
+        'const authed = withMcpAuth(handler, verifyToken, {});\n' +
+        'export { authed as GET };\n',
+      'utf8',
+    );
+
+    const { report } = await generateCatalog({ cwd: dir });
+
+    expect(report.auth.gatedSurfaces).toHaveLength(1);
+    expect(report.auth.gatedSurfaces[0]).toMatchObject({
+      path: '/mcp',
+      status: 'unknown',
+      declared: false,
+      oauthEndpoints: false,
+    });
+    expect(report.auth.gatedSurfaces[0]?.note).toContain('undeclared');
+    expect(report.auth.provider?.name).toBe('clerk');
+  });
+
+  it('marks a config-declared descriptor as declared and notes only the missing docsUrl', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      [
+        'export default {',
+        "  siteUrl: 'https://example.com',",
+        '  entries: [{',
+        "    identifier: 'urn:air:example.com:mcp-server',",
+        "    auth: { status: 'api_key' },",
+        '  }],',
+        '};',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      "import { createMcpHandler, withMcpAuth } from 'mcp-handler';\n" +
+        'const handler = createMcpHandler((server) => {});\n' +
+        'const authed = withMcpAuth(handler, verifyToken, {});\n' +
+        'export { authed as GET };\n',
+      'utf8',
+    );
+
+    const { report } = await generateCatalog({ cwd: dir });
+
+    expect(report.auth.gatedSurfaces[0]).toMatchObject({
+      path: '/mcp',
+      status: 'api_key',
+      declared: true,
+    });
+    expect(report.auth.gatedSurfaces[0]?.note).toContain('docsUrl');
+    expect(report.auth.provider).toBeUndefined();
+  });
+
+  it('is empty (no surfaces, no provider) for an open site', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    const { report } = await generateCatalog({ cwd: dir });
+    expect(report.auth).toEqual({ gatedSurfaces: [] });
+  });
+});

@@ -192,6 +192,8 @@ export {
   type DetectAuthMetadataOptions,
 } from './detect-auth-metadata.js';
 
+export { detectAuthProvider, type DetectedAuthProvider } from './detect-auth-provider.js';
+
 export {
   detectMcpServers,
   detectMcpMounts,
