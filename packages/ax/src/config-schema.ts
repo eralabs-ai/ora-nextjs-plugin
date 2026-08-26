@@ -102,6 +102,26 @@ export interface AxConfig {
    */
   markdownTwins?: boolean;
   /**
+   * Whether to publish in-repo agent skills (`skills/<name>/SKILL.md`) as a discoverable surface —
+   * copied to `public/.well-known/agent-skills/<name>/SKILL.md` alongside a generated
+   * `/.well-known/agent-skills/index.json` (Agent Skills discovery spec, with sha256 digests).
+   * **Opt-in — defaults to `false`**: unlike the scaffolds, there's nothing to write when this is
+   * off, but turning it on publishes repo content to the public site, which is an exposure decision
+   * the project owner has to make, not something ax should default to.
+   *
+   * - `true` — publish every `skills/<name>/SKILL.md` found one level deep at the project root.
+   *   Never reaches into `.claude/skills/` — that directory holds skills for local agent sessions,
+   *   not necessarily ones meant for public discovery.
+   * - `string[]` — explicit root-relative skill directory paths (e.g. `"skills/getting-started"`,
+   *   `".claude/skills/foo"`), evaluated as-is rather than auto-discovered. This is the only way a
+   *   `.claude/skills/` skill gets published, and how `ax init` persists a subset selection.
+   *
+   * Like `markdownTwins`, the published output is a *generated artifact* — regenerated every build
+   * with stale entries removed, never yours to hand-edit once written — not a one-time scaffold like
+   * the `scaffold*` fields, which is why this isn't named `scaffoldSkills`.
+   */
+  publishSkills?: boolean | string[];
+  /**
    * Marks an artifact (MCP server, OpenAPI/REST surface, or a config-declared entry) as gated
    * behind auth. Supersedes the old `denylist`/`allowlist` pair: a single matcher subsumes both
    * (return `false` to re-include a path the built-in floor would gate). A gated artifact is never
@@ -176,6 +196,9 @@ export const axConfigSchema: Record<string, unknown> = {
     scaffoldRobots: { type: 'boolean' },
     scaffoldJsonLd: { type: 'boolean' },
     markdownTwins: { type: 'boolean' },
+    publishSkills: {
+      anyOf: [{ type: 'boolean' }, { type: 'array', items: { type: 'string', minLength: 1 } }],
+    },
     report: { anyOf: [{ type: 'boolean' }, { type: 'string', minLength: 1 }] },
     entries: { type: 'array', items: entryOverrideSchema },
   },

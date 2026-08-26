@@ -111,6 +111,9 @@ function withDefaults(config: AxConfig): ResolvedAxConfig {
     // Default ON, unlike the scaffolds: twins are regenerated build artifacts (never user-owned
     // files), and their first write is confirmed at the review gate — see config-schema.ts.
     markdownTwins: config.markdownTwins ?? true,
+    // Off by default, same reasoning as the scaffolds: publishing skills to the public site is an
+    // exposure decision, not something ax should opt a project into unasked — see config-schema.ts.
+    publishSkills: config.publishSkills ?? false,
     // `isGated` stays a possibly-undefined function (resolveGating supplies the built-in floor when
     // it's absent) — there is no data default to fill in here, unlike the other fields.
     ...(config.isGated !== undefined ? { isGated: config.isGated } : {}),
