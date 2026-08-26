@@ -290,9 +290,9 @@ describe('runInit gating respects basePath', () => {
     );
     expect(card.serverUrl).toBe('https://acme.com/app/mcp');
     expect(card.authentication).toEqual({ required: true });
-    // A single card is a one-liner, not a tree — the "wrote the MCP server cards" header is
-    // reserved for multi-card runs (see the multi-mount describe block below).
-    expect(stdout.some((l) => l.includes('✓ wrote the MCP server cards:'))).toBe(false);
+    // A single card prints its own "✓ wrote <path>" line — the "✓ wrote N MCP server cards"
+    // one-liner is reserved for multi-card runs (see the multi-mount describe block below).
+    expect(stdout.some((l) => /✓ wrote \d+ MCP server cards/.test(l))).toBe(false);
   });
 });
 
@@ -371,12 +371,17 @@ describe('runInit multi-mount primary question', () => {
     expect(gated.authentication).toEqual({ required: true });
     expect(existsSync(join(namedDir, 'api-public-mcp.json'))).toBe(true);
 
-    // Multiple cards land in one run, so the printed output is a "wrote the MCP server cards"
-    // header followed by a file tree — not a one-liner per card.
-    expect(stdout.some((l) => l.includes('✓ wrote the MCP server cards:'))).toBe(true);
-    expect(stdout.some((l) => l.includes('server-card.json'))).toBe(true);
-    expect(stdout.some((l) => l.includes('primary: /api/public/mcp'))).toBe(true);
-    expect(stdout.some((l) => l.includes('requires auth'))).toBe(true);
+    // Multiple cards land in one run, so the printed output is a single "✓ wrote N MCP server
+    // cards" line naming the primary — not a tree, and not a line per card (the build's own
+    // artifact tree shows their full shape minutes later).
+    expect(
+      stdout.some((l) => l.includes('✓ wrote 3 MCP server cards (primary: /api/public/mcp)')),
+    ).toBe(true);
+    // The completion line is unconditional and no longer mentions ax.config — the build's own
+    // output is where the per-artifact detail (and the commit-the-cards CTA) now lives.
+    expect(stdout.some((l) => l.includes('✓ All set — your site is ready to meet agents.'))).toBe(
+      true,
+    );
   });
 
   it('asks (server rows only, first public default) when several servers are public', async () => {

@@ -116,16 +116,21 @@ function renderChildren(nodes: TreeNode[], prefix: string, lines: string[]): voi
 
 /**
  * Renders `entries` as a nested file tree. Top-level roots (`public/`, `app/`, a bare file like
- * `ax-manifest.ts`) render as sibling roots each at column zero with no connector, so several roots
- * in one list stay unambiguous — a root is always visually distinct from a child (which carries a
- * `├`/`└`). Returns plain lines with no prefix; empty input yields an empty array.
+ * `ax-manifest.ts`) carry the same `┌ ├ └` connectors as every other level, matching
+ * route-tree.ts's convention: the first root gets `┌` (unless it's the only one, matching
+ * route-tree's own single-row case), middle roots `├`, the last `└` — so the two tree styles read
+ * as one visual language. Returns plain lines with no prefix; empty input yields an empty array.
  */
 export function renderFileTree(entries: FileTreeEntry[]): string[] {
   const roots = sortNodes(buildForest(entries).map(collapse));
   const lines: string[] = [];
-  for (const root of roots) {
-    lines.push(label(root));
-    if (!root.isFile) renderChildren([...root.children.values()], '', lines);
-  }
+  roots.forEach((root, index) => {
+    const isLast = index === roots.length - 1;
+    const connector = index === 0 && roots.length > 1 ? '┌' : isLast ? '└' : '├';
+    lines.push(`${connector} ${label(root)}`);
+    if (!root.isFile) {
+      renderChildren([...root.children.values()], isLast ? '    ' : '│   ', lines);
+    }
+  });
   return lines;
 }

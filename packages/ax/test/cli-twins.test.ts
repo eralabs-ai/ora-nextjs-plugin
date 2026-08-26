@@ -76,7 +76,9 @@ describe('runCli markdown twins', () => {
     expect(report.sizes.some((s) => s.artifact === 'markdown-twin')).toBe(true);
     // Twins land as rows in the consolidated file tree, not a "✓ wrote 1 markdown twin" line.
     expect(
-      stdout.some((l) => l.includes('✓ wrote (sizes show estimated tokens, chars ÷ 4):')),
+      stdout.some((l) =>
+        l.includes('✓ Following artifacts generated (estimated tokens = chars ÷ 4):'),
+      ),
     ).toBe(true);
     expect(stdout.some((l) => /index\.md — \d+ B \(~\d+ tokens\)/.test(l))).toBe(true);
   });

@@ -266,13 +266,13 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
       : 'markdown twins for the pages above (a new public surface)';
     if (!interactive) {
       stderr(
-        `[ax] This run would publish ${what}. Re-run with --yes to confirm (required in CI / ` +
+        `[ax] This run would generate ${what}. Re-run with --yes to confirm (required in CI / ` +
           'non-interactive shells).',
       );
       return 1;
     }
     const confirm = io.confirm ?? defaultConfirm;
-    const question = firstPublish ? 'Publish this catalog?' : 'Publish these markdown twins?';
+    const question = firstPublish ? 'Generate this catalog?' : 'Generate these markdown twins?';
     if (!(await confirm(question))) {
       stdout('[ax] Aborted — nothing written.');
       return 1;
@@ -423,10 +423,18 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     writeNotes.set(relative(cwd, reportPath), 'machine-readable build report');
   }
 
+  // The project's own ax.config is note-only (never measured — it isn't a generated artifact) but
+  // belongs in the tree alongside everything it configures, so the whole picture — config plus
+  // every artifact it produced — reads as one shape.
+  const configPath = findExistingConfig(cwd);
+  if (configPath !== undefined) {
+    writeNotes.set(relative(cwd, configPath), 'ax config');
+  }
+
   // One consolidated file tree of everything this run wrote, in place of a "✓ wrote" line per
   // artifact. Each measured artifact contributes a `<size>` annotation joined to any note collected
   // for its path (entry count, primary/auth, "refreshed"…); note-only artifacts with no measured
-  // size (the manifest refresh, the report) are appended after.
+  // size (the manifest refresh, the report, ax.config) are appended after.
   const treeEntries: FileTreeEntry[] = [];
   const measuredPaths = new Set<string>();
   for (const size of sizes) {
@@ -440,7 +448,7 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     if (!measuredPaths.has(path)) treeEntries.push({ path, annotation: note });
   }
   if (treeEntries.length > 0) {
-    stdout('[ax] ✓ wrote (sizes show estimated tokens, chars ÷ 4):');
+    stdout('[ax] ✓ Following artifacts generated (estimated tokens = chars ÷ 4):');
     for (const line of renderFileTree(treeEntries)) stdout(`[ax]   ${line}`.trimEnd());
   }
 
@@ -453,6 +461,17 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
           'Claude Code truncates responses over 100K chars.',
       );
     }
+  }
+
+  // This CTA used to print from `ax init`'s own card-writing step, but the cards' role — the
+  // persisted gating/primary answers — only becomes legible once they show up in *this* tree
+  // alongside everything else the build wrote, so it moved here. Only on the gated first publish:
+  // a re-run with cards already committed has nothing new to ask the user to commit.
+  if (writtenCards.length > 0 && firstPublish) {
+    stdout('[ax]');
+    stdout(
+      '[ax]   Commit the MCP server cards — they record your gating and primary decisions, so builds never re-ask.',
+    );
   }
 
   printAgentHandoff(generated.report, reportPath, stdout);
@@ -654,12 +673,16 @@ function printAgentHandoff(
   stdout(`[ax] Find your report at: ${reportPath}`);
   stdout('[ax] 📋 Copy this prompt to your coding agent:');
   stdout('[ax]');
-  stdout(
+  const prompt =
     `[ax]   Read ${reportPath} and work through every check marked "actionable": create or ` +
-      'improve those artifacts to make this site more agent-ready (each check may carry a note ' +
-      'with the exact next step, and the markdownTwins.skipped section lists why any route has ' +
-      'no markdown twin), then rebuild and confirm the report marks them addressed.',
-  );
+    'improve those artifacts to make this site more agent-ready (each check may carry a note ' +
+    'with the exact next step, and the markdownTwins.skipped section lists why any route has ' +
+    'no markdown twin), then rebuild and confirm the report marks them addressed.';
+  // Italicized only on a real TTY, so piped/CI output (and tests, which never set isTTY) stay
+  // plain text — the point is to visually set the copy-paste line apart from the surrounding log
+  // in a terminal, not to embed control codes in captured output. A terminal without italic
+  // support commonly renders \x1b[3m as reverse video or underline instead, which is fine.
+  stdout(process.stdout.isTTY === true ? `\x1b[3m${prompt}\x1b[0m` : prompt);
   stdout('[ax]');
 }
 
@@ -725,8 +748,8 @@ function measureGeneratedArtifacts(cwd: string, input: MeasureArtifactsInput): A
 }
 
 /**
- * The "about to expose" summary: every artifact this run would publish, so the surface is visible
- * before it's written (and before the confirmation gate). One short line per entry — a friendly
+ * The "about to reference" summary: every artifact this run would generate, so the surface is
+ * visible before it's written (and before the confirmation gate). One short line per entry — a friendly
  * name, where it points, and whether it requires auth (the point of the gating work: a gated
  * surface reads as gated rather than silently open). The MCP entry folds its server card in: one
  * line naming the card and pointing at the server it describes, not the URN + media type + card
@@ -739,7 +762,7 @@ function printExposureSummary(
 ): void {
   const { entries } = catalog;
   stdout(
-    `[ax] About to expose ${entries.length} catalog ${entries.length === 1 ? 'entry' : 'entries'}:`,
+    `[ax] About to reference ${entries.length} catalog ${entries.length === 1 ? 'entry' : 'entries'}:`,
   );
   // Card lookup by every URL an mcp entry might carry (the mount's endpoint, or the card URL the
   // generate-time rewrite pointed it at), so each card gets its one line whatever the entry shows.

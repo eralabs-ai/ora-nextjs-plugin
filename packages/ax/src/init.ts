@@ -4,7 +4,6 @@ import { join, relative, resolve } from 'node:path';
 
 import { findExistingConfig } from './config.js';
 import { detectMcpMounts, type McpMount } from './detect-mcp.js';
-import { type FileTreeEntry, renderFileTree } from './file-tree.js';
 import { generateCatalog } from './generate.js';
 import {
   configFileName,
@@ -432,40 +431,22 @@ function writeGatingCards(
 
   const primary = plan.cards.find((emission) => emission.primary);
   if (plan.multi) {
-    // Several cards land at once (the root card plus a per-server named slot each), so a file tree
-    // shows the shape — which is primary, which require auth — far more legibly than one "✓ wrote"
-    // line per card. A single-card write skips the tree below: a tree of one file is just noise.
-    const rootParts: string[] = [];
-    if (primary !== undefined) {
-      rootParts.push(`primary: ${servedPath(findings.basePath, primary.mountPathname)}`);
-    }
-    if (primary?.card.authentication !== undefined) rootParts.push('requires auth');
-    const treeEntries: FileTreeEntry[] = [
-      {
-        path: relative(cwd, result.rootPath),
-        ...(rootParts.length > 0 ? { annotation: rootParts.join(' · ') } : {}),
-      },
-      ...result.named.map((named, index) => {
-        const emission = plan.cards[index];
-        return {
-          path: relative(cwd, named.path),
-          ...(emission?.card.authentication !== undefined ? { annotation: 'requires auth' } : {}),
-        };
-      }),
-    ];
-    stdout('[ax] ✓ wrote the MCP server cards:');
-    for (const line of renderFileTree(treeEntries)) stdout(`[ax]   ${line}`.trimEnd());
+    // Several cards land at once (the root card plus a per-server named slot each), but the build's
+    // own artifact tree renders their full shape minutes later — repeating it here would just be
+    // the same information twice. One line with the count (and, for a multi-server host, which
+    // mount is primary) is enough for the wizard's own recap.
+    const cardCount = 1 + result.named.length;
+    const primaryNote =
+      primary !== undefined
+        ? ` (primary: ${servedPath(findings.basePath, primary.mountPathname)})`
+        : '';
+    stdout(`[ax] ✓ wrote ${cardCount} MCP server cards${primaryNote}`);
   } else {
     stdout(
       `[ax] ✓ wrote ${relative(cwd, result.rootPath)} (MCP server card` +
         `${primary?.card.authentication !== undefined ? ' — marked as requiring auth' : ''})`,
     );
   }
-  stdout('[ax]');
-  stdout(
-    `[ax]   Commit ${plan.multi ? 'them: they record' : 'it: it records'} your gating ` +
-      `${plan.multi ? 'and primary decisions' : 'decision'}, so builds never re-ask.`,
-  );
 }
 
 /**
@@ -800,9 +781,9 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
       markdownTwins: true,
       report: true,
     };
-    const fileName = writeConfigAndWire(cwd, answers, true, stdout);
+    writeConfigAndWire(cwd, answers, true, stdout);
     await createServingManifest(cwd, stdout);
-    printNextSteps(fileName, answers, false, stdout);
+    printNextSteps(false, stdout);
     return 0;
   }
 
@@ -827,7 +808,7 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
     }
     const { answers, gatedMounts, primaryMount, wireManifest } = collected;
 
-    const fileName = writeConfigAndWire(cwd, answers, wireManifest, stdout);
+    writeConfigAndWire(cwd, answers, wireManifest, stdout);
     if (wireManifest) await createServingManifest(cwd, stdout);
     writeGatingCards(cwd, findings, answers.siteUrl, gatedMounts, primaryMount, stdout);
 
@@ -857,7 +838,7 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
       if (!ranBuild) stdout('[ax] ⚠ Build did not finish cleanly — run it yourself when ready.');
     }
 
-    printNextSteps(fileName, answers, ranBuild, stdout);
+    printNextSteps(ranBuild, stdout);
     return 0;
   } finally {
     if (!closed) close();
@@ -894,16 +875,10 @@ async function createServingManifest(cwd: string, stdout: (line: string) => void
   }
 }
 
-function printNextSteps(
-  fileName: string,
-  _answers: InitAnswers,
-  ranBuild: boolean,
-  stdout: (line: string) => void,
-): void {
-  // Keep this short: a first-glance recap of what the wizard itself changed. The build's own output
-  // (and .ora/report.json) is where the per-artifact detail lives — no need to restate it here.
-  stdout('[ax] ✓ Setup complete.');
-  stdout(`[ax]   Created ${fileName} (each field commented) and wired the build (see above).`);
+function printNextSteps(ranBuild: boolean, stdout: (line: string) => void): void {
+  // Keep this short: the build's own output (and .ora/report.json) is where the per-artifact
+  // detail lives — no need to restate it here.
+  stdout('[ax] ✓ All set — your site is ready to meet agents.');
   if (!ranBuild) {
     stdout(
       '[ax]   Next: run your build — the postbuild `ax` step publishes the catalog and prints the report.',
