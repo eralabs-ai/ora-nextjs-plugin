@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { runCli } from '../src/cli.js';
 import { loadAxConfig } from '../src/config.js';
-import { runInit, validateSiteUrl } from '../src/init.js';
+import { runInit, validateExternalUrl, validateSiteUrl } from '../src/init.js';
 import {
   isMultiSelectChoice,
   type MultiSelectChoice,
@@ -82,6 +82,39 @@ function addMcpMount(dir: string): void {
   );
 }
 
+/** Writes a repo skill at `skills/<name>/SKILL.md`, so the skills multi-select has a candidate. */
+function writeSkill(dir: string, name: string): void {
+  const skillDir = join(dir, 'skills', name);
+  mkdirSync(skillDir, { recursive: true });
+  writeFileSync(
+    join(skillDir, 'SKILL.md'),
+    `---\nname: ${name}\ndescription: A ${name} skill.\n---\n\n# ${name}\n\nHow to use ${name}.\n`,
+    'utf8',
+  );
+}
+
+/** Writes a local-session skill at `.claude/skills/<name>/SKILL.md` (offered but never pre-selected). */
+function writeClaudeSkill(dir: string, name: string): void {
+  const skillDir = join(dir, '.claude', 'skills', name);
+  mkdirSync(skillDir, { recursive: true });
+  writeFileSync(
+    join(skillDir, 'SKILL.md'),
+    `---\nname: ${name}\ndescription: A local ${name} skill.\n---\n\n# ${name}\n`,
+    'utf8',
+  );
+}
+
+/** Adds a page route under /docs, so the docs multi-select has a candidate. */
+function writeDocsPage(dir: string): void {
+  const docsDir = join(dir, 'app', 'docs');
+  mkdirSync(docsDir, { recursive: true });
+  writeFileSync(
+    join(docsDir, 'page.tsx'),
+    'export default function Docs() {\n  return <main>Docs</main>;\n}\n',
+    'utf8',
+  );
+}
+
 let dir: string;
 let stdout: string[];
 let stderr: string[];
@@ -132,6 +165,34 @@ describe('validateSiteUrl', () => {
       'https://127.0.0.1.',
     ]) {
       expect(validateSiteUrl(bad).ok, bad).toBe(false);
+    }
+  });
+});
+
+describe('validateExternalUrl', () => {
+  it('accepts an https URL with a path, keeping it verbatim', () => {
+    expect(validateExternalUrl('https://docs.acme.io/guide?x=1')).toBe(
+      'https://docs.acme.io/guide?x=1',
+    );
+    expect(validateExternalUrl('  https://acme.com/docs  ')).toBe('https://acme.com/docs');
+  });
+
+  it('allows http:// (relaxed vs the https-only siteUrl)', () => {
+    expect(validateExternalUrl('http://docs.acme.io')).toBe('http://docs.acme.io');
+  });
+
+  it('rejects blank, garbage, non-http(s), and unreachable hosts with undefined', () => {
+    for (const bad of [
+      '',
+      '   ',
+      'not a url',
+      'ftp://acme.com/file',
+      'https://localhost:3000',
+      'https://127.0.0.1',
+      'https://myapp',
+      'https://demo.local',
+    ]) {
+      expect(validateExternalUrl(bad), bad).toBeUndefined();
     }
   });
 });
@@ -799,6 +860,131 @@ describe('runInit markdown twins + serving-manifest wiring', () => {
     expect(pkg.scripts.prebuild).toBeUndefined();
     expect(existsSync(join(dir, 'ax-manifest.ts'))).toBe(false);
     expect(existsSync(join(dir, 'ax-manifest.js'))).toBe(false);
+  });
+});
+
+describe('runInit docs + skills steps', () => {
+  it('publishes all repo skills as publishSkills: true when the default selection is accepted', async () => {
+    writeBareApp(dir);
+    writeSkill(dir, 'getting-started');
+    writeSkill(dir, 'api-integration');
+
+    // No skills multi-select scripted → the pre-selection (every repo skill) is accepted.
+    const prompter = new ScriptedPrompter({ text: ['https://acme.com'], confirm: [false] });
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+
+    const source = readFileSync(join(dir, 'ax.config.ts'), 'utf8');
+    expect(source).toContain('publishSkills: true,');
+    // No docs and no external URLs typed → no entries block.
+    expect(source).not.toContain('entries:');
+  });
+
+  it('leaves .claude skills out by default (publishSkills: true), and pins an explicit set when one is added', async () => {
+    writeBareApp(dir);
+    writeSkill(dir, 'alpha');
+    writeClaudeSkill(dir, 'internal');
+
+    // Default: repo skill selected, .claude one unchecked → still the zero-config `true`.
+    const defaultPrompter = new ScriptedPrompter({ text: ['https://acme.com'], confirm: [false] });
+    expect(await runInit([], { ...io(), prompter: defaultPrompter })).toBe(0);
+    expect(readFileSync(join(dir, 'ax.config.ts'), 'utf8')).toContain('publishSkills: true,');
+
+    // Fresh run in a new dir: opt the .claude skill in too → an explicit string[] with the paths.
+    rmSync(dir, { recursive: true, force: true });
+    dir = mkdtempSync(join(tmpdir(), 'ax-init-'));
+    writeBareApp(dir);
+    writeSkill(dir, 'alpha');
+    writeClaudeSkill(dir, 'internal');
+    // Only multi-select here is the skills one (no MCP, no docs); setup falls back to its default.
+    const optInPrompter = new ScriptedPrompter({
+      text: ['https://acme.com'],
+      multiSelect: [['skills/alpha', '.claude/skills/internal']],
+      confirm: [false],
+    });
+    expect(await runInit([], { ...io(), prompter: optInPrompter })).toBe(0);
+    expect(readFileSync(join(dir, 'ax.config.ts'), 'utf8')).toContain(
+      'publishSkills: ["skills/alpha",".claude/skills/internal"],',
+    );
+  });
+
+  it('turns approved docs sections and typed external URLs into tagged catalog entries', async () => {
+    writeBareApp(dir);
+    writeDocsPage(dir);
+
+    // No MCP, no skills → the only multi-select is docs (accepted by default). Text order:
+    // siteUrl, external docs URL, external skills repo URL.
+    const prompter = new ScriptedPrompter({
+      text: ['https://acme.com', 'https://help.acme.io/manual', 'https://github.com/acme/skills'],
+      confirm: [false],
+    });
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+
+    const source = readFileSync(join(dir, 'ax.config.ts'), 'utf8');
+    // Docs section detected under /docs → text/html + ax:docs.
+    expect(source).toContain('"identifier": "urn:air:acme.com:docs-docs"');
+    expect(source).toContain('"url": "https://acme.com/docs"');
+    expect(source).toContain('"type": "text/html"');
+    expect(source).toContain('"ax:docs"');
+    // External docs site.
+    expect(source).toContain('"identifier": "urn:air:acme.com:docs-external"');
+    expect(source).toContain('"url": "https://help.acme.io/manual"');
+    // External skills repo → the agent-skills+md media type.
+    expect(source).toContain('"identifier": "urn:air:acme.com:skills-repo"');
+    expect(source).toContain('"type": "application/agent-skills+md"');
+    expect(source).toContain('"url": "https://github.com/acme/skills"');
+    // Per-entry rationale comments carried through from the wizard.
+    expect(source).toContain('Docs section detected under /docs — approved during ax init');
+    expect(source).toContain('External docs site you added during ax init');
+    expect(source).toContain('External skills repository you added during ax init');
+
+    // The rendered config loads and validates.
+    const loaded = await loadAxConfig(dir);
+    expect(loaded.config.entries?.length).toBe(3);
+  });
+
+  it('--yes publishes repo skills but adds no docs entries and asks nothing', async () => {
+    writeBareApp(dir);
+    writeSkill(dir, 'getting-started');
+
+    // No prompter passed → any prompt would throw; --yes must reach none of them.
+    const code = await runInit(['--yes', '--site-url', 'https://acme.com'], io());
+    expect(code).toBe(0);
+    const source = readFileSync(join(dir, 'ax.config.ts'), 'utf8');
+    expect(source).toContain('publishSkills: true,');
+    expect(source).not.toContain('entries:');
+  });
+
+  it('round-trips: init with docs + skills → config loads → build publishes the index and docs entry', async () => {
+    writeBareApp(dir);
+    writeDocsPage(dir);
+    writeSkill(dir, 'getting-started');
+
+    // Approve docs (default), keep publishSkills at the default `true`, skip both external URLs.
+    const prompter = new ScriptedPrompter({ text: ['https://example.com'], confirm: [false] });
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+
+    const loaded = await loadAxConfig(dir);
+    expect(loaded.config.publishSkills).toBe(true);
+    expect(loaded.config.entries?.some((e) => e.identifier.includes('docs-docs'))).toBe(true);
+
+    stdout = [];
+    const code = await runCli([], {
+      cwd: dir,
+      stdout: (l) => stdout.push(l),
+      stderr: (l) => stderr.push(l),
+      confirm: async () => true,
+    });
+    expect(code).toBe(0);
+    // The skills discovery index was published.
+    expect(existsSync(join(dir, 'public', '.well-known', 'agent-skills', 'index.json'))).toBe(true);
+    // The catalog carries the approved docs entry (tagged ax:docs).
+    const catalog = JSON.parse(readFileSync(join(dir, CATALOG_OUTPUT_PATH), 'utf8'));
+    expect(
+      catalog.entries.some(
+        (e: { identifier: string; tags?: string[] }) =>
+          e.identifier.includes('docs-docs') && (e.tags ?? []).includes('ax:docs'),
+      ),
+    ).toBe(true);
   });
 });
 

@@ -2,15 +2,20 @@ import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 
+import type { AxEntryOverride } from './config-schema.js';
 import { AxConfigError, findExistingConfig } from './config.js';
 import { detectMcpMounts, type McpMount } from './detect-mcp.js';
+import { detectSkills } from './detect-skills.js';
+import { type DocRouteCandidate, findDocsCandidates } from './docs-candidates.js';
 import { generateCatalog } from './generate.js';
 import {
+  type CommentedEntry,
   configFileName,
   type ConfigFileTarget,
   type InitAnswers,
   renderAxConfig,
 } from './init-config.js';
+import type { SkillCandidate } from './publish-skills.js';
 import {
   planPostbuildWiring,
   planPrebuildWiring,
@@ -23,7 +28,7 @@ import { buildRouteTreeLines, renderRouteTree, type RouteTreeInput } from './rou
 import { buildRouterModel, type RouterKind } from './router-model.js';
 import { buildMcpServerCardPlan } from './server-card.js';
 import { readSiteMetadata } from './site-metadata.js';
-import { readSiteUrlFromEnv, servedPath } from './site-url.js';
+import { buildUrn, readSiteUrlFromEnv, servedPath } from './site-url.js';
 import { writeServerCards } from './write.js';
 
 export interface InitIO {
@@ -128,12 +133,7 @@ export function validateSiteUrl(
       reason: `Use an https:// origin (got "${trimmed}"). This value is written into the public catalog's URLs.`,
     };
   }
-  // Strip a trailing dot before the checks: `https://localhost.` / `https://127.0.0.1.` are the same
-  // hosts (the root-label dot survives URL parsing) and would otherwise slip past the equality tests.
-  const host = url.hostname.toLowerCase().replace(/\.$/, '');
-  const loopback =
-    host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '[::1]';
-  if (loopback || host.endsWith('.local') || !host.includes('.')) {
+  if (isLocalOrPrivateHost(url.hostname)) {
     return {
       ok: false,
       reason:
@@ -142,6 +142,44 @@ export function validateSiteUrl(
     };
   }
   return { ok: true, value: url.origin };
+}
+
+/**
+ * True for a host no agent on the public internet could reach: loopback, an `.local` mDNS name, or a
+ * bare single-label host with no dot (`myapp`). Shared by {@link validateSiteUrl} and
+ * {@link validateExternalUrl} so both refuse the same set of unreachable hosts — a published URL
+ * pointing at one of these is a dead link. The trailing dot is stripped first because
+ * `https://localhost.` / `https://127.0.0.1.` are the same hosts (the root-label dot survives URL
+ * parsing) and would otherwise slip past the equality tests.
+ */
+function isLocalOrPrivateHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/\.$/, '');
+  const loopback =
+    host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '[::1]';
+  return loopback || host.endsWith('.local') || !host.includes('.');
+}
+
+/**
+ * Validates a URL the user typed for an *external* resource (a docs site, a skills repo) — a
+ * relaxed cousin of {@link validateSiteUrl}. It is written into a catalog entry's `url`, not used as
+ * the site origin, so it keeps its path and allows `http://` as well as `https://` (some doc hosts
+ * still serve plain http). It rejects the same unreachable hosts `validateSiteUrl` does, since a
+ * localhost/preview link is just as broken here. Returns the trimmed URL on success, or `undefined`
+ * for a blank, unparseable, non-http(s), or local/private-host value — the wizard retries on
+ * `undefined` exactly like the siteUrl prompt.
+ */
+export function validateExternalUrl(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (trimmed === '') return undefined;
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return undefined;
+  if (isLocalOrPrivateHost(url.hostname)) return undefined;
+  return trimmed;
 }
 
 /** A candidate `siteUrl` default plus a human-readable label for where it was found. */
@@ -185,6 +223,18 @@ interface InitFindings {
   mcpMounts: McpMount[];
   openApiFound: boolean;
   webMcpToolNames: string[];
+  /**
+   * Page-route groups that look like documentation sections (`/docs`, `/guides`, …). Never acted on
+   * by a build — the wizard shows them for a human to confirm, since a `/docs` route could just as
+   * easily be marketing. See docs-candidates.ts.
+   */
+  docsCandidates: DocRouteCandidate[];
+  /**
+   * Publishable agent skills found on disk, split by source. `repo` are `skills/<name>/SKILL.md`
+   * (safe to pre-select); `claude` are `.claude/skills/<name>/SKILL.md` (skills for local agent
+   * sessions, offered but never pre-selected).
+   */
+  skillCandidates: { repo: SkillCandidate[]; claude: SkillCandidate[] };
   /** Presence of each detect-and-recommend artifact, for the findings summary. */
   artifacts: {
     llmsTxt: boolean;
@@ -219,6 +269,16 @@ async function gatherFindings(cwd: string): Promise<InitFindings> {
         .filter((url): url is string => url !== undefined),
     ),
   ].sort();
+  // Skills detection re-run directly (like the mount scan) for its candidate lists only: the wizard
+  // confirms what to publish, so nothing is planned or published here — `publishSkills: false` and
+  // no-op warn/recommend keep it a pure scan.
+  const skills = detectSkills({
+    cwd,
+    publishSkills: false,
+    basePath: report.basePath,
+    warn: () => {},
+    recommend: () => {},
+  });
   return {
     routers: report.routers,
     pageRoutes: router.listPageRoutes(),
@@ -227,6 +287,8 @@ async function gatherFindings(cwd: string): Promise<InitFindings> {
     mcpMounts: mounts,
     openApiFound: report.artifacts.openapi.found,
     webMcpToolNames: generated.webMcpToolNames,
+    docsCandidates: findDocsCandidates(router),
+    skillCandidates: { repo: skills.repoCandidates, claude: skills.claudeCandidates },
     artifacts: {
       llmsTxt: report.artifacts.llmsTxt.found,
       robotsTxt: report.artifacts.robotsTxt.found,
@@ -295,6 +357,22 @@ function printFindings(
   stdout(
     `[ax]   • Existing discovery artifacts: ${present.length > 0 ? present.join(', ') : 'none'}`,
   );
+  if (findings.docsCandidates.length > 0) {
+    const sections = findings.docsCandidates
+      .map((doc) => `${doc.root} (${doc.pageCount} page${doc.pageCount === 1 ? '' : 's'})`)
+      .join(', ');
+    stdout(`[ax]   • Routes that look like docs sections: ${sections}`);
+  }
+  const repoSkills = findings.skillCandidates.repo;
+  const claudeSkills = findings.skillCandidates.claude;
+  if (repoSkills.length > 0) {
+    stdout(`[ax]   • Agent skills in skills/: ${repoSkills.map((s) => s.name).join(', ')}`);
+  }
+  if (claudeSkills.length > 0) {
+    stdout(
+      `[ax]   • Local-session skills in .claude/skills/: ${claudeSkills.map((s) => s.name).join(', ')}`,
+    );
+  }
 }
 
 /**
@@ -506,6 +584,168 @@ const SETUP_OPTIONS: Array<{ value: SetupOptionValue; label: string; selected: t
   },
 ];
 
+/** POSIX-normalizes a repo-relative path so config values stay portable (forward slashes only). */
+function toPosixPath(path: string): string {
+  return path.split('\\').join('/');
+}
+
+/** The displayName for a docs root: its segment, capitalized (`/docs` → `Docs`). */
+function docsDisplayName(root: string): string {
+  const name = root.replace(/^\//, '');
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+/**
+ * Prompts for one optional external URL, blank to skip. Mirrors the siteUrl prompt's retry budget:
+ * a non-blank value that doesn't validate re-asks (up to five tries) rather than silently dropping a
+ * URL the user meant to add; a blank answer is the deliberate "skip" and returns immediately. Uses
+ * the relaxed {@link validateExternalUrl} (http(s), keeps paths, rejects unreachable hosts).
+ */
+async function promptExternalUrl(
+  prompter: Prompter,
+  question: string,
+  stdout: (line: string) => void,
+): Promise<string | undefined> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const raw = await prompter.text(question);
+    if (raw.trim() === '') return undefined;
+    const valid = validateExternalUrl(raw);
+    if (valid !== undefined) return valid;
+    stdout(
+      `[ax] "${raw.trim()}" isn't a reachable http(s):// URL — try again, or press Enter to skip.`,
+    );
+  }
+  return undefined;
+}
+
+/**
+ * The docs and skills steps: confirm the docs sections ax spotted in the routes, add any external
+ * docs/skills, and choose which repo (and, opt-in, .claude) skills to publish. Kept out of
+ * {@link collectInteractive}'s main sequence so that flow stays readable; returns the hand-declared
+ * entries (each with the rationale comment rendered above it) and the resolved `publishSkills`.
+ */
+async function collectDocsAndSkills(
+  prompter: Prompter,
+  findings: InitFindings,
+  siteUrl: string,
+  stdout: (line: string) => void,
+): Promise<{ entries: CommentedEntry[]; publishSkills?: boolean | string[] }> {
+  const entries: CommentedEntry[] = [];
+
+  // 1. Docs sections ax spotted in the routes — all pre-selected, since a section it flagged is
+  // very likely real docs; the user deselects any false positive (a `/docs` marketing page). Each
+  // approved root becomes a text/html entry tagged `ax:docs` — the one signal that tells the build a
+  // route is documentation (it never guesses that itself).
+  if (findings.docsCandidates.length > 0) {
+    stdout('[ax]');
+    const rows: MultiSelectRow[] = findings.docsCandidates.map((doc) => ({
+      value: doc.root,
+      label: `${doc.root} (${doc.pageCount} page${doc.pageCount === 1 ? '' : 's'})`,
+      selected: true,
+    }));
+    const approved = new Set(
+      await prompter.multiSelect(
+        'Reference these docs sections in your catalog so agents can find them?',
+        rows,
+      ),
+    );
+    for (const doc of findings.docsCandidates) {
+      if (!approved.has(doc.root)) continue;
+      const rootName = doc.root.replace(/^\//, '');
+      entries.push({
+        comment: `Docs section detected under ${doc.root} — approved during ax init`,
+        entry: {
+          identifier: buildUrn(siteUrl, `docs-${rootName}`),
+          type: 'text/html',
+          displayName: docsDisplayName(doc.root),
+          url: `${siteUrl}${doc.root}`,
+          tags: ['ax:docs'],
+        },
+      });
+    }
+  }
+
+  // 2. An external docs site (hosted elsewhere) — referenced the same way, so agents find it too.
+  stdout('[ax]');
+  const externalDocs = await promptExternalUrl(
+    prompter,
+    'Have docs hosted somewhere else? Paste the URL to reference it (or press Enter to skip)',
+    stdout,
+  );
+  if (externalDocs !== undefined) {
+    entries.push({
+      comment: 'External docs site you added during ax init',
+      entry: {
+        identifier: buildUrn(siteUrl, 'docs-external'),
+        type: 'text/html',
+        displayName: 'Documentation',
+        url: externalDocs,
+        tags: ['ax:docs'],
+      },
+    });
+  }
+
+  // 3. Which agent skills to publish. Repo skills (`skills/`) are pre-selected; `.claude/skills/`
+  // ones are offered unchecked and labelled as local-session skills — you *can* publish them, but
+  // they weren't necessarily written for your site's public audience. All-repo-and-nothing-else maps
+  // to `true` (stays zero-config); any other selection is pinned to explicit paths.
+  let publishSkills: boolean | string[] | undefined;
+  const { repo, claude } = findings.skillCandidates;
+  if (repo.length > 0 || claude.length > 0) {
+    stdout('[ax]');
+    const rows: MultiSelectRow[] = [
+      ...repo.map((skill) => ({
+        value: toPosixPath(skill.dirPath),
+        label: skill.dirPath,
+        selected: true,
+      })),
+      ...claude.map((skill) => ({
+        value: toPosixPath(skill.dirPath),
+        label: `${skill.dirPath} — local-session skill, not necessarily written for your site's audience`,
+        selected: false,
+      })),
+    ];
+    const selected = new Set(
+      await prompter.multiSelect(
+        'Publish these agent skills so agents can discover and load them?',
+        rows,
+      ),
+    );
+    const repoPaths = repo.map((skill) => toPosixPath(skill.dirPath));
+    if (selected.size === 0) {
+      publishSkills = undefined;
+    } else if (
+      repoPaths.length === selected.size &&
+      repoPaths.every((path) => selected.has(path))
+    ) {
+      publishSkills = true;
+    } else {
+      publishSkills = [...selected];
+    }
+  }
+
+  // 4. An external agent-skills repository (e.g. a GitHub repo of skills), referenced off-site.
+  stdout('[ax]');
+  const externalSkills = await promptExternalUrl(
+    prompter,
+    'Publish a skills repository hosted elsewhere? Paste the URL to reference it (or press Enter to skip)',
+    stdout,
+  );
+  if (externalSkills !== undefined) {
+    entries.push({
+      comment: 'External skills repository you added during ax init',
+      entry: {
+        identifier: buildUrn(siteUrl, 'skills-repo'),
+        type: 'application/agent-skills+md',
+        displayName: 'Agent skills repository',
+        url: externalSkills,
+      },
+    });
+  }
+
+  return { entries, ...(publishSkills !== undefined ? { publishSkills } : {}) };
+}
+
 /**
  * Asks the questions the source tree can't answer, each with a default. Returns undefined only when
  * a required answer (a valid siteUrl) couldn't be obtained after several tries. The gating answer
@@ -548,6 +788,16 @@ async function collectInteractive(
   }
   if (siteUrl === undefined) return undefined;
 
+  // Docs and skills next: they reference real artifacts against the siteUrl just confirmed, so they
+  // ask after it and before the generic setup list. Both degrade to "nothing added" when there's
+  // nothing to offer and the user skips — no config entry, config stays zero-config.
+  const { entries, publishSkills } = await collectDocsAndSkills(
+    prompter,
+    findings,
+    siteUrl,
+    stdout,
+  );
+
   // Every setup item defaults to selected in the list: config defaults are false because a *silent*
   // write into a source tree is invasive, but here the ask itself is the opt-in and the user is
   // present to deselect anything they don't want. Same yes-when-asked / no-when-silent policy the
@@ -569,6 +819,8 @@ async function collectInteractive(
       // Twin *intent* lands in config; generation happens at build (twins need the prerendered output).
       markdownTwins: setupSelected('markdownTwins'),
       report: setupSelected('report'),
+      ...(publishSkills !== undefined ? { publishSkills } : {}),
+      ...(entries.length > 0 ? { entries } : {}),
     },
     gatedMounts,
     primaryMount,
@@ -797,6 +1049,11 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
       scaffoldAgent404: true,
       markdownTwins: true,
       report: true,
+      // Skills: publish the repo skills (never `.claude/skills/` — that's a local-session directory,
+      // and publishing it needs a deliberate choice this headless path can't ask for). No docs
+      // entries at all: which routes are documentation (vs marketing) is exactly the guess ax
+      // refuses to make without a human, so `--yes` adds none.
+      ...(findings.skillCandidates.repo.length > 0 ? { publishSkills: true } : {}),
     };
     writeConfigAndWire(cwd, answers, true, stdout);
     await createServingManifest(cwd, stdout);

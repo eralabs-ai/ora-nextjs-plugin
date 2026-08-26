@@ -3,6 +3,8 @@
 // commits doubles as the documentation for what they turned on. This module is pure — answers in,
 // source string out — so the wizard's I/O and this file's exact shape can be tested apart.
 
+import type { AxEntryOverride } from './config-schema.js';
+
 /** How the config file should be written, derived from the project (never asked). */
 export interface ConfigFileTarget {
   /** `.ts` when the project has a tsconfig.json, else `.js`. Drives the filename and syntax. */
@@ -29,6 +31,24 @@ export interface InitAnswers {
   scaffoldAgent404: boolean;
   markdownTwins: boolean;
   report: boolean;
+  /**
+   * Which agent skills to publish, when the wizard collected an answer. Left undefined (not
+   * rendered) when the user selected nothing, so the config stays at the off-by-default posture.
+   */
+  publishSkills?: boolean | string[];
+  /**
+   * Hand-declared catalog entries the wizard collected (docs sections the user confirmed, an
+   * external docs site, an external skills repo). Each carries the rationale comment rendered above
+   * it — the *why* is decided at collection time, where it's known, rather than reverse-engineered
+   * from the entry's shape at render time.
+   */
+  entries?: CommentedEntry[];
+}
+
+/** A config `entries` override paired with the one-line rationale comment rendered above it. */
+export interface CommentedEntry {
+  comment: string;
+  entry: AxEntryOverride;
 }
 
 /** The canonical config basename (matches config.ts's `CONFIG_BASENAME`). */
@@ -42,6 +62,29 @@ export function configFileName(target: ConfigFileTarget): string {
 /** A `key: value,` line preceded by its rationale comment, at two-space indent. */
 function field(comment: string, key: string, value: string): string {
   return `  // ${comment}\n  ${key}: ${value},`;
+}
+
+/**
+ * Renders the `entries: [...]` field: the standard field-level comment, then one object literal per
+ * entry, each preceded by its own rationale comment. Every value goes through `JSON.stringify` (same
+ * as the scalar fields), so the objects render as valid literals in all three targets; keys stay
+ * JSON-quoted, which is valid TS/JS and keeps the emitter trivial.
+ */
+function renderEntries(entries: CommentedEntry[]): string {
+  const items = entries
+    .map(({ comment, entry }) => {
+      const body = JSON.stringify(entry, null, 2)
+        .split('\n')
+        .map((line) => `    ${line}`)
+        .join('\n');
+      return `    // ${comment}\n${body},`;
+    })
+    .join('\n');
+  return (
+    '  // Hand-declared entries that override (by matching identifier) or extend the set ax infers ' +
+    'from your source tree.\n' +
+    `  entries: [\n${items}\n  ],`
+  );
 }
 
 /**
@@ -94,6 +137,27 @@ export function renderAxConfig(answers: InitAnswers, target: ConfigFileTarget): 
       String(answers.report),
     ),
   ];
+
+  // Only rendered when the wizard collected an answer: with nothing selected there is nothing to
+  // publish, and omitting the field keeps the config at the safe off-by-default posture. `true`
+  // publishes every skills/<name>/SKILL.md; a string[] publishes exactly those directories — the
+  // only way a .claude/skills/ skill (written for local agent sessions, not your public audience)
+  // gets published. Either way it exposes repo content on your public site, an opt-in decision.
+  if (answers.publishSkills !== undefined) {
+    fields.push(
+      field(
+        'Publish in-repo agent skills as a discovery index agents can find. `true` publishes every ' +
+          'skills/<name>/SKILL.md; a string[] publishes exactly those directories (the only way a ' +
+          '.claude/skills/ skill is published). Publishing repo content to your public site is opt-in.',
+        'publishSkills',
+        JSON.stringify(answers.publishSkills),
+      ),
+    );
+  }
+
+  if (answers.entries !== undefined && answers.entries.length > 0) {
+    fields.push(renderEntries(answers.entries));
+  }
 
   const body = fields.join('\n');
 
