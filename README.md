@@ -86,6 +86,16 @@ doesn't own. It never overwrites an existing `ax.config.*`, and it generates no 
 itself — the first real build is still the moment the [review-before-publish](#the-catalog) gate
 runs, now pre-answered by your choices.
 
+Between confirming your site URL and that final checklist, it also asks about **docs and skills** —
+the wizard's other judgment calls the source tree can't make alone: which detected documentation-shaped
+route sections (`/docs`, `/guides`, `/help`, `/api-reference`, `/reference`, `/documentation`) to
+reference in the catalog, pre-selected since it flagged them for a reason (each approved section
+becomes a `text/html` entry tagged `ax:docs`); an optional URL for docs hosted elsewhere; which of
+your `skills/<name>/SKILL.md` skills to [publish](#agent-skills-publishing-publishskills) — pre-selected,
+while anything under `.claude/skills/` is offered unchecked, since those are written for local agent
+sessions rather than your public audience; and an optional URL for a skills repository hosted
+elsewhere. Any of these URL prompts skips on a blank answer rather than retrying.
+
 It is a plain command, never a `postinstall` hook — installing the package stays inert. For CI or
 scripting, run it unattended:
 
@@ -146,8 +156,15 @@ The `postbuild` run writes `public/.well-known/ai-catalog.json` with:
   - A static **`public/openapi.json`** → `application/vnd.oai.openapi+json`.
   - An **`llms.txt`** served either as `app/llms.txt/route.ts` or `public/llms.txt` →
     `text/markdown`.
-- **Config-declared entries** — anything you list in `ax.config`'s `entries`, e.g. docs/skills
-  pointers (`text/html` / `application/ai-skill+md`).
+  - A pre-existing **agent-skills discovery index** (`/.well-known/agent-skills/index.json`, static
+    or a route handler) that ax didn't write itself → `application/agent-skills+json`. See
+    [Agent skills publishing](#agent-skills-publishing-publishskills) for the opt-in pass that
+    generates one for you.
+- **Config-declared entries** — anything you list in `ax.config`'s `entries`: a docs pointer
+  (`text/html`, tagged `ax:docs` — the one signal the build trusts to mean "this is
+  documentation") or an external skills repo (`application/agent-skills+md`). `ax init`'s docs and
+  skills questions write these for you (see [`ax init`](#ax-init--one-command-setup)); hand-declare
+  more the same way.
 
 Every entry above is validated against the AI Catalog spec before writing; the CLI refuses to
 write (and exits non-zero) if generation ever produces an invalid catalog. The plugin only ever
@@ -313,9 +330,12 @@ derive ships as a marked TODO rather than plausible-looking filler).
 
 `app/llms.txt/route.ts` (or `.js`), written once, containing: your `package.json` name and
 description, a **Key pages** section listing your app's real statically-addressable routes (dynamic
-segments are never guessed), and a **Machine-readable resources** section linking the artifacts this
-build actually produced or detected — the catalog, `openapi.json`, an MCP endpoint — as absolute
-URLs when the site origin resolved and served paths otherwise.
+segments are never guessed), a **Docs** section linking any `ax:docs`-tagged entries from your
+config (nothing invented — docs are a declaration, never a guess, so this section is empty until
+you approve one via `ax init` or declare one by hand), and a **Machine-readable resources** section
+linking the artifacts this build actually produced or detected — the catalog, `openapi.json`, an MCP
+endpoint, an **Agent skills** line when a skills index is served — as absolute URLs when the site
+origin resolved and served paths otherwise.
 
 The **When to use** section is deliberately a TODO, and the comment says why: agent-readiness checks
 look for real guidance about which tasks belong on your site, and an unedited placeholder scores the
@@ -467,16 +487,52 @@ the opposite posture. `onDetection` telemetry is armored (sync throws swallowed,
 `event.waitUntil()`), and canonical URLs derived behind a proxy are round-tripped through the URL
 parser — an unparseable `Host` omits the header rather than reflecting raw input.
 
+## Agent skills publishing (`publishSkills`)
+
+Like markdown twins, publishing your in-repo Agent Skills is a _generated artifact_, not a scaffold:
+nothing to hand-edit, regenerated every build, and off by default because publishing repo content to
+your public site is an exposure decision only you can make. Turn it on and ax copies each selected
+`SKILL.md` to
+`public/.well-known/agent-skills/<name>/SKILL.md` and generates the discovery index that describes
+them, `/.well-known/agent-skills/index.json` — an [Agent Skills discovery
+spec](https://schemas.agentskills.io/discovery/0.2.0/schema.json) v0.2.0 document (`$schema` +
+`skills: [{ name, type: "skill-md", description, url, digest }]`, `digest` a `sha256:` hash of the
+published content). A description missing from a skill's frontmatter falls back to its first
+paragraph (with a warning nudging you to add one).
+
+- **`true`** publishes every `skills/<name>/SKILL.md` found one level deep at your project root.
+  It never reaches into `.claude/skills/` — that directory holds skills for local agent sessions,
+  not necessarily ones meant for public discovery.
+- **A `string[]`** names explicit root-relative skill directories instead (e.g.
+  `["skills/getting-started", ".claude/skills/foo"]`), evaluated as-is. This is the only way a
+  `.claude/skills/` skill gets published, and how `ax init`'s skills question persists a subset
+  selection.
+
+Every build recomputes the index and removes published skill directories that are no longer
+selected, so a stale skill never lingers after you deselect it. A published `SKILL.md` you (or
+someone) hand-edited after ax wrote it is never overwritten — ax warns and tells you to edit the
+source instead, and the index still reports that copy's actual (edited) digest rather than lying
+about what's served. A pre-existing `agent-skills` discovery index ax didn't write is referenced,
+never touched or regenerated. Under `emit: 'route'`, only `index.json` becomes a route handler
+(matching the catalog's own emission target) — the `SKILL.md` copies are always static files under
+`public/`, since they're plain assets an agent fetches by URL. When you have skills under `skills/`
+but nothing serves them, the build recommends turning `publishSkills` on rather than publishing them
+unbidden. Once something serves an index — published this run or pre-existing — the catalog gains an
+`application/agent-skills+json` entry pointing at it, and `.ora/report.json`'s `skillsPublish` block
+records what was written, removed, and skipped as hand-edited.
+
 ## Machine-readable build report (`--report` / `report`)
 
 `ax --report` (or `report: true` in `ax.config`; a string value customizes the path)
 writes **`.ora/report.json`** — the machine-readable twin of the CLI output: catalog entries and
 where they were written, detected MCP mounts and the server card path, WebMCP tool sites, presence
 of every detect-and-recommend artifact (robots.txt / sitemap / agents.md / JSON-LD / llms.txt /
-openapi.json), agent-404 status, what each opt-in scaffold wrote or skipped and why, the byte and
-estimated-token size of every generated artifact, and every warning and recommendation verbatim. A
-coding agent (or CI step) reads one JSON file instead of parsing log lines — point your agent at it
-after a build and let it work through the recommendations.
+openapi.json / an agent-skills discovery index / a declared docs entry), agent-404 status, what each
+opt-in scaffold wrote or skipped and why, a `skillsPublish` block recording what the agent-skills
+publish pass wrote, removed, or left alone as hand-edited, the byte and estimated-token size of every
+generated artifact, and every warning and recommendation verbatim. A coding agent (or CI step) reads
+one JSON file instead of parsing log lines — point your agent at it after a build and let it work
+through the recommendations.
 
 ### The `ora` section — recommendations in Ora's check language
 

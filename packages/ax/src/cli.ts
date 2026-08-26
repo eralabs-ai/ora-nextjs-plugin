@@ -24,6 +24,7 @@ import type { McpServerCardEmission, McpServerCardPlan } from './server-card.js'
 import { buildArtifactUrl, servedPath } from './site-url.js';
 import type { AiCatalog } from './types.js';
 import {
+  applySkillsPublishPlan,
   CATALOG_OUTPUT_PATH,
   jsonText,
   namedServerCardUrlPath,
@@ -373,6 +374,37 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     ? applyAuthMdPlan(cwd, generated.authMdPlan, twinWarn)
     : {};
   reportMarkdownTwinOutcome(cwd, generated, twinResult, authMdResult, reportTarget, stdout);
+
+  // Agent skills: planned during generation (so the exposure summary above already listed them),
+  // published only now — after the gate — alongside the twins. The SKILL.md copies and the
+  // discovery index follow the same emission target as the catalog. Patch the report with the
+  // actuals, the same way the twin outcome is reconciled above.
+  if (generated.skillsPlan !== undefined) {
+    const skillsResult = applySkillsPublishPlan(cwd, generated.skillsPlan, {
+      target: emit,
+      warn: (message) => stdout(`[ax] ⚠ ${message}`),
+    });
+    generated.report.skillsPublish.written = skillsResult.written.map((skill) => ({
+      name: skill.name,
+      path: relative(cwd, skill.path),
+    }));
+    generated.report.skillsPublish.removed = skillsResult.removed.map((path) =>
+      relative(cwd, path),
+    );
+    generated.report.skillsPublish.skippedHandEdited = skillsResult.skipped.map((skill) => ({
+      name: skill.name,
+      path: relative(cwd, skill.path),
+    }));
+    for (const removed of skillsResult.removed) {
+      stdout(`[ax] ✓ removed ${relative(cwd, removed)} (stale published agent skill)`);
+    }
+    if (skillsResult.written.length > 0) {
+      stdout(
+        `[ax] ✓ published ${skillsResult.written.length} agent skill` +
+          `${skillsResult.written.length === 1 ? '' : 's'} and a discovery index`,
+      );
+    }
+  }
 
   // Token-aware sizes: report each artifact this build wrote in bytes *and* estimated tokens
   // (chars ÷ 4), since tokens — not disk size — are what constrain the agent that later reads it.
@@ -811,6 +843,22 @@ function printExposureSummary(
       `[ax]   • Auth guide → ${generated.authMdPlan.servedPath} (${surfaceCount} gated ` +
         `surface${surfaceCount === 1 ? '' : 's'})`,
     );
+  }
+
+  // Agent skills are published to the public site, so the gate must show them before anything is
+  // written: counts of what this run would create/update/remove, plus any hand-edited copies it
+  // will refuse to overwrite.
+  const skillsPlan = generated.skillsPlan;
+  if (skillsPlan !== undefined) {
+    const count = (action: string): number =>
+      skillsPlan.skills.filter((skill) => skill.action === action).length;
+    const parts = [
+      `${count('create')} to publish`,
+      `${count('update')} to update`,
+      `${skillsPlan.staleDirs.length} removed`,
+      `${count('skip-hand-edited')} skipped (hand-edited)`,
+    ];
+    stdout(`[ax]   • Agent skills → ${parts.join(', ')}`);
   }
 }
 

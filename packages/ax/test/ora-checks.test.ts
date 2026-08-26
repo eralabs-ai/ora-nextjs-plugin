@@ -22,6 +22,8 @@ function nothingPresent(): OraArtifactPresence {
     'mcp-server-card': false,
     'auth.md': false,
     middleware: false,
+    'agent-skills-index': false,
+    docs: false,
   };
 }
 
@@ -53,6 +55,8 @@ describe('ORA_CHECK_MAP', () => {
       'mcp-server-card',
       'auth.md',
       'middleware',
+      'agent-skills-index',
+      'docs',
     ]);
   });
 });
@@ -131,6 +135,40 @@ describe("buildOraChecks 'not-applicable' artifacts", () => {
     expect(checks.some((check) => check.artifact === 'auth.md')).toBe(false);
     // The other artifacts are unaffected.
     expect(checks.some((check) => check.id === 'markdown-url-fallback')).toBe(true);
+  });
+
+  it('maps the agent-skills index and docs onto Ora’s real check ids', () => {
+    const present = { ...nothingPresent(), 'agent-skills-index': true, docs: true };
+    const addressed = buildOraChecks(present)
+      .filter((check) => check.status === 'addressed')
+      .map((check) => check.id);
+    expect(addressed).toEqual(['agent-skills-index-v2', 'public-api-docs']);
+  });
+
+  it('holds the agent-skills index and docs checks actionable when neither is present', () => {
+    const actionable = idsWithStatus(nothingPresent(), 'actionable');
+    expect(actionable).toContain('agent-skills-index-v2');
+    expect(actionable).toContain('public-api-docs');
+  });
+
+  it('attaches a hand-edit note to the actionable-or-addressed agent-skills index only when actionable', () => {
+    const note = '1 published skill file was hand-edited; edit the sources instead.';
+    // When the index is present the check is addressed and never carries a note...
+    const addressed = buildOraChecks(
+      { ...nothingPresent(), 'agent-skills-index': true },
+      { 'agent-skills-index': note },
+    ).find((check) => check.id === 'agent-skills-index-v2');
+    expect(addressed?.note).toBeUndefined();
+    // ...but an absent index keeps the note on its actionable check.
+    const actionable = buildOraChecks(nothingPresent(), {
+      'agent-skills-index': note,
+    }).find((check) => check.id === 'agent-skills-index-v2');
+    expect(actionable).toEqual({
+      id: 'agent-skills-index-v2',
+      artifact: 'agent-skills-index',
+      status: 'actionable',
+      note,
+    });
   });
 
   it('maps the markdown twins and auth guide onto Ora’s real check ids', () => {

@@ -23,6 +23,12 @@ fixtures/**/public/.well-known/ai-catalog.json
 fixtures/**/public/.well-known/mcp/server-card.json
 fixtures/**/public/.well-known/mcp/server-card/
 
+# The published agent-skills discovery index + SKILL.md copies ax's postbuild step writes — the
+# whole directory is generated (unlike the single catalog/card files above, there's no plausible
+# hand-authored file under this path to preserve). The tracked artifact is the committed
+# fixtures/*/skills.golden/ snapshot, the same idiom cards.golden/ uses for server cards.
+fixtures/**/public/.well-known/agent-skills/
+
 # Markdown twins + the auth guide ax's postbuild step generates in fixtures — build output. The
 # tracked artifacts are the normalized snapshots under fixtures/*/twins.golden/. Scoped to the
 # exact generated paths so hand-authored fixture markdown (markdown-twins/public/hand.md,
@@ -36,6 +42,7 @@ fixtures/mdx-content/public/guide.md
 fixtures/mcp-multi-server/public/index.md
 fixtures/discovery/public/index.md
 fixtures/middleware/public/index.md
+fixtures/agent-skills/public/index.md
 fixtures/*/public/auth.md
 
 # The serving-manifest data module a fixture's `prebuild: ax manifest` regenerates every build —

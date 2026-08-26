@@ -33,6 +33,7 @@ const REPORT_PATH = join('.ora', 'report.json');
 const GOLDEN_FILE = 'report.golden.json';
 const TWINS_GOLDEN_DIR = 'twins.golden';
 const CARDS_GOLDEN_DIR = 'cards.golden';
+const SKILLS_GOLDEN_DIR = 'skills.golden';
 
 /**
  * The reports carry three fields that vary per run or per checkout and must be neutralized before
@@ -236,6 +237,90 @@ function checkCardSnapshots(name, fixtureRoot, update) {
   return failures.map((f) => `${f} (run \`pnpm reports:regen\` if intended)`);
 }
 
+/**
+ * Every file the agent-skills publish pass produced under `public/.well-known/agent-skills/` —
+ * the discovery `index.json` plus each published `<name>/SKILL.md` — by path relative to that
+ * dir. Like server cards, this output is fully deterministic (fixtures pin `siteUrl`, and the
+ * published content is a verbatim copy of the source `SKILL.md`), so it's snapshotted verbatim.
+ */
+function producedSkillsFiles(fixtureRoot) {
+  const skillsDir = join(fixtureRoot, 'public', '.well-known', 'agent-skills');
+  const files = new Map();
+  const stack = existsSync(skillsDir) ? [skillsDir] : [];
+  while (stack.length > 0) {
+    const dir = stack.pop();
+    for (const name of readdirSync(dir)) {
+      const abs = join(dir, name);
+      if (statSync(abs).isDirectory()) {
+        stack.push(abs);
+      } else if (name.endsWith('.json') || name.endsWith('.md')) {
+        files.set(relative(skillsDir, abs), readFileSync(abs, 'utf8'));
+      }
+    }
+  }
+  return files;
+}
+
+/** Every .json/.md under a fixture's committed skills.golden/, by path relative to that dir. */
+function skillsGoldenFiles(fixtureRoot) {
+  const goldenDir = join(fixtureRoot, SKILLS_GOLDEN_DIR);
+  const files = new Map();
+  const stack = existsSync(goldenDir) ? [goldenDir] : [];
+  while (stack.length > 0) {
+    const dir = stack.pop();
+    for (const name of readdirSync(dir)) {
+      const abs = join(dir, name);
+      if (statSync(abs).isDirectory()) stack.push(abs);
+      else if (name.endsWith('.json') || name.endsWith('.md'))
+        files.set(relative(goldenDir, abs), readFileSync(abs, 'utf8'));
+    }
+  }
+  return files;
+}
+
+/**
+ * Agent-skills snapshots: every file the fixture build published under
+ * `public/.well-known/agent-skills/` is pinned verbatim under `fixtures/<name>/skills.golden/`.
+ * Returns failure strings (empty when in sync / updating).
+ */
+function checkSkillsSnapshots(name, fixtureRoot, update) {
+  const produced = producedSkillsFiles(fixtureRoot);
+  const goldenDir = join(fixtureRoot, SKILLS_GOLDEN_DIR);
+
+  if (update) {
+    rmSync(goldenDir, { recursive: true, force: true });
+    for (const [rel, content] of produced) {
+      const target = join(goldenDir, rel);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, content, 'utf8');
+    }
+    if (produced.size > 0) console.log(`updated  ${name}/${SKILLS_GOLDEN_DIR} (${produced.size})`);
+    return [];
+  }
+
+  const failures = [];
+  const goldens = skillsGoldenFiles(fixtureRoot);
+  for (const [rel, content] of produced) {
+    const golden = goldens.get(rel);
+    if (golden === undefined) {
+      failures.push(
+        `${name}: generated .well-known/agent-skills/${rel} has no ${SKILLS_GOLDEN_DIR}/${rel} snapshot`,
+      );
+    } else if (content !== golden) {
+      failures.push(
+        `${name}: .well-known/agent-skills/${rel} does not match its ${SKILLS_GOLDEN_DIR} snapshot`,
+      );
+    }
+    goldens.delete(rel);
+  }
+  for (const rel of goldens.keys()) {
+    failures.push(
+      `${name}: stale snapshot ${SKILLS_GOLDEN_DIR}/${rel} — the build no longer produces it`,
+    );
+  }
+  return failures.map((f) => `${f} (run \`pnpm reports:regen\` if intended)`);
+}
+
 const update = process.argv.includes('--update');
 const failures = [];
 let checked = 0;
@@ -256,6 +341,7 @@ for (const name of fixturesWithReports()) {
   const actual = serialize(normalize(JSON.parse(readFileSync(reportPath, 'utf8')), fixtureRoot));
   failures.push(...checkTwinSnapshots(name, fixtureRoot, update));
   failures.push(...checkCardSnapshots(name, fixtureRoot, update));
+  failures.push(...checkSkillsSnapshots(name, fixtureRoot, update));
 
   if (update) {
     writeFileSync(goldenPath, actual, 'utf8');

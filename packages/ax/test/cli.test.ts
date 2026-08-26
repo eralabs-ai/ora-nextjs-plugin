@@ -39,8 +39,35 @@ function writeMcpFixture(dir: string): void {
 function writeFullyAgentReadyApp(dir: string): void {
   writeMcpFixture(dir);
 
+  // A docs declaration (a `text/html` entry tagged `ax:docs`) addresses the docs check, and a
+  // served agent-skills index addresses the skills-index check — the two artifacts ax never guesses
+  // and only recognizes when explicitly present.
+  writeFileSync(
+    join(dir, 'ax.config.mjs'),
+    'export default {\n' +
+      "  siteUrl: 'https://example.com',\n" +
+      '  entries: [\n' +
+      '    {\n' +
+      "      identifier: 'urn:air:example.com:docs',\n" +
+      "      type: 'text/html',\n" +
+      "      displayName: 'Documentation',\n" +
+      "      url: 'https://example.com/docs',\n" +
+      "      tags: ['ax:docs'],\n" +
+      '    },\n' +
+      '  ],\n' +
+      '};\n',
+    'utf8',
+  );
+
   const publicDir = join(dir, 'public');
   mkdirSync(publicDir, { recursive: true });
+  const skillsDir = join(publicDir, '.well-known', 'agent-skills');
+  mkdirSync(skillsDir, { recursive: true });
+  writeFileSync(
+    join(skillsDir, 'index.json'),
+    `${JSON.stringify({ $schema: 'x', skills: [] }, null, 2)}\n`,
+    'utf8',
+  );
   writeFileSync(join(publicDir, 'llms.txt'), '# demo\n', 'utf8');
   // A hand-authored homepage twin (no generated-by marker): the markdown-fallback checks read as
   // addressed without this synthetic app needing a real prerendered build output.
@@ -877,5 +904,79 @@ describe('runCli multi-mount server cards', () => {
     expect(rerunQuestions.some((q) => q.includes('be the primary'))).toBe(false);
     const rebuilt = JSON.parse(readFileSync(join(dir, SERVER_CARD_OUTPUT_PATH), 'utf8'));
     expect(rebuilt.serverUrl).toBe('https://example.com/api/beta/mcp');
+  });
+});
+
+// Agent-skills publishing: the exposure summary must list them BEFORE anything is written (the
+// gate's whole point), and the post-gate apply publishes the copies + index and patches the report.
+describe('runCli agent skills', () => {
+  function writeSkillsApp(dir: string): void {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com', publishSkills: true };\n",
+      'utf8',
+    );
+    mkdirSync(join(dir, 'skills', 'alpha'), { recursive: true });
+    writeFileSync(
+      join(dir, 'skills', 'alpha', 'SKILL.md'),
+      '---\ndescription: Alpha skill\n---\n\n# Alpha\n\nBody.\n',
+      'utf8',
+    );
+  }
+
+  it('lists skills in the exposure summary, publishes them, and patches the report', async () => {
+    writeSkillsApp(dir);
+
+    const code = await runCli(['--report'], { ...io, cwd: dir });
+
+    expect(code).toBe(0);
+    // The gate showed the skills line before any write.
+    expect(stdout.some((l) => l.includes('Agent skills → 1 to publish'))).toBe(true);
+    // The copy and the discovery index landed under public/.well-known/agent-skills/.
+    const copy = join(dir, 'public', '.well-known', 'agent-skills', 'alpha', 'SKILL.md');
+    const index = join(dir, 'public', '.well-known', 'agent-skills', 'index.json');
+    expect(existsSync(copy)).toBe(true);
+    expect(existsSync(index)).toBe(true);
+
+    const report = JSON.parse(readFileSync(join(dir, REPORT_OUTPUT_PATH), 'utf8'));
+    expect(report.skillsPublish.enabled).toBe(true);
+    expect(report.skillsPublish.written).toEqual([
+      { name: 'alpha', path: join('public', '.well-known', 'agent-skills', 'alpha', 'SKILL.md') },
+    ]);
+    expect(report.artifacts.agentSkills.found).toBe(true);
+    expect(
+      report.ora.checks.find((c: { id: string }) => c.id === 'agent-skills-index-v2').status,
+    ).toBe('addressed');
+  });
+
+  it('writes no skills and shows no skills line when publishSkills is off (default)', async () => {
+    writeSkillsApp(dir);
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com' };\n",
+      'utf8',
+    );
+
+    await runCli(['--report'], { ...io, cwd: dir });
+
+    expect(stdout.some((l) => l.includes('Agent skills →'))).toBe(false);
+    expect(existsSync(join(dir, 'public', '.well-known', 'agent-skills', 'index.json'))).toBe(
+      false,
+    );
+    const report = JSON.parse(readFileSync(join(dir, REPORT_OUTPUT_PATH), 'utf8'));
+    expect(report.skillsPublish.enabled).toBe(false);
+  });
+
+  it('writes nothing under --dry-run but still shows the skills line', async () => {
+    writeSkillsApp(dir);
+
+    const code = await runCli(['--dry-run'], { ...io, cwd: dir });
+
+    expect(code).toBe(0);
+    expect(stdout.some((l) => l.includes('Agent skills → 1 to publish'))).toBe(true);
+    expect(existsSync(join(dir, 'public', '.well-known', 'agent-skills', 'index.json'))).toBe(
+      false,
+    );
   });
 });

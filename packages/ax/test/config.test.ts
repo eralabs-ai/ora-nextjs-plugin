@@ -30,6 +30,7 @@ describe('loadAxConfig', () => {
       scaffoldRobots: false,
       scaffoldJsonLd: false,
       markdownTwins: true,
+      publishSkills: false,
       report: false,
       entries: [],
     });
@@ -114,6 +115,49 @@ describe('loadAxConfig', () => {
       const { config } = await loadAxConfig(dir);
       expect(config.siteUrl).toBe('https://example.com');
       expect(typeof config.isGated).toBe('function');
+    });
+  });
+
+  // `publishSkills` accepts either a boolean (auto-discover root-level `skills/*`) or an explicit
+  // list of root-relative skill directory paths (the only way to reach into `.claude/skills/`).
+  describe('publishSkills', () => {
+    it('accepts true', async () => {
+      writeFileSync(join(dir, 'ax.config.js'), 'module.exports = { publishSkills: true };\n');
+      const { config } = await loadAxConfig(dir);
+      expect(config.publishSkills).toBe(true);
+    });
+
+    it('accepts false', async () => {
+      writeFileSync(join(dir, 'ax.config.js'), 'module.exports = { publishSkills: false };\n');
+      const { config } = await loadAxConfig(dir);
+      expect(config.publishSkills).toBe(false);
+    });
+
+    it('accepts an explicit list of skill directories, including under .claude/skills/', async () => {
+      writeFileSync(
+        join(dir, 'ax.config.js'),
+        "module.exports = { publishSkills: ['skills/foo', '.claude/skills/bar'] };\n",
+      );
+      const { config } = await loadAxConfig(dir);
+      expect(config.publishSkills).toEqual(['skills/foo', '.claude/skills/bar']);
+    });
+
+    it('rejects a string (only boolean or string[] are valid shapes)', async () => {
+      writeFileSync(join(dir, 'ax.config.js'), "module.exports = { publishSkills: 'yes' };\n");
+      await expect(loadAxConfig(dir)).rejects.toThrow(AxConfigError);
+      await expect(loadAxConfig(dir)).rejects.toThrow(/publishSkills/);
+    });
+
+    it('rejects a non-string array item', async () => {
+      writeFileSync(join(dir, 'ax.config.js'), 'module.exports = { publishSkills: [1] };\n');
+      await expect(loadAxConfig(dir)).rejects.toThrow(AxConfigError);
+      await expect(loadAxConfig(dir)).rejects.toThrow(/publishSkills/);
+    });
+
+    it('rejects an empty string array item', async () => {
+      writeFileSync(join(dir, 'ax.config.js'), "module.exports = { publishSkills: [''] };\n");
+      await expect(loadAxConfig(dir)).rejects.toThrow(AxConfigError);
+      await expect(loadAxConfig(dir)).rejects.toThrow(/publishSkills/);
     });
   });
 

@@ -309,6 +309,89 @@ describe('detectLlmsTxt — scaffolding', () => {
     expect(scaffolded).toContain('\\${interpolation}');
   });
 
+  it('lists docs entries under a Docs section, between Key pages and Machine-readable resources', () => {
+    mkdirSync(join(dir, 'app'), { recursive: true });
+    writeFileSync(join(dir, 'app', 'page.tsx'), 'export default function P() {}\n', 'utf8');
+
+    detectLlmsTxt({
+      cwd: dir,
+      siteUrl: 'https://example.com',
+      basePath: '',
+      warn,
+      scaffold: true,
+      site: { displayName: 'acme' },
+      resources: {
+        docsEntries: [
+          { url: 'https://example.com/docs', displayName: 'Docs' },
+          { url: 'https://example.com/guide' },
+        ],
+      },
+    });
+
+    const scaffolded = readFileSync(join(dir, 'app', 'llms.txt', 'route.js'), 'utf8');
+    expect(scaffolded).toContain(
+      '## Docs\n\n- [Docs](https://example.com/docs)\n- [Documentation](https://example.com/guide)',
+    );
+    const keyPagesIndex = scaffolded.indexOf('## Key pages');
+    const docsIndex = scaffolded.indexOf('## Docs');
+    const resourcesIndex = scaffolded.indexOf('## Machine-readable resources');
+    expect(keyPagesIndex).toBeGreaterThan(-1);
+    expect(keyPagesIndex).toBeLessThan(docsIndex);
+    expect(docsIndex).toBeLessThan(resourcesIndex);
+  });
+
+  it('omits the Docs section when no docs entries are given', () => {
+    mkdirSync(join(dir, 'app'), { recursive: true });
+
+    detectLlmsTxt({
+      cwd: dir,
+      siteUrl: 'https://example.com',
+      basePath: '',
+      warn,
+      scaffold: true,
+      site: { displayName: 'acme' },
+    });
+
+    const scaffolded = readFileSync(join(dir, 'app', 'llms.txt', 'route.js'), 'utf8');
+    expect(scaffolded).not.toContain('## Docs');
+  });
+
+  it('lists the agent skills index under Machine-readable resources when skillsIndexUrl is given', () => {
+    mkdirSync(join(dir, 'app'), { recursive: true });
+
+    detectLlmsTxt({
+      cwd: dir,
+      siteUrl: 'https://example.com',
+      basePath: '',
+      warn,
+      scaffold: true,
+      site: { displayName: 'acme' },
+      resources: { skillsIndexUrl: 'https://example.com/.well-known/agent-skills/index.json' },
+    });
+
+    const scaffolded = readFileSync(join(dir, 'app', 'llms.txt', 'route.js'), 'utf8');
+    expect(scaffolded).toContain(
+      '- [Agent skills](https://example.com/.well-known/agent-skills/index.json) — ' +
+        "this site's published agent skills",
+    );
+  });
+
+  it('omits the agent skills line when skillsIndexUrl is absent', () => {
+    mkdirSync(join(dir, 'app'), { recursive: true });
+
+    detectLlmsTxt({
+      cwd: dir,
+      siteUrl: 'https://example.com',
+      basePath: '',
+      warn,
+      scaffold: true,
+      site: { displayName: 'acme' },
+    });
+
+    const scaffolded = readFileSync(join(dir, 'app', 'llms.txt', 'route.js'), 'utf8');
+    expect(scaffolded).not.toContain('Agent skills');
+  });
+
   it('warns instead of throwing when app/llms.txt exists as a plain file, not a directory', () => {
     mkdirSync(join(dir, 'app'), { recursive: true });
     writeFileSync(join(dir, 'app', 'llms.txt'), 'not a directory', 'utf8');

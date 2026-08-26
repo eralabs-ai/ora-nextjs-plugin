@@ -65,6 +65,25 @@ export interface ReportMarkdownTwins {
 }
 
 /**
+ * What the agent-skills publish pass did (and refused to do): the discovery index and its published
+ * SKILL.md copies are *generated artifacts* — regenerated every build — so this records which copies
+ * were written or removed this run, and which the build refused to overwrite because a human edited
+ * the published copy (edit the source instead). Sibling of {@link ReportMarkdownTwins}: the generator
+ * leaves the arrays empty (they describe writes that only happen after the review gate) and the CLI
+ * patches in the actuals once the plan is applied.
+ */
+export interface ReportSkillsPublish {
+  /** Whether ax is publishing agent skills this run (a non-empty `publishSkills` set was resolved). */
+  enabled: boolean;
+  /** Skills whose published SKILL.md was written this run (created or updated). */
+  written: Array<{ name: string; path: string }>;
+  /** Published skill dirs removed this run — a skill ax published before and no longer does. */
+  removed: string[];
+  /** Skills left untouched because their published copy was hand-edited (the source is authoritative). */
+  skippedHandEdited: Array<{ name: string; path: string }>;
+}
+
+/**
  * How this build's findings map onto Ora's named agent-readiness checks. This is what makes the
  * report a handoff rather than a log — an agent reads `checks` and works the `actionable` ones.
  * Deliberately just the mapping: no service URLs, so the report describes the site, not a vendor.
@@ -127,6 +146,14 @@ export interface BuildReport {
     jsonLd: ReportArtifact;
     llmsTxt: ReportArtifact;
     openapi: ReportArtifact;
+    /** An agent-skills discovery index is served (pre-existing) or published this run. */
+    agentSkills: ReportArtifact;
+    /**
+     * Whether the catalog declares where the site's docs live — a `text/html` entry tagged
+     * `ax:docs`. Mechanical: the build never guesses docs; presence is asserted only by that tag
+     * (written by `ax init` or hand-declared in `ax.config` `entries`), never inferred from routes.
+     */
+    docs: ReportArtifact;
   };
   /** Agent-aware 404 status: whether a not-found page exists and whether it signposts agents. */
   agent404: {
@@ -149,6 +176,8 @@ export interface BuildReport {
   scaffolds: ReportScaffolds;
   /** The markdown-twin pass: what was written, what was refused and why (see the type). */
   markdownTwins: ReportMarkdownTwins;
+  /** The agent-skills publish pass: what was published, removed, or left as a hand-edit. */
+  skillsPublish: ReportSkillsPublish;
   /**
    * Byte and estimated-token size of each artifact this build generated. Tokens (`chars / 4`) are
    * the unit that constrains the agent that later reads the artifact; an entry over the truncation

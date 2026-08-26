@@ -11,6 +11,7 @@ import { buildMcpEntries, detectMcpMounts, type McpMount } from './detect-mcp.js
 import { detectOpenApi } from './detect-openapi.js';
 import { detectRobots } from './detect-robots.js';
 import { detectSitemap } from './detect-sitemap.js';
+import { detectSkills } from './detect-skills.js';
 import { detectWebMcp } from './detect-webmcp.js';
 import { buildDiscoveryRecommendations } from './discovery.js';
 import { applyEntryOverrides, entryUrlPath } from './entries.js';
@@ -21,6 +22,7 @@ import { planMarkdownTwins, type MarkdownTwinPlan } from './markdown-twins.js';
 import { buildMiddlewareWiringInstruction, detectMiddleware } from './middleware-wiring.js';
 import { loadNextConfig } from './next-config.js';
 import { buildOraChecks, type OraArtifact } from './ora-checks.js';
+import type { SkillsPublishPlan } from './publish-skills.js';
 import type { BuildReport, ReportArtifact, ReportScaffolds } from './report.js';
 import { buildRouterModel } from './router-model.js';
 import type { JsonLdScaffoldResult } from './scaffold-json-ld.js';
@@ -88,6 +90,11 @@ export interface GenerateCatalogResult {
   twinPlan: MarkdownTwinPlan;
   /** The generated `/auth.md`, when gated surfaces exist. Written by the CLI with the twins. */
   authMdPlan?: AuthMdPlan;
+  /**
+   * This build's agent-skills publish plan — present only when `publishSkills` selected a non-empty
+   * set. Computed here (pure, so the review gate can show it), applied by the CLI after the gate.
+   */
+  skillsPlan?: SkillsPublishPlan;
 }
 
 /** Presence-shape shared by the detect-and-recommend detectors (`{found, source?}`). */
@@ -289,11 +296,26 @@ function oraCheckNotes(scaffolds: {
   authMdMissing?: boolean;
   mcpCardMissing?: boolean;
   middlewareWiring?: string;
+  skillsPlan?: SkillsPublishPlan;
 }): Partial<Record<OraArtifact, string>> {
   const notes: Partial<Record<OraArtifact, string>> = {};
 
   if (scaffolds.middlewareWiring !== undefined) {
     notes['middleware'] = scaffolds.middlewareWiring;
+  }
+
+  // A hand-edited published copy is still listed in the served index (with its own digest), so the
+  // index check stays addressed — but the human's edit will never propagate unless they move it to
+  // the source, which is the one thing worth saying about an otherwise-addressed check.
+  const handEdited = scaffolds.skillsPlan?.skills.filter(
+    (skill) => skill.action === 'skip-hand-edited',
+  );
+  if (handEdited !== undefined && handEdited.length > 0) {
+    const count = handEdited.length;
+    notes['agent-skills-index'] =
+      `${count} published skill file${count === 1 ? ' was' : 's were'} hand-edited; ax leaves ` +
+      'them in place but will not update them — edit the sources under skills/ instead (delete a ' +
+      'published copy to let ax manage it again).';
   }
 
   if (scaffolds.mcpCardMissing === true) {
@@ -472,6 +494,32 @@ export async function generateCatalog(
     (mcpMounts.some((mount) => mount.auth !== undefined) ||
       (openApiEntry?.auth !== undefined && openApiEntry.auth.status !== 'none'));
 
+  // Agent skills: detect served/publishable skills and plan a publish when opted in. Runs before
+  // the llms.txt detector so a scaffolded starter can already reference the skills discovery index
+  // this same run publishes. Publishing repo content to the public site is an exposure decision, so
+  // the plan is applied only after the review gate — the entry is referenced now (pure), the copies
+  // land later (in the CLI).
+  const skills = detectSkills({
+    cwd,
+    publishSkills: config.publishSkills,
+    siteUrl,
+    basePath,
+    warn,
+    recommend,
+  });
+  if (skills.entry) inferredEntries.push(skills.entry);
+
+  // Docs entries come from config directly, not the merged catalog: `applyEntryOverrides` (below)
+  // runs after this detector, and `ax:docs` entries only ever come from config (hand-declared or
+  // written by `ax init`) anyway, so reading `config.entries` here is correct, not a shortcut.
+  const docsEntries = config.entries
+    .filter((entry) => Array.isArray(entry.tags) && entry.tags.includes('ax:docs'))
+    .filter((entry): entry is CatalogEntry & { url: string } => typeof entry.url === 'string')
+    .map((entry) => ({
+      url: entry.url,
+      ...(entry.displayName !== undefined ? { displayName: entry.displayName } : {}),
+    }));
+
   const llmsTxtResult = detectLlmsTxt({
     cwd,
     siteUrl,
@@ -489,6 +537,8 @@ export async function generateCatalog(
       mcpPathnames: mcpMounts.map((mount) => mount.pathname),
       twinPaths: twinPlan.servedPaths,
       authMd: authMdLikely,
+      docsEntries,
+      skillsIndexUrl: skills.entry?.url,
     },
   });
   if (llmsTxtResult.entry) inferredEntries.push(llmsTxtResult.entry);
@@ -527,6 +577,21 @@ export async function generateCatalog(
         }
       }
     }
+  }
+
+  // Where the site's docs live is a declaration, never a guess: an entry is docs only when it's
+  // explicitly tagged `ax:docs` (written by `ax init` or hand-declared in ax.config `entries`).
+  // Reading the final merged entries keeps this mechanical — the build asserts nothing about docs
+  // from routes or content. Absent, nudge toward declaring them.
+  const docsFound = entries.some(
+    (entry) => Array.isArray(entry.tags) && entry.tags.includes('ax:docs'),
+  );
+  if (!docsFound) {
+    recommend(
+      'No docs declared — agents that want to read your documentation have nowhere to look. Run ' +
+        '`ax init` to detect your docs routes and add any external docs, or add a `text/html` entry ' +
+        "tagged `ax:docs` to ax.config's `entries` pointing at where your docs live.",
+    );
   }
 
   // Detect-and-recommend for the discovery/access artifacts that affect agent-readiness. These
@@ -681,6 +746,8 @@ export async function generateCatalog(
         ...(llmsTxtResult.source !== undefined ? { source: llmsTxtResult.source } : {}),
       },
       openapi: openApi,
+      agentSkills: artifact(skills),
+      docs: { found: docsFound },
     },
     scaffolds,
     // Planned values; the CLI reconciles `written`/`deleted`/`authMd` after it applies the plan
@@ -703,6 +770,15 @@ export async function generateCatalog(
       ...(authMdPlan !== undefined
         ? { authMd: { path: join('public', 'auth.md'), surfaceCount: authMdPlan.surfaceCount } }
         : {}),
+    },
+    // Planned placeholders; the CLI patches `written`/`removed`/`skippedHandEdited` once it applies
+    // the plan post-review-gate, exactly like `markdownTwins.written`. `enabled` reflects whether a
+    // publish is happening this run — a non-empty `publishSkills` set produced a plan.
+    skillsPublish: {
+      enabled: skills.plan !== undefined,
+      written: [],
+      removed: [],
+      skippedHandEdited: [],
     },
     // Filled in by the CLI once artifacts are on disk (it knows the written catalog / server-card
     // paths and can read the scaffolded files back), so the generator leaves it empty.
@@ -737,6 +813,11 @@ export async function generateCatalog(
           // a middleware file wires the ax runtime entry.
           middleware:
             router.listPageRoutes().length === 0 ? 'not-applicable' : middlewareStatus.wiredToAx,
+          // The skills index and the docs declaration are their own presence signals — a site that
+          // serves neither simply has both actionable (never N/A: they aren't gated on some other
+          // surface existing first).
+          'agent-skills-index': skills.found,
+          docs: docsFound,
         },
         oraCheckNotes({
           llmsTxtScaffolded: llmsTxtResult.scaffoldedPath,
@@ -745,6 +826,7 @@ export async function generateCatalog(
           authMdMissing: authMdCandidate !== undefined && authMdPlan === undefined,
           mcpCardMissing: mcpMounts.length > 0 && serverCardPlan === undefined,
           ...(middlewareWiring !== undefined ? { middlewareWiring } : {}),
+          ...(skills.plan !== undefined ? { skillsPlan: skills.plan } : {}),
         }),
       ),
     },
@@ -760,6 +842,7 @@ export async function generateCatalog(
     reportTarget: config.report,
     twinPlan,
     ...(authMdPlan !== undefined ? { authMdPlan } : {}),
+    ...(skills.plan !== undefined ? { skillsPlan: skills.plan } : {}),
     ...(serverCardPlan ? { serverCardPlan } : {}),
     ...(llmsTxtResult.scaffoldedBody !== undefined
       ? { scaffoldedLlmsTxtBody: llmsTxtResult.scaffoldedBody }

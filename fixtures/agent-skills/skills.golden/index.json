@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schemas.agentskills.io/discovery/0.2.0/schema.json",
+  "skills": [
+    {
+      "name": "api-integration",
+      "type": "skill-md",
+      "description": "Helps a coding agent wire a new API route into this site and expose it to other agents correctly.",
+      "url": "/.well-known/agent-skills/api-integration/SKILL.md",
+      "digest": "sha256:5bbab591a4a82d277d067385415f4f7c2053724eb68c7225188b99d97cbf16ba"
+    },
+    {
+      "name": "getting-started",
+      "type": "skill-md",
+      "description": "Walks a coding agent through cloning this fixture site and running its dev server.",
+      "url": "/.well-known/agent-skills/getting-started/SKILL.md",
+      "digest": "sha256:a5fce4197f1cb58bd622e73bc6ee56bd94e375c1cfbb94b17fe2ba3e27fa8d64"
+    }
+  ]
+}
