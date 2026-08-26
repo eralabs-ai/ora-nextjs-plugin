@@ -451,6 +451,12 @@ async function askAuthEndpoints(
         `${suggestion.issuers.join(', ')} (from ${suggestion.issuersSource}) — its ` +
         '/.well-known/oauth-authorization-server document lists the endpoints to paste below.',
     );
+  } else if (suggestion.resourceMetadataRoute !== undefined) {
+    stdout(
+      `[ax]   Detected an RFC 9728 protected-resource route (${suggestion.resourceMetadataRoute}) — ` +
+        'your auth provider serves the OAuth metadata at runtime, so agents can discover the ' +
+        'endpoints themselves; the endpoint questions below are optional.',
+    );
   }
 
   // Up to a few tries per question, like siteUrl: an invalid value would otherwise be written into
@@ -484,11 +490,15 @@ async function askAuthEndpoints(
       : ' (Enter to skip)';
 
   // Default the scheme to OAuth only when the source tree shows OAuth actually exists (committed
-  // metadata or a declared authorization server). Most real apps have something more basic — an
-  // API key behind their existing login — and a wizard that leads with OAuth questions they can't
-  // answer just teaches them to skip. With no evidence the default is "skip": Enter-through stays
-  // a no-op, and api_key (the realistic common declaration) is one active keystroke away.
-  const oauthEvidence = suggestion.oauth !== undefined || suggestion.issuers.length > 0;
+  // metadata, a declared authorization server, or a wired protected-resource route). Most real
+  // apps have something more basic — an API key behind their existing login — and a wizard that
+  // leads with OAuth questions they can't answer just teaches them to skip. With no evidence the
+  // default is "skip": Enter-through stays a no-op, and api_key (the realistic common
+  // declaration) is one active keystroke away.
+  const oauthEvidence =
+    suggestion.oauth !== undefined ||
+    suggestion.issuers.length > 0 ||
+    suggestion.resourceMetadataRoute !== undefined;
 
   const overrides: AxEntryOverride[] = [];
   for (const mount of gated) {
@@ -526,11 +536,14 @@ async function askAuthEndpoints(
     const docsUrl = await askUrl(`Docs URL where a human obtains access${where} (Enter to skip)`);
 
     const hasEndpoints = Object.keys(oauth).length > 0;
-    // "api_key" is a declaration by itself; "oauth2" only becomes one once an endpoint backs it
-    // (see the scheme-select rationale above), so an endpoint-less OAuth answer falls back to the
-    // honest "unknown" — and with no docs link either, to nothing at all.
-    const status = scheme === 'api_key' ? 'api_key' : hasEndpoints ? 'oauth2' : 'unknown';
-    if (scheme !== 'api_key' && !hasEndpoints && docsUrl === undefined) continue;
+    // "api_key" is a declaration by itself; "oauth2" becomes one once an endpoint backs it — or
+    // when the source tree itself does (a wired protected-resource route / committed metadata):
+    // agents then discover the endpoints at runtime, so a bare "oauth2" status is accurate and
+    // strictly better than "unknown". Without either kind of backing, an endpoint-less OAuth
+    // answer falls back to the honest "unknown" — and with no docs link either, to nothing.
+    const oauthBacked = hasEndpoints || oauthEvidence;
+    const status = scheme === 'api_key' ? 'api_key' : oauthBacked ? 'oauth2' : 'unknown';
+    if (scheme === 'oauth2' && !oauthBacked && docsUrl === undefined) continue;
 
     overrides.push({
       identifier: mcpMountIdentifier(siteUrl, mount.pathname, findings.mcpMounts.length > 1),
@@ -544,7 +557,9 @@ async function askAuthEndpoints(
       status === 'api_key'
         ? `API key/bearer${docsUrl !== undefined ? ' + docs link' : ''}`
         : status === 'oauth2'
-          ? `OAuth 2.0 endpoints${docsUrl !== undefined ? ' + docs link' : ''}`
+          ? `${hasEndpoints ? 'OAuth 2.0 endpoints' : 'OAuth 2.0 (endpoints agent-discoverable at runtime)'}${
+              docsUrl !== undefined ? ' + docs link' : ''
+            }`
           : 'docs link';
     stdout(`[ax]   ✓ will declare auth for ${served(mount.pathname)} in ax.config (${what})`);
   }

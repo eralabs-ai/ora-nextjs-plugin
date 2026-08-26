@@ -40,6 +40,13 @@ const RESOURCE_METADATA_PATHS = [
 const AUTH_SERVER_URLS_RE = /\bauthServerUrls\s*:\s*\[([^\]]*)\]/;
 const STRING_LITERAL_RE = /['"]([^'"]+)['"]/g;
 
+// A *call* to a protected-resource metadata handler — mcp-handler's `protectedResourceHandler(`
+// (whose `authServerUrls` literal also names the issuer) or a provider-flavored variant like
+// @clerk/mcp-tools' `protectedResourceHandlerClerk(`, which derives the authorization server from
+// env at runtime, so there is no committed issuer literal to read. Either way the wiring itself
+// is committed evidence that this app's gated surface speaks OAuth.
+const PROTECTED_RESOURCE_HANDLER_RE = /\bprotectedResourceHandler[A-Za-z]*\s*\(/;
+
 export interface AuthMetadataSuggestion {
   /** Endpoint prefills — present only when a committed document literally states them (source 1). */
   oauth?: EntryAuthOAuth;
@@ -49,6 +56,13 @@ export interface AuthMetadataSuggestion {
   issuers: string[];
   /** Where the first issuer declaration was found, relative to the project root. */
   issuersSource?: string;
+  /**
+   * A wired RFC 9728 protected-resource route (relative source path), when one exists. Set even
+   * when no issuer literal is readable (a provider-flavored handler resolves it from env at
+   * runtime) — the wiring alone is committed evidence the gated surface speaks OAuth, which the
+   * wizard uses for its scheme default and to say endpoints are agent-discoverable at runtime.
+   */
+  resourceMetadataRoute?: string;
 }
 
 export interface DetectAuthMetadataOptions {
@@ -127,9 +141,18 @@ export function detectAuthMetadata(options: DetectAuthMetadataOptions): AuthMeta
     } catch {
       continue;
     }
-    if (!content.includes('authServerUrls')) continue;
+    if (!content.includes('authServerUrls') && !content.includes('protectedResourceHandler')) {
+      continue;
+    }
     // Scrubbed like every textual detector: a mention in a comment or template literal never fires.
-    const match = AUTH_SERVER_URLS_RE.exec(scrubSource(content));
+    const scrubbed = scrubSource(content);
+    if (
+      suggestion.resourceMetadataRoute === undefined &&
+      PROTECTED_RESOURCE_HANDLER_RE.test(scrubbed)
+    ) {
+      suggestion.resourceMetadataRoute = relative(cwd, file);
+    }
+    const match = AUTH_SERVER_URLS_RE.exec(scrubbed);
     if (match?.[1] === undefined) continue;
     for (const literal of match[1].matchAll(STRING_LITERAL_RE)) {
       const issuer = safeHttpUrl(literal[1]);

@@ -123,3 +123,51 @@ describe('detectAuthMetadata', () => {
     expect(suggestion.issuers).toEqual(['https://auth.example.com']);
   });
 });
+
+describe('resourceMetadataRoute (provider-served RFC 9728 wiring)', () => {
+  it('detects a provider-flavored handler with no issuer literal (Clerk derives it from env)', () => {
+    const routeDir = join(dir, 'app', '.well-known', 'oauth-protected-resource');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      "import { protectedResourceHandlerClerk } from '@clerk/mcp-tools/next';\n" +
+        'const handler = protectedResourceHandlerClerk({ scopes_supported: ["email"] });\n' +
+        'export { handler as GET };\n',
+      'utf8',
+    );
+
+    const suggestion = detectAuthMetadata({ cwd: dir });
+    expect(suggestion.resourceMetadataRoute).toBe(
+      join('app', '.well-known', 'oauth-protected-resource', 'route.ts'),
+    );
+    expect(suggestion.issuers).toEqual([]);
+    expect(suggestion.oauth).toBeUndefined();
+  });
+
+  it('sets the route alongside issuers for the plain mcp-handler variant', () => {
+    const routeDir = join(dir, 'app', 'api', 'meta');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      "const h = protectedResourceHandler({ authServerUrls: ['https://auth.example.com'] });\n" +
+        'export { h as GET };\n',
+      'utf8',
+    );
+
+    const suggestion = detectAuthMetadata({ cwd: dir });
+    expect(suggestion.resourceMetadataRoute).toBe(join('app', 'api', 'meta', 'route.ts'));
+    expect(suggestion.issuers).toEqual(['https://auth.example.com']);
+  });
+
+  it('ignores a handler mention that only appears in a comment', () => {
+    const routeDir = join(dir, 'app', 'api', 'thing');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      '// wire protectedResourceHandlerClerk( here later\n' +
+        'export function GET() { return new Response("ok"); }\n',
+      'utf8',
+    );
+    expect(detectAuthMetadata({ cwd: dir }).resourceMetadataRoute).toBeUndefined();
+  });
+});

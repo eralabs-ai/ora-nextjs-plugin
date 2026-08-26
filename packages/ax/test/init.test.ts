@@ -1141,3 +1141,51 @@ describe('credential-in-URL guard (wizard answers are published verbatim)', () =
     expect(JSON.stringify(config)).not.toContain('sk-live-123');
   });
 });
+
+describe('provider-wired OAuth evidence (Clerk-style runtime metadata)', () => {
+  it('defaults to OAuth, prints the wiring context, and a bare Enter-through declares oauth2', async () => {
+    writeBareApp(dir);
+    const mountDir = join(dir, 'app', '[transport]');
+    mkdirSync(mountDir, { recursive: true });
+    writeFileSync(
+      join(mountDir, 'route.ts'),
+      `import { createMcpHandler, withMcpAuth } from 'mcp-handler';\n` +
+        `const handler = createMcpHandler((server) => {});\n` +
+        `const authed = withMcpAuth(handler, verifyToken, { resourceMetadataPath: '/.well-known/oauth-protected-resource' });\n` +
+        `export { authed as GET };\n`,
+      'utf8',
+    );
+    const metaDir = join(dir, 'app', '.well-known', 'oauth-protected-resource');
+    mkdirSync(metaDir, { recursive: true });
+    writeFileSync(
+      join(metaDir, 'route.ts'),
+      "import { protectedResourceHandlerClerk } from '@clerk/mcp-tools/next';\n" +
+        'const handler = protectedResourceHandlerClerk();\n' +
+        'export { handler as GET };\n',
+      'utf8',
+    );
+
+    let schemeDefault: string | undefined;
+    const prompter = new (class extends ScriptedPrompter {
+      override async select(question: string, rows: MultiSelectRow[]): Promise<string | undefined> {
+        if (question.startsWith('How do agents authenticate')) {
+          schemeDefault = rows.filter(isMultiSelectChoice).find((c) => c.selected)?.value;
+        }
+        return super.select(question, rows);
+      }
+    })({
+      // Only the siteUrl is scripted — everything else is a pure Enter-through on defaults.
+      text: ['https://acme.com'],
+      multiSelect: [[], []],
+      confirm: [false],
+    });
+
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+    expect(schemeDefault).toBe('oauth2');
+    expect(stdout.some((l) => l.includes('protected-resource route'))).toBe(true);
+    // Endpoints skipped, docs skipped — but the wiring backs a bare oauth2 declaration.
+    const { config } = await loadAxConfig(dir);
+    expect(config.entries[0]?.auth).toEqual({ status: 'oauth2' });
+    expect(stdout.some((l) => l.includes('agent-discoverable at runtime'))).toBe(true);
+  });
+});
