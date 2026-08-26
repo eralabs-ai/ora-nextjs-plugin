@@ -638,9 +638,11 @@ async function collectDocsAndSkills(
   // route is documentation (it never guesses that itself).
   if (findings.docsCandidates.length > 0) {
     stdout('[ax]');
+    // Routes are served under any `next.config` basePath, so both the rows the user reads and the
+    // URL the entry records use the served path — same rule as every other path init displays.
     const rows: MultiSelectRow[] = findings.docsCandidates.map((doc) => ({
       value: doc.root,
-      label: `${doc.root} (${doc.pageCount} page${doc.pageCount === 1 ? '' : 's'})`,
+      label: `${servedPath(findings.basePath, doc.root)} (${doc.pageCount} page${doc.pageCount === 1 ? '' : 's'})`,
       selected: true,
     }));
     const approved = new Set(
@@ -658,7 +660,7 @@ async function collectDocsAndSkills(
           identifier: buildUrn(siteUrl, `docs-${rootName}`),
           type: 'text/html',
           displayName: docsDisplayName(doc.root),
-          url: `${siteUrl}${doc.root}`,
+          url: `${siteUrl}${servedPath(findings.basePath, doc.root)}`,
           tags: ['ax:docs'],
         },
       });
