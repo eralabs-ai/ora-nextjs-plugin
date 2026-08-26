@@ -33,7 +33,7 @@ const GENERATED_JSON = [
 ];
 
 /** Matches the frontmatter marker every ax-generated markdown file carries. */
-const GENERATED_BY_RE = /^generated-by:\s*"@ora-ai\/ax"$/m;
+const GENERATED_BY_RE = /^generated-by:\s*"@ora-ai\/ax-nextjs"$/m;
 
 let removed = 0;
 

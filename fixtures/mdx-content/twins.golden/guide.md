@@ -2,7 +2,7 @@
 title: "The MDX guide"
 canonical_url: https://mdx-content-fixture.example.com/guide
 last_updated: <last_updated>
-generated-by: "@ora-ai/ax"
+generated-by: "@ora-ai/ax-nextjs"
 ---
 
 # The MDX guide

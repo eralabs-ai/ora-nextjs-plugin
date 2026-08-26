@@ -9,10 +9,10 @@
 //     fresh as the build that wrote it.
 
 /** The `generated-by` frontmatter value marking a file as ax build output (regenerated, not yours). */
-export const GENERATED_BY = '@ora-ai/ax';
+export const GENERATED_BY = '@ora-ai/ax-nextjs';
 
 /** Matches a generated-by frontmatter line anywhere in a file's opening frontmatter block. */
-const GENERATED_BY_RE = /^generated-by:\s*["']?@ora-ai\/ax["']?\s*$/m;
+const GENERATED_BY_RE = /^generated-by:\s*["']?@ora-ai\/ax-nextjs["']?\s*$/m;
 
 export interface MarkdownFrontmatter {
   title: string;

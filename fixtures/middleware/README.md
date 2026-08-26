@@ -1,6 +1,6 @@
 # fixture: middleware
 
-An App Router app that actually wires the `@ora-ai/ax/middleware` runtime entry — the negotiation
+An App Router app that actually wires the `@ora-ai/ax-nextjs/middleware` runtime entry — the negotiation
 half of the markdown story — and proves it against a real `next build` (the Edge bundle compiles)
 plus a `next start` dual-fetch dogfood (`scripts/dogfood-middleware.mjs`).
 

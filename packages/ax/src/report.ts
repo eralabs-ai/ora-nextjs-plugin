@@ -136,7 +136,7 @@ export interface BuildReport {
   };
   /**
    * The negotiation middleware: whether a `middleware.{ts,js}` exists and whether it wires the
-   * `@ora-ai/ax/middleware` runtime entry. When it doesn't, the wiring instructions live in the
+   * `@ora-ai/ax-nextjs/middleware` runtime entry. When it doesn't, the wiring instructions live in the
    * `markdown-negotiation` ora-check note and in `recommendations` — ax never writes or edits the
    * user's middleware singleton.
    */

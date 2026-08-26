@@ -34,7 +34,7 @@ describe('renderAxConfig', () => {
   it('writes a TypeScript config with a rationale comment on every field', () => {
     const source = renderAxConfig(answers(), TS);
 
-    expect(source).toContain("import type { AxConfig } from '@ora-ai/ax';");
+    expect(source).toContain("import type { AxConfig } from '@ora-ai/ax-nextjs';");
     expect(source).toContain('const config: AxConfig = {');
     expect(source).toContain('export default config;');
     expect(source).toContain('siteUrl: "https://example.com"');
@@ -62,14 +62,14 @@ describe('renderAxConfig', () => {
 
   it('emits ESM JavaScript with a JSDoc type when the project is ESM JS', () => {
     const source = renderAxConfig(answers(), { language: 'js', moduleSystem: 'esm' });
-    expect(source).toContain("/** @type {import('@ora-ai/ax').AxConfig} */");
+    expect(source).toContain("/** @type {import('@ora-ai/ax-nextjs').AxConfig} */");
     expect(source).toContain('export default config;');
     expect(source).not.toContain(': AxConfig');
   });
 
   it('emits CommonJS JavaScript with module.exports', () => {
     const source = renderAxConfig(answers(), { language: 'js', moduleSystem: 'cjs' });
-    expect(source).toContain("/** @type {import('@ora-ai/ax').AxConfig} */");
+    expect(source).toContain("/** @type {import('@ora-ai/ax-nextjs').AxConfig} */");
     expect(source).toContain('module.exports = config;');
   });
 

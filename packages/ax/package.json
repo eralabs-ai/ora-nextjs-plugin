@@ -1,8 +1,25 @@
 {
-  "name": "@ora-ai/ax",
+  "name": "@ora-ai/ax-nextjs",
   "version": "0.0.0",
   "description": "Agent Experience (AX) toolkit for Next.js: generate a spec-valid ai-catalog.json, detect WebMCP tools, scaffold agent-aware 404s, and report agent-readiness at build time.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eralabs-ai/ora-nextjs-plugin.git",
+    "directory": "packages/ax"
+  },
+  "homepage": "https://github.com/eralabs-ai/ora-nextjs-plugin#readme",
+  "bugs": "https://github.com/eralabs-ai/ora-nextjs-plugin/issues",
+  "keywords": [
+    "nextjs",
+    "ai-agents",
+    "agent-experience",
+    "ai-catalog",
+    "mcp",
+    "llms-txt",
+    "agent-readiness",
+    "ard"
+  ],
   "type": "module",
   "engines": {
     "node": ">=18.18"
@@ -46,7 +63,7 @@
     "turndown-plugin-gfm": "^1.0.2"
   },
   "peerDependencies": {
-    "next": ">=14"
+    "next": ">=15"
   },
   "peerDependenciesMeta": {
     "next": {

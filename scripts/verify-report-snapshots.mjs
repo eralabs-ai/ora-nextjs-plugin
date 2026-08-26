@@ -87,7 +87,7 @@ function generatedMarkdownFiles(fixtureRoot) {
         stack.push(abs);
       } else if (name.endsWith('.md')) {
         const content = readFileSync(abs, 'utf8');
-        if (/^generated-by:\s*"@ora-ai\/ax"$/m.test(content)) {
+        if (/^generated-by:\s*"@ora-ai\/ax-nextjs"$/m.test(content)) {
           files.set(relative(publicDir, abs), content);
         }
       }

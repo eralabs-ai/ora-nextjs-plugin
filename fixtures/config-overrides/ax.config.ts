@@ -1,4 +1,4 @@
-import type { AxConfig } from '@ora-ai/ax';
+import type { AxConfig } from '@ora-ai/ax-nextjs';
 
 // This is the fixture that documents-and-tests the config surface. Until zero-config artifact
 // detection lands there are no *inferred* entries to override, so here every entry is
@@ -12,7 +12,7 @@ const config: AxConfig = {
   //
   // The floor is inlined here rather than composed from the exported `defaultIsGated`: this file is
   // evaluated for real (via jiti) by the test suite, which runs against src without building the
-  // package's dist, so importing a *runtime* value from `@ora-ai/ax` would fail to resolve. The
+  // package's dist, so importing a *runtime* value from `@ora-ai/ax-nextjs` would fail to resolve. The
   // README shows the `defaultIsGated`-composition form for consumers of the published package.
   isGated: ({ path }) =>
     (path.startsWith('/api/auth/') || path.startsWith('/api/webhooks/')) &&

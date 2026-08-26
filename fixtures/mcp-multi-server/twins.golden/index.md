@@ -3,7 +3,7 @@ title: "MCP Multi-Server Fixture"
 description: "A Next.js app hosting two MCP servers: one public, one gated via withMcpAuth."
 canonical_url: https://mcp-multi-fixture.example.com/
 last_updated: <last_updated>
-generated-by: "@ora-ai/ax"
+generated-by: "@ora-ai/ax-nextjs"
 ---
 
 # MCP multi-server fixture

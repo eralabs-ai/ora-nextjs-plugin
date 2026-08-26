@@ -26,7 +26,7 @@ afterEach(() => {
 });
 
 const WIRED_SOURCE =
-  "import { withAx } from '@ora-ai/ax/middleware';\n" +
+  "import { withAx } from '@ora-ai/ax-nextjs/middleware';\n" +
   "import { axManifest } from './ax-manifest';\n" +
   'export default withAx({ manifest: axManifest });\n';
 
@@ -63,7 +63,7 @@ describe('buildMiddlewareWiringInstruction', () => {
       detectMiddleware(dir),
     );
 
-    expect(instruction).toContain("import { withAx } from '@ora-ai/ax/middleware';");
+    expect(instruction).toContain("import { withAx } from '@ora-ai/ax-nextjs/middleware';");
     expect(instruction).toContain("import { axManifest } from './ax-manifest';");
     expect(instruction).toContain('export default withAx({ manifest: axManifest });');
     expect(instruction).toContain(

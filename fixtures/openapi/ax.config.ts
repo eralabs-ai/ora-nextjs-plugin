@@ -1,4 +1,4 @@
-import type { AxConfig } from '@ora-ai/ax';
+import type { AxConfig } from '@ora-ai/ax-nextjs';
 
 // `siteUrl` makes the fixture deterministic regardless of where it's built (CI, a laptop, ...) —
 // without it, zero-config OpenAPI detection (Phase 2.2) would still run but skip emitting a

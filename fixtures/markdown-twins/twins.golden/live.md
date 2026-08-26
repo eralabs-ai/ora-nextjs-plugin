@@ -3,7 +3,7 @@ title: "Live departures board"
 description: "Real-time departures, fetched in the browser after the page loads."
 canonical_url: https://markdown-twins-fixture.example.com/live
 last_updated: <last_updated>
-generated-by: "@ora-ai/ax"
+generated-by: "@ora-ai/ax-nextjs"
 ---
 
 # Live departures board

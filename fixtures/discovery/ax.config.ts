@@ -1,4 +1,4 @@
-import type { AxConfig } from '@ora-ai/ax';
+import type { AxConfig } from '@ora-ai/ax-nextjs';
 
 // `siteUrl` keeps the fixture deterministic regardless of where it's built (see the openapi
 // fixture's config for the full rationale). This fixture exercises the Phase 2.4 detect-and-recommend

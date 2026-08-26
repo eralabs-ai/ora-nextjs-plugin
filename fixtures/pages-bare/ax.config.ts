@@ -1,4 +1,4 @@
-import type { AxConfig } from '@ora-ai/ax';
+import type { AxConfig } from '@ora-ai/ax-nextjs';
 
 // `siteUrl` makes the fixture deterministic regardless of where it's built (see the mcp-adapter
 // fixture for the full rationale). This is a Pages Router app — no `app/` directory — so it exists

@@ -3,7 +3,7 @@ title: "Markdown Twins Fixture"
 description: "Exercises every rung of the markdown-twin ladder in one build."
 canonical_url: https://markdown-twins-fixture.example.com/
 last_updated: <last_updated>
-generated-by: "@ora-ai/ax"
+generated-by: "@ora-ai/ax-nextjs"
 ---
 
 # Markdown twins fixture

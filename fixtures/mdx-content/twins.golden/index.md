@@ -3,7 +3,7 @@ title: "MDX Content Fixture"
 description: "Exercises Tier-1 markdown-twin derivation from page.mdx sources."
 canonical_url: https://mdx-content-fixture.example.com/
 last_updated: <last_updated>
-generated-by: "@ora-ai/ax"
+generated-by: "@ora-ai/ax-nextjs"
 ---
 
 # MDX content fixture

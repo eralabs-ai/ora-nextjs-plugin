@@ -73,7 +73,7 @@ function writeFullyAgentReadyApp(dir: string): void {
   // so the markdown-negotiation checks read as addressed.
   writeFileSync(
     join(dir, 'middleware.ts'),
-    "import { withAx } from '@ora-ai/ax/middleware';\n" +
+    "import { withAx } from '@ora-ai/ax-nextjs/middleware';\n" +
       "import { axManifest } from './ax-manifest';\n" +
       'export default withAx({ manifest: axManifest });\n',
     'utf8',

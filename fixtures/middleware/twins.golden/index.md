@@ -1,9 +1,9 @@
 ---
 title: "Middleware Fixture"
-description: "Exercises the @ora-ai/ax/middleware negotiation entry against a real next build."
+description: "Exercises the @ora-ai/ax-nextjs/middleware negotiation entry against a real next build."
 canonical_url: https://middleware-fixture.example.com/
 last_updated: <last_updated>
-generated-by: "@ora-ai/ax"
+generated-by: "@ora-ai/ax-nextjs"
 ---
 
 # Middleware fixture

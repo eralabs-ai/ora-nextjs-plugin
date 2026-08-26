@@ -3,7 +3,7 @@ title: "Authentication — openapi"
 description: "How to obtain access to the gated surfaces on this site."
 canonical_url: https://openapi-fixture.example.com/auth.md
 last_updated: <last_updated>
-generated-by: "@ora-ai/ax"
+generated-by: "@ora-ai/ax-nextjs"
 ---
 
 # Authentication

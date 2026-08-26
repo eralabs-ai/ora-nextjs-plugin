@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Dogfood for the @ora-ai/ax/middleware runtime entry: boots the built `middleware` fixture with
+// Dogfood for the @ora-ai/ax-nextjs/middleware runtime entry: boots the built `middleware` fixture with
 // a real `next start` and probes it over HTTP — the same black-box posture as Ora's
 // markdown-negotiation checks (dual-fetch of one URL with and without `Accept: text/markdown`
 // must return different content types, correct bodies both ways, and `Vary: Accept` on the

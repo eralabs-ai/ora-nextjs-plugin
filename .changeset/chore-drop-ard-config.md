@@ -1,5 +1,5 @@
 ---
-'@ora-ai/ax': minor
+'@ora-ai/ax-nextjs': minor
 ---
 
 **Breaking (pre-1.0):** removed support for the legacy `ard.config.*` config file and its

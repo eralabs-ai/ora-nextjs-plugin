@@ -1,4 +1,4 @@
-import type { AxConfig } from '@ora-ai/ax';
+import type { AxConfig } from '@ora-ai/ax-nextjs';
 
 // `siteUrl` makes the fixture deterministic (see the mcp-adapter fixture for the full rationale).
 // This is a Pages Router app: the declarative `<form toolname>` lives on `pages/index.tsx`, whose
