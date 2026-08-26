@@ -968,7 +968,6 @@ describe('auth-endpoint questions (declared auth for gated MCP servers)', () => 
     });
     // The adoption names its source, so the config value is traceable, not magic.
     expect(stdout.some((l) => l.includes('Using the OAuth endpoints your public'))).toBe(true);
-    expect(stdout.some((l) => l.includes('will declare auth for /mcp'))).toBe(true);
   });
 
   it('a docs URL alone keeps the honest "unknown" status; an Enter-through declares api_key', async () => {
@@ -1094,7 +1093,6 @@ describe('auth-scheme question (api_key and skip branches)', () => {
     });
     // The OAuth endpoint questions never ran — only siteUrl and the docs URL were asked.
     expect(textQuestions.some((q) => q.includes('OAuth'))).toBe(false);
-    expect(stdout.some((l) => l.includes('API key/bearer + docs link'))).toBe(true);
   });
 
   it('choosing API key with no docs URL still declares the scheme (an active choice is a declaration)', async () => {
@@ -1103,6 +1101,22 @@ describe('auth-scheme question (api_key and skip branches)', () => {
 
     const prompter = new ScriptedPrompter({
       text: ['https://acme.com', ''],
+      multiSelect: [[], []],
+      select: ['api_key'],
+      confirm: [false],
+    });
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+    const { config } = await loadAxConfig(dir);
+    expect(config.entries[0]?.auth).toEqual({ status: 'api_key' });
+  });
+
+  it('an unedited docs-URL prefill (the bare site origin) means skip, not a homepage docsUrl', async () => {
+    writeBareApp(dir);
+    addGatedMount(dir);
+
+    const prompter = new ScriptedPrompter({
+      // The docs answer echoes the prefill exactly — the user pressed Enter without adding a path.
+      text: ['https://acme.com', 'https://acme.com/'],
       multiSelect: [[], []],
       select: ['api_key'],
       confirm: [false],
@@ -1211,10 +1225,8 @@ describe('provider-wired OAuth evidence (Clerk-style runtime metadata)', () => {
 
     expect(await runInit([], { ...io(), prompter })).toBe(0);
     expect(schemeDefault).toBe('oauth2');
-    expect(stdout.some((l) => l.includes('protected-resource route'))).toBe(true);
     // Endpoints skipped, docs skipped — but the wiring backs a bare oauth2 declaration.
     const { config } = await loadAxConfig(dir);
     expect(config.entries[0]?.auth).toEqual({ status: 'oauth2' });
-    expect(stdout.some((l) => l.includes('agent-discoverable at runtime'))).toBe(true);
   });
 });

@@ -451,12 +451,6 @@ async function askAuthEndpoints(
         `${suggestion.issuers.join(', ')} (from ${suggestion.issuersSource}) — agents discover ` +
         'its endpoints from the metadata chain at runtime.',
     );
-  } else if (suggestion.resourceMetadataRoute !== undefined) {
-    stdout(
-      `[ax]   Detected an RFC 9728 protected-resource route (${suggestion.resourceMetadataRoute}) — ` +
-        'your auth provider serves the OAuth metadata at runtime, so agents can discover the ' +
-        'endpoints themselves; the endpoint questions below are optional.',
-    );
   }
 
   // Up to a few tries per question, like siteUrl: an invalid value would otherwise be written into
@@ -537,10 +531,15 @@ async function askAuthEndpoints(
         if (tokenEndpoint !== undefined) oauth.tokenEndpoint = tokenEndpoint;
       }
     }
-    const docsUrl = await askUrl(
+    // Prefilled with the site origin so the user only types the path. An unedited prefill (or a
+    // cleared line) means skip — a bare homepage is never a docs URL someone chose on purpose.
+    const docsPrefill = `${siteUrl}/`;
+    const docsAnswer = await askUrl(
       `Docs URL${where} — the page where a human gets access; agents send their user there when ` +
-        'they hit the auth wall (Enter to skip)',
+        'they hit the auth wall (add the path, or Enter to skip)',
+      docsPrefill,
     );
+    const docsUrl = docsAnswer === docsPrefill || docsAnswer === siteUrl ? undefined : docsAnswer;
 
     const hasEndpoints = Object.keys(oauth).length > 0;
     // "api_key" is a declaration by itself; "oauth2" becomes one once an endpoint backs it — or
@@ -560,15 +559,8 @@ async function askAuthEndpoints(
         ...(docsUrl !== undefined ? { docsUrl } : {}),
       },
     });
-    const what =
-      status === 'api_key'
-        ? `API key/bearer${docsUrl !== undefined ? ' + docs link' : ''}`
-        : status === 'oauth2'
-          ? `${hasEndpoints ? 'OAuth 2.0 endpoints' : 'OAuth 2.0 (endpoints agent-discoverable at runtime)'}${
-              docsUrl !== undefined ? ' + docs link' : ''
-            }`
-          : 'docs link';
-    stdout(`[ax]   ✓ will declare auth for ${served(mount.pathname)} in ax.config (${what})`);
+    // No per-mount recap line: the "✓ wrote ax.config.ts" confirmation that follows covers it,
+    // and the declaration itself is right there in the file it names.
   }
   return overrides;
 }
