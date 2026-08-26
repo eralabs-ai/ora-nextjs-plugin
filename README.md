@@ -76,7 +76,10 @@ npx ax init
 
 It runs the same source-tree detection a build does (no `next build` needed), prints what it found,
 then asks **only what the code can't answer** — your production `siteUrl`, which detected surfaces
-agents can use without signing in (the rest are gated and never advertised as open), and one
+agents can use without signing in (the rest are gated and never advertised as open), where agents
+authenticate to the gated ones (OAuth endpoints + a docs URL, all optional — written as a declared
+`auth` entry in `ax.config`, and prefilled when a committed authorization-server metadata document
+already states them, the same way `siteUrl` prefills from your env), and one
 pre-selected checklist of every opt-in scaffold, each line stating why agents need it — deselect
 anything you don't want, then press Enter. It writes an `ax.config.ts` (or `.js`,
 matching your project) with a one-line comment on every field, so the config it commits doubles as

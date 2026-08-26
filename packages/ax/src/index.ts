@@ -187,6 +187,12 @@ export {
 } from './router-model.js';
 
 export {
+  detectAuthMetadata,
+  type AuthMetadataSuggestion,
+  type DetectAuthMetadataOptions,
+} from './detect-auth-metadata.js';
+
+export {
   detectMcpServers,
   detectMcpMounts,
   buildMcpEntries,

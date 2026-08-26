@@ -2,8 +2,11 @@ import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 
+import { safeHttpUrl } from './auth.js';
 import { AxConfigError, findExistingConfig } from './config.js';
-import { detectMcpMounts, type McpMount } from './detect-mcp.js';
+import type { AxEntryOverride } from './config-schema.js';
+import { detectAuthMetadata, type AuthMetadataSuggestion } from './detect-auth-metadata.js';
+import { detectMcpMounts, mcpMountIdentifier, type McpMount } from './detect-mcp.js';
 import { generateCatalog } from './generate.js';
 import {
   configFileName,
@@ -183,6 +186,8 @@ interface InitFindings {
   basePath: string;
   /** Detected mounts, kept whole: the gating card is built from these after the answers land. */
   mcpMounts: McpMount[];
+  /** Committed auth-server declarations, for the auth-endpoint questions' prefills/context. */
+  authMetadata: AuthMetadataSuggestion;
   openApiFound: boolean;
   webMcpToolNames: string[];
   /** Presence of each detect-and-recommend artifact, for the findings summary. */
@@ -225,6 +230,7 @@ async function gatherFindings(cwd: string): Promise<InitFindings> {
     apiRoutePaths,
     basePath: report.basePath,
     mcpMounts: mounts,
+    authMetadata: detectAuthMetadata({ cwd, router }),
     openApiFound: report.artifacts.openapi.found,
     webMcpToolNames: generated.webMcpToolNames,
     artifacts: {
@@ -399,6 +405,104 @@ async function askPrimary(
 }
 
 /**
+ * Runs the auth-endpoint questions — for gated MCP servers only, right after the siteUrl answer
+ * (the entry identifiers need it). Gating recorded *that* a server requires login; this collects
+ * *how* an agent authenticates — the endpoints detection can never see (a `withMcpAuth` wrapper
+ * only ever says "requires auth, scheme unknown") — as a declared `auth` entry override in the
+ * generated ax.config. Every question is optional: Enter with no value skips, and skipping
+ * everything writes nothing (the build then keeps its "declare it in ax.config" nudge).
+ *
+ * Same prefill posture as siteUrl: a value the source tree already states (a committed RFC 8414
+ * authorization-server metadata document) becomes the editable default, named with its source. A
+ * declared authorization *server* (mcp-handler's `authServerUrls`, or committed RFC 9728
+ * metadata) can't prefill an endpoint — its endpoints live behind its own /.well-known, which ax
+ * never fetches — so it prints as context above the questions instead of pretending to be one.
+ */
+async function askAuthEndpoints(
+  prompter: Prompter,
+  findings: InitFindings,
+  siteUrl: string,
+  gatedMounts: Set<string>,
+  stdout: (line: string) => void,
+): Promise<AxEntryOverride[]> {
+  const gated = findings.mcpMounts.filter((mount) => gatedMounts.has(mount.pathname));
+  if (gated.length === 0) return [];
+  const served = (pathname: string): string => servedPath(findings.basePath, pathname);
+  const suggestion = findings.authMetadata;
+
+  stdout('[ax]');
+  stdout(
+    '[ax] Your gated MCP server' +
+      (gated.length === 1 ? ' publishes' : 's publish') +
+      ' as "requires auth". Declaring where agents authenticate (in ax.config, then /auth.md and ' +
+      'the server card) turns that into something an agent can act on. Every answer is optional — ' +
+      'press Enter to skip. Endpoint URLs only, never credentials.',
+  );
+  if (suggestion.issuers.length > 0 && suggestion.issuersSource !== undefined) {
+    stdout(
+      `[ax]   Detected OAuth authorization server${suggestion.issuers.length === 1 ? '' : 's'}: ` +
+        `${suggestion.issuers.join(', ')} (from ${suggestion.issuersSource}) — its ` +
+        '/.well-known/oauth-authorization-server document lists the endpoints to paste below.',
+    );
+  }
+
+  // Up to a few tries per question, like siteUrl: an invalid value would otherwise be written into
+  // ax.config and fail its schema gate on the very next build.
+  const askUrl = async (question: string, prefill?: string): Promise<string | undefined> => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const raw = (await prompter.text(question, prefill)).trim();
+      if (raw === '') return undefined;
+      if (safeHttpUrl(raw) !== undefined) return raw;
+      stdout(`[ax] "${raw}" is not an absolute http(s) URL — try again, or press Enter to skip.`);
+    }
+    return undefined;
+  };
+  const prefillNote =
+    suggestion.oauthSource !== undefined
+      ? ` (prefilled from ${suggestion.oauthSource} — Enter to approve, clear to skip)`
+      : ' (Enter to skip)';
+
+  const overrides: AxEntryOverride[] = [];
+  for (const mount of gated) {
+    const where = gated.length > 1 ? ` for ${served(mount.pathname)}` : '';
+    const authorizationEndpoint = await askUrl(
+      `OAuth authorization endpoint${where}${prefillNote}`,
+      suggestion.oauth?.authorizationEndpoint,
+    );
+    const tokenEndpoint = await askUrl(
+      `OAuth token endpoint${where}${prefillNote}`,
+      suggestion.oauth?.tokenEndpoint,
+    );
+    const docsUrl = await askUrl(`Docs URL where a human obtains access${where} (Enter to skip)`);
+
+    const oauth = {
+      ...(authorizationEndpoint !== undefined ? { authorizationEndpoint } : {}),
+      ...(tokenEndpoint !== undefined ? { tokenEndpoint } : {}),
+    };
+    const hasEndpoints = Object.keys(oauth).length > 0;
+    if (!hasEndpoints && docsUrl === undefined) continue;
+
+    overrides.push({
+      identifier: mcpMountIdentifier(siteUrl, mount.pathname, findings.mcpMounts.length > 1),
+      auth: {
+        // Endpoints given → the scheme is OAuth 2.0 by declaration; a docs link alone refines
+        // nothing about the scheme, so the status stays the honest "unknown".
+        status: hasEndpoints ? 'oauth2' : 'unknown',
+        ...(hasEndpoints ? { oauth } : {}),
+        ...(docsUrl !== undefined ? { docsUrl } : {}),
+      },
+    });
+    stdout(
+      `[ax]   ✓ will declare auth for ${served(mount.pathname)} in ax.config` +
+        `${hasEndpoints ? ' (OAuth 2.0 endpoints' : ' (docs link'}${
+          hasEndpoints && docsUrl !== undefined ? ' + docs link)' : ')'
+        }`,
+    );
+  }
+  return overrides;
+}
+
+/**
  * Writes the well-known MCP server cards straight from the wizard — the actionable artifact
  * `init` exists to produce for an app that already has an MCP server, and the *persistence* for
  * the answers: each card's `authentication` block is what the next build reads back for that
@@ -548,6 +652,10 @@ async function collectInteractive(
   }
   if (siteUrl === undefined) return undefined;
 
+  // Auth endpoints for the servers just gated — right here because the entry identifiers are
+  // built from the siteUrl answer, and the gating context is still on screen.
+  const authEntries = await askAuthEndpoints(prompter, findings, siteUrl, gatedMounts, stdout);
+
   // Every setup item defaults to selected in the list: config defaults are false because a *silent*
   // write into a source tree is invasive, but here the ask itself is the opt-in and the user is
   // present to deselect anything they don't want. Same yes-when-asked / no-when-silent policy the
@@ -569,6 +677,7 @@ async function collectInteractive(
       // Twin *intent* lands in config; generation happens at build (twins need the prerendered output).
       markdownTwins: setupSelected('markdownTwins'),
       report: setupSelected('report'),
+      ...(authEntries.length > 0 ? { entries: authEntries } : {}),
     },
     gatedMounts,
     primaryMount,

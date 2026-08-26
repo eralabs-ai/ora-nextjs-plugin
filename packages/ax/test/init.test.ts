@@ -832,3 +832,187 @@ describe('runInit setup multi-select', () => {
     expect(existsSync(join(dir, 'ax-manifest.ts'))).toBe(false);
   });
 });
+
+describe('auth-endpoint questions (declared auth for gated MCP servers)', () => {
+  /** A withMcpAuth-wrapped mount at /mcp — gated by its own code, so it pre-deselects. */
+  function addGatedMcpMount(dir2: string): void {
+    const routeDir = join(dir2, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      `import { createMcpHandler, withMcpAuth } from 'mcp-handler';\n` +
+        `const handler = createMcpHandler((server) => { server.tool('roll_dice', 'd', {}, async () => ({})); });\n` +
+        `const authed = withMcpAuth(handler, verifyToken, {});\n` +
+        `export { authed as GET };\n`,
+      'utf8',
+    );
+  }
+
+  it('collects endpoints + docs URL and writes them as an entries auth override that loads', async () => {
+    writeBareApp(dir);
+    addGatedMcpMount(dir);
+    // A protectedResourceHandler route declares the authorization server — shown as context.
+    const metaDir = join(dir, 'app', '.well-known', 'oauth-protected-resource');
+    mkdirSync(metaDir, { recursive: true });
+    writeFileSync(
+      join(metaDir, 'route.ts'),
+      "import { protectedResourceHandler } from 'mcp-handler';\n" +
+        "const handler = protectedResourceHandler({ authServerUrls: ['https://auth.acme.com'] });\n" +
+        'export { handler as GET };\n',
+      'utf8',
+    );
+
+    const prompter = new ScriptedPrompter({
+      text: [
+        'https://acme.com',
+        'https://auth.acme.com/authorize',
+        'https://auth.acme.com/token',
+        'https://acme.com/docs/access',
+      ],
+      multiSelect: [[], []],
+      confirm: [false],
+    });
+
+    const code = await runInit([], { ...io(), prompter });
+
+    expect(code).toBe(0);
+    const source = readFileSync(join(dir, 'ax.config.ts'), 'utf8');
+    expect(source).toContain('entries: [');
+    expect(source).toContain('identifier: "urn:air:acme.com:mcp-server"');
+    expect(source).toContain('authorizationEndpoint: "https://auth.acme.com/authorize"');
+    expect(source).toContain('tokenEndpoint: "https://auth.acme.com/token"');
+    expect(source).toContain('docsUrl: "https://acme.com/docs/access"');
+    // The declared authorization server was surfaced as context before the questions.
+    expect(
+      stdout.some(
+        (l) => l.includes('Detected OAuth authorization server') && l.includes('auth.acme.com'),
+      ),
+    ).toBe(true);
+    expect(stdout.some((l) => l.includes('will declare auth for /mcp'))).toBe(true);
+    // Round-trip: the written config passes the real loader/schema gate and carries the auth.
+    const { config } = await loadAxConfig(dir);
+    expect(config.entries[0]?.auth).toEqual({
+      status: 'oauth2',
+      oauth: {
+        authorizationEndpoint: 'https://auth.acme.com/authorize',
+        tokenEndpoint: 'https://auth.acme.com/token',
+      },
+      docsUrl: 'https://acme.com/docs/access',
+    });
+  });
+
+  it('prefills the endpoint questions from committed RFC 8414 metadata (Enter approves them)', async () => {
+    writeBareApp(dir);
+    addGatedMcpMount(dir);
+    const wellKnown = join(dir, 'public', '.well-known');
+    mkdirSync(wellKnown, { recursive: true });
+    writeFileSync(
+      join(wellKnown, 'oauth-authorization-server'),
+      JSON.stringify({
+        issuer: 'https://acme.com',
+        authorization_endpoint: 'https://acme.com/oauth/authorize',
+        token_endpoint: 'https://acme.com/oauth/token',
+      }),
+      'utf8',
+    );
+
+    // Only the siteUrl is scripted: the endpoint questions fall through to their defaults — the
+    // prefills — exactly like pressing Enter to approve them.
+    const prompter = new ScriptedPrompter({
+      text: ['https://acme.com'],
+      multiSelect: [[], []],
+      confirm: [false],
+    });
+
+    const code = await runInit([], { ...io(), prompter });
+
+    expect(code).toBe(0);
+    const { config } = await loadAxConfig(dir);
+    expect(config.entries[0]?.auth).toEqual({
+      status: 'oauth2',
+      oauth: {
+        authorizationEndpoint: 'https://acme.com/oauth/authorize',
+        tokenEndpoint: 'https://acme.com/oauth/token',
+      },
+    });
+    // The question named the prefill's source, so approving it is an informed check.
+    expect(stdout.some((l) => l.includes('will declare auth for /mcp'))).toBe(true);
+  });
+
+  it('a docs URL alone keeps the honest "unknown" status; skipping everything writes no entries', async () => {
+    writeBareApp(dir);
+    addGatedMcpMount(dir);
+
+    const prompter = new ScriptedPrompter({
+      text: ['https://acme.com', '', '', 'https://acme.com/docs/access'],
+      multiSelect: [[], []],
+      confirm: [false],
+    });
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+    const { config } = await loadAxConfig(dir);
+    expect(config.entries[0]?.auth).toEqual({
+      status: 'unknown',
+      docsUrl: 'https://acme.com/docs/access',
+    });
+
+    // Fresh project, all three questions skipped → the config carries no entries key at all.
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+    writeBareApp(dir);
+    addGatedMcpMount(dir);
+    stdout = [];
+    const skipAll = new ScriptedPrompter({
+      text: ['https://acme.com'],
+      multiSelect: [[], []],
+      confirm: [false],
+    });
+    expect(await runInit([], { ...io(), prompter: skipAll })).toBe(0);
+    expect(readFileSync(join(dir, 'ax.config.ts'), 'utf8')).not.toContain('entries:');
+  });
+
+  it('re-prompts on an invalid endpoint URL and skips after repeated bad input', async () => {
+    writeBareApp(dir);
+    addGatedMcpMount(dir);
+
+    const prompter = new ScriptedPrompter({
+      text: [
+        'https://acme.com',
+        'javascript:alert(1)', // authorization endpoint: three bad tries → skipped
+        'not-a-url',
+        '/relative',
+        'https://auth.acme.com/token', // token endpoint: valid on the first try
+        '', // docs: skipped
+      ],
+      multiSelect: [[], []],
+      confirm: [false],
+    });
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+
+    expect(stdout.filter((l) => l.includes('is not an absolute http(s) URL'))).toHaveLength(3);
+    const { config } = await loadAxConfig(dir);
+    expect(config.entries[0]?.auth).toEqual({
+      status: 'oauth2',
+      oauth: { tokenEndpoint: 'https://auth.acme.com/token' },
+    });
+  });
+
+  it('asks nothing when no MCP server is gated', async () => {
+    writeBareApp(dir);
+    addMcpMount(dir); // plain mount, pre-selected public
+    let textQuestions = 0;
+    const prompter: Prompter = {
+      text: async (_q, d) => {
+        textQuestions++;
+        return d ?? 'https://acme.com';
+      },
+      confirm: async () => false,
+      multiSelect: async (_q, rows) =>
+        rows.filter(isMultiSelectChoice).map((choice) => choice.value),
+      select: async () => undefined,
+    };
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+    // Only the siteUrl question was asked.
+    expect(textQuestions).toBe(1);
+    expect(readFileSync(join(dir, 'ax.config.ts'), 'utf8')).not.toContain('entries:');
+  });
+});
