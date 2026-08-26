@@ -290,6 +290,9 @@ describe('runInit gating respects basePath', () => {
     );
     expect(card.serverUrl).toBe('https://acme.com/app/mcp');
     expect(card.authentication).toEqual({ required: true });
+    // A single card prints its own "✓ wrote <path>" line — the "✓ wrote N MCP server cards"
+    // one-liner is reserved for multi-card runs (see the multi-mount describe block below).
+    expect(stdout.some((l) => /✓ wrote \d+ MCP server cards/.test(l))).toBe(false);
   });
 });
 
@@ -367,6 +370,18 @@ describe('runInit multi-mount primary question', () => {
     const gated = JSON.parse(readFileSync(join(namedDir, 'api-mcp.json'), 'utf8'));
     expect(gated.authentication).toEqual({ required: true });
     expect(existsSync(join(namedDir, 'api-public-mcp.json'))).toBe(true);
+
+    // Multiple cards land in one run, so the printed output is a single "✓ wrote N MCP server
+    // cards" line naming the primary — not a tree, and not a line per card (the build's own
+    // artifact tree shows their full shape minutes later).
+    expect(
+      stdout.some((l) => l.includes('✓ wrote 3 MCP server cards (primary: /api/public/mcp)')),
+    ).toBe(true);
+    // The completion line is unconditional and no longer mentions ax.config — the build's own
+    // output is where the per-artifact detail (and the commit-the-cards CTA) now lives.
+    expect(stdout.some((l) => l.includes('✓ All set — your site is ready to meet agents.'))).toBe(
+      true,
+    );
   });
 
   it('asks (server rows only, first public default) when several servers are public', async () => {
@@ -421,7 +436,9 @@ describe('runInit multi-mount primary question', () => {
 
     const prompter = new ScriptedPrompter({
       text: ['https://acme.com'],
-      confirm: [false, false, false, false, false, false, false, false],
+      // Gating and setup multi-selects both fall back to accepting whatever's pre-selected; only
+      // the build offer remains a confirm, and this test doesn't care about its answer.
+      confirm: [false],
       select: ['/api/tools/mcp'],
     });
 
@@ -468,10 +485,11 @@ describe('runInit interactive (scripted answers)', () => {
 
     const prompter = new ScriptedPrompter({
       text: ['https://acme.com'],
-      // Select nothing as public → the server is gated. The built-in floor always applies anyway.
-      multiSelect: [[]],
-      // scaffoldLlmsTxt, JsonLd, Robots, Agent404, report, run-build — all no.
-      confirm: [false, false, false, false, false, false],
+      // Two multi-selects in order: gating (select nothing as public → the server is gated; the
+      // built-in floor always applies anyway), then setup (decline everything).
+      multiSelect: [[], []],
+      // Only the build offer remains a confirm.
+      confirm: [false],
     });
 
     const code = await runInit([], { ...io(), prompter });
@@ -521,9 +539,11 @@ describe('runInit interactive (scripted answers)', () => {
     const prompter: Prompter = {
       text: async () => 'https://acme.com',
       confirm: async () => false,
-      // Accept the pre-selection (a plain mount starts public).
-      multiSelect: async (_question, rows) => {
-        offeredRows.push(...rows);
+      // Accept the pre-selection (a plain mount starts public). Only capture the gating call's
+      // rows — the setup multi-select (asked right after) offers its own unrelated seven rows, and
+      // this test is about the gating prompt's shape, not the setup one.
+      multiSelect: async (question, rows) => {
+        if (!question.startsWith('What should ax set up?')) offeredRows.push(...rows);
         return rows
           .filter(isMultiSelectChoice)
           .filter((choice) => choice.selected)
@@ -629,7 +649,8 @@ describe('runInit interactive (scripted answers)', () => {
     writeBareApp(dir);
     const prompter = new ScriptedPrompter({
       text: ['http://localhost:3000', 'https://acme.com'],
-      confirm: [true, true, true, true, true, false],
+      // No MCP mount here, so the only confirm left is the build offer — decline it.
+      confirm: [false],
     });
 
     const code = await runInit([], { ...io(), prompter });
@@ -646,7 +667,7 @@ describe('runInit interactive (scripted answers)', () => {
     let built = 0;
     const prompter = new ScriptedPrompter({
       text: ['https://acme.com'],
-      confirm: [true, true, true, true, true, true, true, true], // last = run build
+      confirm: [true], // the only confirm left is the build offer
     });
 
     const code = await runInit([], {
@@ -702,7 +723,7 @@ describe('runInit round-trip', () => {
     // selected) → nothing gated → no isGated written.
     const prompter = new ScriptedPrompter({
       text: ['https://acme.com'],
-      confirm: [false, false, false, false, false, false],
+      confirm: [false],
     });
     expect(await runInit([], { ...io(), prompter })).toBe(0);
     expect(readFileSync(join(dir, 'ax.config.ts'), 'utf8')).not.toContain('isGated');
@@ -755,10 +776,12 @@ describe('runInit markdown twins + serving-manifest wiring', () => {
 
   it('declining the twin and manifest questions writes markdownTwins: false and wires no prebuild', async () => {
     writeBareApp(dir);
-    // Confirm order: 4 scaffolds, markdownTwins, report, wireManifest, build offer.
+    // Setup order: llmsTxt, jsonLd, robots, agent404, markdownTwins, report, manifest — deselect
+    // markdownTwins and manifest, keep the rest. Only the build offer remains a confirm.
     const prompter = new ScriptedPrompter({
       text: ['https://acme.com'],
-      confirm: [true, true, true, true, false, true, false, false],
+      multiSelect: [['llmsTxt', 'jsonLd', 'robots', 'agent404', 'report']],
+      confirm: [false],
     });
     const code = await runInit([], { ...io(), prompter });
     expect(code).toBe(0);
@@ -769,5 +792,36 @@ describe('runInit markdown twins + serving-manifest wiring', () => {
     expect(pkg.scripts.prebuild).toBeUndefined();
     expect(existsSync(join(dir, 'ax-manifest.ts'))).toBe(false);
     expect(existsSync(join(dir, 'ax-manifest.js'))).toBe(false);
+  });
+});
+
+describe('runInit setup multi-select', () => {
+  it('maps a deselected subset to InitAnswers and wireManifest, leaving the rest at their default', async () => {
+    writeBareApp(dir);
+    // Deselect only jsonLd and manifest; everything else in SETUP_OPTIONS stays selected.
+    const prompter = new ScriptedPrompter({
+      text: ['https://acme.com'],
+      multiSelect: [['llmsTxt', 'robots', 'agent404', 'markdownTwins', 'report']],
+      confirm: [false],
+    });
+
+    const code = await runInit([], { ...io(), prompter });
+
+    expect(code).toBe(0);
+    const source = readFileSync(join(dir, 'ax.config.ts'), 'utf8');
+    expect(source).toContain('scaffoldJsonLd: false,');
+    expect(source).toContain('scaffoldLlmsTxt: true,');
+    expect(source).toContain('scaffoldRobots: true,');
+    expect(source).toContain('scaffoldAgent404: true,');
+    expect(source).toContain('markdownTwins: true,');
+    expect(source).toContain('report: true,');
+
+    // manifest deselected → no prebuild wired, but the postbuild script is still added.
+    const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+    expect(pkg.scripts.prebuild).toBeUndefined();
+    expect(pkg.scripts.postbuild).toBe('ax');
+    expect(existsSync(join(dir, 'ax-manifest.ts'))).toBe(false);
   });
 });

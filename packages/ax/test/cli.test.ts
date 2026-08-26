@@ -110,7 +110,7 @@ describe('runCli', () => {
 
     expect(code).toBe(0);
     expect(existsSync(join(dir, CATALOG_OUTPUT_PATH))).toBe(true);
-    expect(stdout.some((l) => l.includes('wrote'))).toBe(true);
+    expect(stdout.some((l) => l.includes('✓ Following artifacts generated'))).toBe(true);
     expect(stderr).toEqual([]);
   });
 
@@ -345,7 +345,11 @@ describe('runCli', () => {
     const code = await runCli(['--report'], { ...io, cwd: dir });
 
     expect(code).toBe(0);
-    expect(stdout.some((l) => l.includes('Generated artifact sizes'))).toBe(true);
+    expect(
+      stdout.some((l) =>
+        l.includes('✓ Following artifacts generated (estimated tokens = chars ÷ 4):'),
+      ),
+    ).toBe(true);
     expect(stdout.some((l) => /ai-catalog\.json — \d+ B \(~\d+ tokens\)/.test(l))).toBe(true);
 
     const report = JSON.parse(readFileSync(join(dir, REPORT_OUTPUT_PATH), 'utf8'));
@@ -499,7 +503,7 @@ describe('runCli review-before-publish gate', () => {
       cwd: dir,
       confirm: async (question: string) => {
         questions.push(question);
-        // "Is the MCP server at /mcp public…?" → no (requires login); "Publish this catalog?" → yes.
+        // "Is the MCP server at /mcp public…?" → no (requires login); "Generate this catalog?" → yes.
         return !question.includes('public');
       },
     });
@@ -552,7 +556,7 @@ describe('runCli review-before-publish gate', () => {
     expect(code).toBe(0);
     expect(existsSync(join(dir, CATALOG_OUTPUT_PATH))).toBe(false);
     expect(existsSync(join(dir, SERVER_CARD_OUTPUT_PATH))).toBe(false);
-    expect(stdout.some((l) => l.includes('About to expose'))).toBe(true);
+    expect(stdout.some((l) => l.includes('About to reference'))).toBe(true);
     expect(stdout.some((l) => l.includes('nothing written'))).toBe(true);
   });
 
@@ -562,10 +566,18 @@ describe('runCli review-before-publish gate', () => {
     await runCli(['--yes'], { ...io, cwd: dir });
 
     const output = stdout.join('\n');
-    expect(output).toContain('About to expose 1 catalog entry:');
+    expect(output).toContain('About to reference 1 catalog entry:');
     // One short line: the friendly name and the server it points at — no URN or media type.
     expect(output).toContain('• MCP server card → https://example.com/mcp');
     expect(output).not.toContain('urn:air:example.com:mcp-server (');
+    // The generated-artifacts tree includes the project's own ax.config alongside what it
+    // configured, annotated so it reads as config rather than a build output.
+    expect(output).toContain('ax.config.mjs — ax config');
+    // First-publish runs that write server cards get a one-time CTA to commit them — the cards
+    // are what let the next build skip re-asking the gating/primary questions.
+    expect(output).toContain(
+      'Commit the MCP server cards — they record your gating and primary decisions, so builds never re-ask.',
+    );
   });
 });
 

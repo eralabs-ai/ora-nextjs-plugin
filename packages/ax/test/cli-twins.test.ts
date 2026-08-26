@@ -74,7 +74,13 @@ describe('runCli markdown twins', () => {
       { route: '/', path: join('public', 'index.md'), tier: 2, source: 'prerender' },
     ]);
     expect(report.sizes.some((s) => s.artifact === 'markdown-twin')).toBe(true);
-    expect(stdout.some((l) => l.includes('✓ wrote 1 markdown twin'))).toBe(true);
+    // Twins land as rows in the consolidated file tree, not a "✓ wrote 1 markdown twin" line.
+    expect(
+      stdout.some((l) =>
+        l.includes('✓ Following artifacts generated (estimated tokens = chars ÷ 4):'),
+      ),
+    ).toBe(true);
+    expect(stdout.some((l) => /index\.md — \d+ B \(~\d+ tokens\)/.test(l))).toBe(true);
   });
 
   it('gates the FIRST twin publish even when the catalog already exists', async () => {
@@ -122,7 +128,10 @@ describe('runCli markdown twins', () => {
     write('ax-manifest.ts', 'export const axManifest = {} as const;\n');
     const code = await runCli(['--yes'], io());
     expect(code).toBe(0);
-    expect(stdout.some((l) => l.includes('refreshed ax-manifest.ts'))).toBe(true);
+    // The manifest refresh lands as a tree row now, not a standalone "refreshed ax-manifest.ts" line.
+    expect(stdout.some((l) => l.includes('ax-manifest.ts — serving manifest (refreshed)'))).toBe(
+      true,
+    );
     // The refresh sees the twin this same run just wrote.
     expect(readFileSync(join(dir, 'ax-manifest.ts'), 'utf8')).toContain('"/index.md"');
   });

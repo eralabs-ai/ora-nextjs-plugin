@@ -305,8 +305,9 @@ function printFindings(
  * Selected means **public**: pressing Enter with everything selected says "none require logging
  * in", and an unselected server is published as *requiring auth* (recorded in its server card),
  * never advertised as open. A `withMcpAuth`-wrapped mount starts deselected — its own code already
- * demands auth. The built-in auth/webhook floor always applies on top. Returns the pathnames of
- * the gated mounts.
+ * demands auth, which the tree's per-row "auth detected" annotation already says, so the question
+ * itself stays short. The built-in auth/webhook floor always applies on top. Returns the pathnames
+ * of the gated mounts.
  */
 async function askGating(
   prompter: Prompter,
@@ -319,23 +320,20 @@ async function askGating(
   const authDetected = new Map(
     findings.mcpMounts.map((mount) => [mount.pathname, mount.auth !== undefined]),
   );
-  const rows: MultiSelectRow[] = buildRouteTreeLines(findingsTreeInput(findings)).map((line) =>
-    line.mountPathname !== undefined
-      ? {
-          value: line.mountPathname,
-          label: line.text,
-          selected: authDetected.get(line.mountPathname) !== true,
-        }
-      : { text: line.text },
-  );
+  const rows: MultiSelectRow[] = [
+    { text: '' },
+    ...buildRouteTreeLines(findingsTreeInput(findings)).map((line): MultiSelectRow =>
+      line.mountPathname !== undefined
+        ? {
+            value: line.mountPathname,
+            label: line.text,
+            selected: authDetected.get(line.mountPathname) !== true,
+          }
+        : { text: line.text },
+    ),
+  ];
 
-  const preDeselected = findings.mcpMounts.filter((mount) => mount.auth !== undefined).length;
-  const question =
-    "Select only the PUBLIC MCP servers (those that don't require being logged in) — press " +
-    "Enter if they're all public:" +
-    (preDeselected > 0
-      ? ` (ax pre-deselected ${preDeselected} whose code already demands auth.)`
-      : '');
+  const question = 'Select only the PUBLIC MCP servers — press Enter to save:';
   const publicValues = new Set(await prompter.multiSelect(question, rows));
 
   const gated = new Set(
@@ -432,24 +430,81 @@ function writeGatingCards(
   const result = writeServerCards(cwd, plan);
 
   const primary = plan.cards.find((emission) => emission.primary);
-  stdout(
-    `[ax] ✓ wrote ${relative(cwd, result.rootPath)} (MCP server card` +
-      (plan.multi && primary !== undefined
-        ? ` — primary: ${servedPath(findings.basePath, primary.mountPathname)})`
-        : `${primary?.card.authentication !== undefined ? ' — marked as requiring auth' : ''})`),
-  );
-  result.named.forEach((named, index) => {
-    const emission = plan.cards[index];
+  if (plan.multi) {
+    // Several cards land at once (the root card plus a per-server named slot each), but the build's
+    // own artifact tree renders their full shape minutes later — repeating it here would just be
+    // the same information twice. One line with the count (and, for a multi-server host, which
+    // mount is primary) is enough for the wizard's own recap.
+    const cardCount = 1 + result.named.length;
+    const primaryNote =
+      primary !== undefined
+        ? ` (primary: ${servedPath(findings.basePath, primary.mountPathname)})`
+        : '';
+    stdout(`[ax] ✓ wrote ${cardCount} MCP server cards${primaryNote}`);
+  } else {
     stdout(
-      `[ax] ✓ wrote ${relative(cwd, named.path)} (MCP server card` +
-        `${emission?.card.authentication !== undefined ? ' — marked as requiring auth' : ''})`,
+      `[ax] ✓ wrote ${relative(cwd, result.rootPath)} (MCP server card` +
+        `${primary?.card.authentication !== undefined ? ' — marked as requiring auth' : ''})`,
     );
-  });
-  stdout(
-    `[ax]   Commit ${plan.multi ? 'them: they record' : 'it: it records'} your gating ` +
-      `${plan.multi ? 'and primary decisions' : 'decision'}, so builds never re-ask.`,
-  );
+  }
 }
+
+/**
+ * The stable key for each item in the setup multi-select — doubles as the value round-tripped
+ * through `Prompter.multiSelect`. Kept separate from `InitAnswers`' field names (and from
+ * `wireManifest`, which isn't a config field at all) so the mapping in {@link collectInteractive} is
+ * one explicit switch rather than a name-matching convention.
+ */
+type SetupOptionValue =
+  'llmsTxt' | 'jsonLd' | 'robots' | 'agent404' | 'markdownTwins' | 'report' | 'manifest';
+
+/**
+ * The seven setup choices, each pre-selected — replaces what used to be seven sequential y/n
+ * confirms. One question reads faster than seven, and a list makes the *shape* of what's on offer
+ * visible at a glance instead of trickling out one item at a time. Labels stay short; a clause is
+ * added only where the name alone doesn't say what the user would be giving up by deselecting it,
+ * and that clause states the value to the user/agents, not the mechanism.
+ */
+const SETUP_OPTIONS: Array<{ value: SetupOptionValue; label: string; selected: true }> = [
+  {
+    value: 'llmsTxt',
+    label: 'Scaffold llms.txt — a guided map so agents know how to navigate your site',
+    selected: true,
+  },
+  {
+    value: 'jsonLd',
+    label:
+      'Scaffold Organization JSON-LD — machine-readable identity so agents gain trust in your site',
+    selected: true,
+  },
+  {
+    value: 'robots',
+    label:
+      'Add robots.txt pointers + AI-crawler rules — so agent crawlers find (and may read) your artifacts',
+    selected: true,
+  },
+  {
+    value: 'agent404',
+    label: 'Scaffold an agent-aware 404 page — steers lost agents back',
+    selected: true,
+  },
+  {
+    value: 'markdownTwins',
+    label: 'Markdown twins on every build (/docs → /docs.md)',
+    selected: true,
+  },
+  {
+    value: 'report',
+    label: 'Write .ora/report.json',
+    selected: true,
+  },
+  {
+    value: 'manifest',
+    label:
+      'Wire "prebuild": "ax manifest" — so your middleware always serves agents the current surface',
+    selected: true,
+  },
+];
 
 /**
  * Asks the questions the source tree can't answer, each with a default. Returns undefined only when
@@ -479,6 +534,7 @@ async function collectInteractive(
 
   // One line: the question names the prefill source inline, so "is this right?" is an informed
   // check rather than a mystery string. The value itself is prefilled as editable input.
+  stdout('[ax]');
   const siteUrlQuestion =
     siteUrlDefault.value !== undefined && siteUrlDefault.source !== undefined
       ? `Your public production site URL (prefilled from ${siteUrlDefault.source} — press Enter to approve, or edit)`
@@ -492,46 +548,31 @@ async function collectInteractive(
   }
   if (siteUrl === undefined) return undefined;
 
-  // Scaffolds default to yes in the wizard: config defaults are false because a *silent* write into
-  // a source tree is invasive, but here the ask itself is the opt-in and the user is present to say
-  // no. Same yes-when-asked / no-when-silent policy the README documents.
-  const scaffoldLlmsTxt = await prompter.confirm(
-    'Scaffold a starter llms.txt from your routes?',
-    true,
+  // Every setup item defaults to selected in the list: config defaults are false because a *silent*
+  // write into a source tree is invasive, but here the ask itself is the opt-in and the user is
+  // present to deselect anything they don't want. Same yes-when-asked / no-when-silent policy the
+  // README documents — just collapsed from seven yes/no questions into one list, since none of these
+  // choices depend on another's answer.
+  stdout('[ax]');
+  const setupValues = new Set(
+    await prompter.multiSelect('What should ax set up? (All are recommended)', SETUP_OPTIONS),
   );
-  const scaffoldJsonLd = await prompter.confirm(
-    'Scaffold an Organization JSON-LD component?',
-    true,
-  );
-  const scaffoldRobots = await prompter.confirm(
-    'Add discovery pointers + AI-crawler rules to robots.txt?',
-    true,
-  );
-  const scaffoldAgent404 = await prompter.confirm('Scaffold an agent-aware 404 page?', true);
-  // Twin *intent* lands in config; generation happens at build (twins need the prerendered output).
-  const markdownTwins = await prompter.confirm(
-    'Generate markdown twins of your pages on every build (route /docs → /docs.md)?',
-    true,
-  );
-  const report = await prompter.confirm('Write .ora/report.json (the agent handoff report)?', true);
-  const wireManifest = await prompter.confirm(
-    'Wire "prebuild": "ax manifest" (the serving manifest middleware imports)?',
-    true,
-  );
+  const setupSelected = (value: SetupOptionValue): boolean => setupValues.has(value);
 
   return {
     answers: {
       siteUrl,
-      scaffoldLlmsTxt,
-      scaffoldJsonLd,
-      scaffoldRobots,
-      scaffoldAgent404,
-      markdownTwins,
-      report,
+      scaffoldLlmsTxt: setupSelected('llmsTxt'),
+      scaffoldJsonLd: setupSelected('jsonLd'),
+      scaffoldRobots: setupSelected('robots'),
+      scaffoldAgent404: setupSelected('agent404'),
+      // Twin *intent* lands in config; generation happens at build (twins need the prerendered output).
+      markdownTwins: setupSelected('markdownTwins'),
+      report: setupSelected('report'),
     },
     gatedMounts,
     primaryMount,
-    wireManifest,
+    wireManifest: setupSelected('manifest'),
   };
 }
 
@@ -702,6 +743,7 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
   // On an interactive run the gating question renders the route tree itself (checkbox on the MCP
   // server node), so the findings summary skips it rather than showing the same tree twice.
   printFindings(findings, stdout, { tree: args.yes || !interactive });
+  stdout('[ax]');
 
   if (!args.yes && !interactive) {
     stderr(
@@ -739,9 +781,9 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
       markdownTwins: true,
       report: true,
     };
-    const fileName = writeConfigAndWire(cwd, answers, true, stdout);
+    writeConfigAndWire(cwd, answers, true, stdout);
     await createServingManifest(cwd, stdout);
-    printNextSteps(fileName, answers, false, stdout);
+    printNextSteps(false, stdout);
     return 0;
   }
 
@@ -766,12 +808,13 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
     }
     const { answers, gatedMounts, primaryMount, wireManifest } = collected;
 
-    const fileName = writeConfigAndWire(cwd, answers, wireManifest, stdout);
+    writeConfigAndWire(cwd, answers, wireManifest, stdout);
     if (wireManifest) await createServingManifest(cwd, stdout);
     writeGatingCards(cwd, findings, answers.siteUrl, gatedMounts, primaryMount, stdout);
 
     // Offer the first build so the report shows up immediately. Default no — spawning a full
     // `next build` is heavy and should never happen without an explicit yes.
+    stdout('[ax]');
     const wantBuild = await prompter.confirm(
       'Run the first build now so you can see the report?',
       false,
@@ -795,7 +838,7 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
       if (!ranBuild) stdout('[ax] ⚠ Build did not finish cleanly — run it yourself when ready.');
     }
 
-    printNextSteps(fileName, answers, ranBuild, stdout);
+    printNextSteps(ranBuild, stdout);
     return 0;
   } finally {
     if (!closed) close();
@@ -832,16 +875,10 @@ async function createServingManifest(cwd: string, stdout: (line: string) => void
   }
 }
 
-function printNextSteps(
-  fileName: string,
-  _answers: InitAnswers,
-  ranBuild: boolean,
-  stdout: (line: string) => void,
-): void {
-  // Keep this short: a first-glance recap of what the wizard itself changed. The build's own output
-  // (and .ora/report.json) is where the per-artifact detail lives — no need to restate it here.
-  stdout('[ax] ✓ Setup complete.');
-  stdout(`[ax]   Created ${fileName} (each field commented) and wired the build (see above).`);
+function printNextSteps(ranBuild: boolean, stdout: (line: string) => void): void {
+  // Keep this short: the build's own output (and .ora/report.json) is where the per-artifact
+  // detail lives — no need to restate it here.
+  stdout('[ax] ✓ All set — your site is ready to meet agents.');
   if (!ranBuild) {
     stdout(
       '[ax]   Next: run your build — the postbuild `ax` step publishes the catalog and prints the report.',
