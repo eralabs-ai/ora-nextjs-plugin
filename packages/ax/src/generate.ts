@@ -7,6 +7,7 @@ import { loadAxConfig } from './config.js';
 import { detectAgentsMd } from './detect-agents-md.js';
 import { detectJsonLd } from './detect-json-ld.js';
 import { detectLlmsTxt } from './detect-llms-txt.js';
+import { detectAuthMetadata } from './detect-auth-metadata.js';
 import { detectAuthProvider } from './detect-auth-provider.js';
 import {
   applyDeclaredMountAuth,
@@ -664,6 +665,7 @@ export async function generateCatalog(
 
   // The report's structured auth section — same inputs as auth.md, plus which descriptors were
   // config-declared and which known auth-provider dependency the app carries.
+  const authMetadata = detectAuthMetadata({ cwd, router });
   const reportAuth = buildReportAuth({
     cwd,
     mounts: mcpMounts,
@@ -840,19 +842,42 @@ export async function generateCatalog(
           // With nothing gated there is nothing an auth guide could say — the checks are omitted,
           // never claimed addressed or held actionable.
           'auth.md': authMdCandidate === undefined ? 'not-applicable' : authMdPlan !== undefined,
+          // Addressed once no gated surface ships the undeclared "unknown" scheme.
+          'auth-declaration':
+            reportAuth.gatedSurfaces.length === 0
+              ? 'not-applicable'
+              : reportAuth.gatedSurfaces.every((surface) => surface.status !== 'unknown'),
+          // Only speaks when a gated surface declares OAuth: addressed once the RFC 9728
+          // metadata exists somewhere ax can see it (a wired route, a committed document, or a
+          // mount's declared resourceMetadataPath).
+          'oauth-metadata': !reportAuth.gatedSurfaces.some((s) => s.status === 'oauth2')
+            ? 'not-applicable'
+            : authMetadata.resourceMetadataRoute !== undefined ||
+              mcpMounts.some((mount) => mount.resourceMetadataPath !== undefined) ||
+              authMetadata.issuersSource?.includes('oauth-protected-resource') === true,
           // Negotiation is runtime behavior on page URLs: N/A with no page routes, addressed once
           // a middleware file wires the ax runtime entry.
           middleware:
             router.listPageRoutes().length === 0 ? 'not-applicable' : middlewareStatus.wiredToAx,
         },
-        oraCheckNotes({
-          llmsTxtScaffolded: llmsTxtResult.scaffoldedPath,
-          jsonLd: jsonLd.scaffold,
-          twinPlan,
-          authMdMissing: authMdCandidate !== undefined && authMdPlan === undefined,
-          mcpCardMissing: mcpMounts.length > 0 && serverCardPlan === undefined,
-          ...(middlewareWiring !== undefined ? { middlewareWiring } : {}),
-        }),
+        {
+          ...oraCheckNotes({
+            llmsTxtScaffolded: llmsTxtResult.scaffoldedPath,
+            jsonLd: jsonLd.scaffold,
+            twinPlan,
+            authMdMissing: authMdCandidate !== undefined && authMdPlan === undefined,
+            mcpCardMissing: mcpMounts.length > 0 && serverCardPlan === undefined,
+            ...(middlewareWiring !== undefined ? { middlewareWiring } : {}),
+          }),
+          'auth-declaration':
+            'A gated surface publishes auth.status "unknown" — declare entries[].auth in ' +
+            'ax.config (the ax init wizard collects this) so agents know the scheme.',
+          'oauth-metadata':
+            'OAuth is declared but no RFC 9728 protected-resource metadata is wired, so agents ' +
+            "can't discover the authorization server. Add your provider's protected-resource " +
+            'route (see report.auth.provider) or a static /.well-known/oauth-protected-resource ' +
+            'document.',
+        },
       ),
     },
     warnings,

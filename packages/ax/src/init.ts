@@ -441,9 +441,8 @@ async function askAuthEndpoints(
   stdout(
     '[ax] Your gated MCP server' +
       (gated.length === 1 ? ' publishes' : 's publish') +
-      ' as "requires auth". Declaring where agents authenticate (in ax.config, then /auth.md and ' +
-      'the server card) turns that into something an agent can act on. Every answer is optional — ' +
-      'press Enter to skip. Endpoint URLs only, never credentials.',
+      ' as "requires auth". Declaring where agents authenticate turns that into something an ' +
+      'agent can act on.',
   );
   if (suggestion.issuers.length > 0 && suggestion.issuersSource !== undefined) {
     stdout(
@@ -489,12 +488,11 @@ async function askAuthEndpoints(
       ? ` (prefilled from ${suggestion.oauthSource} — Enter to approve, clear to skip)`
       : ' (Enter to skip)';
 
-  // Default the scheme to OAuth only when the source tree shows OAuth actually exists (committed
-  // metadata, a declared authorization server, or a wired protected-resource route). Most real
-  // apps have something more basic — an API key behind their existing login — and a wizard that
-  // leads with OAuth questions they can't answer just teaches them to skip. With no evidence the
-  // default is "skip": Enter-through stays a no-op, and api_key (the realistic common
-  // declaration) is one active keystroke away.
+  // Default the scheme to OAuth when the source tree shows OAuth actually exists (committed
+  // metadata, a declared authorization server, or a wired protected-resource route); otherwise to
+  // API key — the scheme most real apps actually have. A wizard that leads with OAuth questions a
+  // basic-auth user can't answer just teaches them to skip, and defaulting to "skip" undersells
+  // the one declaration nearly every gated surface can truthfully make.
   const oauthEvidence =
     suggestion.oauth !== undefined ||
     suggestion.issuers.length > 0 ||
@@ -507,16 +505,15 @@ async function askAuthEndpoints(
       (await prompter.select(`How do agents authenticate to ${served(mount.pathname)}?`, [
         {
           value: 'oauth2',
-          label:
-            'OAuth 2.0 — agents discover your authorization server and sign in (the MCP-spec path)',
+          label: 'OAuth 2.0 — agents discover your authorization server and sign in',
           selected: oauthEvidence,
         },
         {
           value: 'api_key',
           label: 'API key / bearer token — a human obtains a credential and gives it to the agent',
-          selected: false,
+          selected: !oauthEvidence,
         },
-        { value: 'skip', label: 'Skip — declare later in ax.config', selected: !oauthEvidence },
+        { value: 'skip', label: 'Skip — declare later in ax.config', selected: false },
       ])) ?? 'skip';
     if (scheme === 'skip') continue;
 
@@ -533,7 +530,10 @@ async function askAuthEndpoints(
       );
       if (tokenEndpoint !== undefined) oauth.tokenEndpoint = tokenEndpoint;
     }
-    const docsUrl = await askUrl(`Docs URL where a human obtains access${where} (Enter to skip)`);
+    const docsUrl = await askUrl(
+      `Docs URL${where} — the page where a human gets access; agents send their user there when ` +
+        'they hit the auth wall (Enter to skip)',
+    );
 
     const hasEndpoints = Object.keys(oauth).length > 0;
     // "api_key" is a declaration by itself; "oauth2" becomes one once an endpoint backs it — or

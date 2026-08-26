@@ -44,6 +44,8 @@ export type OraArtifact =
   | 'mcp-server'
   | 'mcp-server-card'
   | 'auth.md'
+  | 'auth-declaration'
+  | 'oauth-metadata'
   | 'middleware';
 
 export interface OraArtifactChecks {
@@ -77,6 +79,15 @@ export const ORA_CHECK_MAP: readonly OraArtifactChecks[] = [
   // with nothing gated, the caller marks it 'not-applicable' and the checks are omitted entirely
   // (an absent check is "this build can't speak to it", never a claim the site fails it).
   { artifact: 'auth.md', checks: ['auth-md-exists', 'auth-md-structure'] },
+  // Whether every gated surface publishes *some* auth scheme (declared or derived) — Ora's
+  // mechanism check probes the live server, but a surface shipping `status "unknown"` is the
+  // build-time signal that it will find nothing to match. N/A with nothing gated.
+  { artifact: 'auth-declaration', checks: ['mcp-auth-mechanism'] },
+  // RFC 9728 protected-resource metadata for an OAuth-gated MCP server (a wired route, a
+  // committed document, or a declared resourceMetadataPath). Only reported when the gated
+  // surface actually speaks OAuth — an API-key scheme has no metadata chain to publish, and an
+  // omitted check is "this build can't speak to it", never a claim the site fails it.
+  { artifact: 'oauth-metadata', checks: ['oauth-protected-resource'] },
   // Ora's negotiation checks dual-fetch a page URL with and without `Accept: text/markdown` and
   // expect different content-types plus `Vary: Accept` on the markdown variant — runtime behavior
   // only the negotiation middleware provides. Addressed when a middleware file wires the ax

@@ -945,7 +945,7 @@ describe('auth-endpoint questions (declared auth for gated MCP servers)', () => 
     expect(stdout.some((l) => l.includes('will declare auth for /mcp'))).toBe(true);
   });
 
-  it('a docs URL alone keeps the honest "unknown" status; skipping everything writes no entries', async () => {
+  it('a docs URL alone keeps the honest "unknown" status; an Enter-through declares api_key', async () => {
     writeBareApp(dir);
     addGatedMcpMount(dir);
 
@@ -963,19 +963,22 @@ describe('auth-endpoint questions (declared auth for gated MCP servers)', () => 
       docsUrl: 'https://acme.com/docs/access',
     });
 
-    // Fresh project, all three questions skipped → the config carries no entries key at all.
+    // Fresh project, pure Enter-through: with no OAuth evidence the scheme defaults to api_key —
+    // the declaration nearly every gated surface can truthfully make — so accepting every default
+    // declares it (docs URL skipped). Choosing "skip" is the explicit way to write nothing.
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
     writeBareApp(dir);
     addGatedMcpMount(dir);
     stdout = [];
-    const skipAll = new ScriptedPrompter({
+    const enterThrough = new ScriptedPrompter({
       text: ['https://acme.com'],
       multiSelect: [[], []],
       confirm: [false],
     });
-    expect(await runInit([], { ...io(), prompter: skipAll })).toBe(0);
-    expect(readFileSync(join(dir, 'ax.config.ts'), 'utf8')).not.toContain('entries:');
+    expect(await runInit([], { ...io(), prompter: enterThrough })).toBe(0);
+    const { config: rerun } = await loadAxConfig(dir);
+    expect(rerun.entries[0]?.auth).toEqual({ status: 'api_key' });
   });
 
   it('re-prompts on an invalid endpoint URL and skips after repeated bad input', async () => {

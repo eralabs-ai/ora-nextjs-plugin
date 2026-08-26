@@ -877,6 +877,63 @@ describe('report auth section', () => {
     expect(report.auth.provider).toBeUndefined();
   });
 
+  it('speaks to Ora auth checks: mechanism actionable while "unknown", PRM omitted for api_key', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com' };\n",
+      'utf8',
+    );
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      "import { createMcpHandler, withMcpAuth } from 'mcp-handler';\n" +
+        'const handler = createMcpHandler((server) => {});\n' +
+        'const authed = withMcpAuth(handler, verifyToken, {});\n' +
+        'export { authed as GET };\n',
+      'utf8',
+    );
+
+    // Gated with status "unknown" → the mechanism check is actionable with the declare note; no
+    // OAuth declared → the RFC 9728 check is omitted, not held against the site.
+    const { report } = await generateCatalog({ cwd: dir });
+    const mechanism = report.ora.checks.find((c) => c.id === 'mcp-auth-mechanism');
+    expect(mechanism?.status).toBe('actionable');
+    expect(mechanism?.note).toContain('entries[].auth');
+    expect(report.ora.checks.some((c) => c.id === 'oauth-protected-resource')).toBe(false);
+
+    // Declare api_key → mechanism addressed, PRM still (honestly) absent. A *different* directory
+    // (not a recreated one): the config loader (jiti) caches modules by absolute path within a
+    // process, so rewriting the same ax.config.mjs path would read back the first version.
+    const dir2 = mkdtempSync(join(tmpdir(), 'ax-generate-auth2-'));
+    try {
+      writeFileSync(join(dir2, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+      const routeDir2 = join(dir2, 'app', '[transport]');
+      mkdirSync(routeDir2, { recursive: true });
+      writeFileSync(
+        join(routeDir2, 'route.ts'),
+        "import { createMcpHandler, withMcpAuth } from 'mcp-handler';\n" +
+          'const handler = createMcpHandler((server) => {});\n' +
+          'const authed = withMcpAuth(handler, verifyToken, {});\n' +
+          'export { authed as GET };\n',
+        'utf8',
+      );
+      writeFileSync(
+        join(dir2, 'ax.config.mjs'),
+        "export default { siteUrl: 'https://example.com', entries: [{ identifier: 'urn:air:example.com:mcp-server', auth: { status: 'api_key' } }] };\n",
+        'utf8',
+      );
+      const { report: declared } = await generateCatalog({ cwd: dir2 });
+      expect(declared.ora.checks.find((c) => c.id === 'mcp-auth-mechanism')?.status).toBe(
+        'addressed',
+      );
+      expect(declared.ora.checks.some((c) => c.id === 'oauth-protected-resource')).toBe(false);
+    } finally {
+      rmSync(dir2, { recursive: true, force: true });
+    }
+  });
+
   it('is empty (no surfaces, no provider) for an open site', async () => {
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
     const { report } = await generateCatalog({ cwd: dir });

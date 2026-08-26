@@ -208,13 +208,15 @@ function interactiveMultiSelect(
   const renderRegion = (): string[] => {
     let n = -1;
     const body = rows.map((row) => {
-      // Display rows get exactly the choice prefix's width (` ❯ [x] ` = 7 chars) so tree
-      // connectors line up across selectable and inert rows.
+      // Display rows get exactly the choice prefix's width (` > [x] ` = 7 chars) so tree
+      // connectors line up across selectable and inert rows. ASCII-only markers on purpose:
+      // ambiguous-width glyphs (❯ • ·) render two columns wide under some terminal/font configs,
+      // wrapping a line the redraw arithmetic counted as one physical row.
       if (!isMultiSelectChoice(row)) return `       ${row.text}`.trimEnd();
       n++;
-      return `${n === focus ? ' ❯' : '  '} [${selected[n] ? 'x' : ' '}] ${row.label}`;
+      return `${n === focus ? ' >' : '  '} [${selected[n] ? 'x' : ' '}] ${row.label}`;
     });
-    return [...body, '', '↑/↓ move · space toggle · enter accept'];
+    return [...body, '', 'up/down move - space toggle - enter accept'];
   };
 
   output.write(`${question}\n`);
@@ -299,13 +301,14 @@ function interactiveSelect(
   const renderRegion = (): string[] => {
     let n = -1;
     const body = rows.map((row) => {
-      // Display rows get exactly the choice prefix's width (` ❯ (•) ` = 7 chars) so tree
-      // connectors line up across selectable and inert rows.
+      // Display rows get exactly the choice prefix's width (` > (*) ` = 7 chars) so tree
+      // connectors line up across selectable and inert rows. ASCII-only markers — same
+      // ambiguous-width reasoning as the multi-select renderer above.
       if (!isMultiSelectChoice(row)) return `       ${row.text}`.trimEnd();
       n++;
-      return `${n === focus ? ' ❯' : '  '} (${n === focus ? '•' : ' '}) ${row.label}`;
+      return `${n === focus ? ' >' : '  '} (${n === focus ? '*' : ' '}) ${row.label}`;
     });
-    return [...body, '', '↑/↓ move · enter accept'];
+    return [...body, '', 'up/down move - enter accept'];
   };
 
   output.write(`${question}\n`);
