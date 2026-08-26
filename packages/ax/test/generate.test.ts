@@ -698,3 +698,107 @@ describe('generateCatalog multi-mount MCP', () => {
     expect(report.ora.checks.some((c) => c.id === 'mcp-server-card')).toBe(false);
   });
 });
+
+describe('generateCatalog with config-declared entry auth', () => {
+  const declaringConfig = [
+    'export default {',
+    "  siteUrl: 'https://example.com',",
+    '  entries: [{',
+    "    identifier: 'urn:air:example.com:mcp-server',",
+    '    auth: {',
+    "      status: 'oauth2',",
+    "      oauth: { authorizationEndpoint: 'https://auth.example.com/authorize', tokenEndpoint: 'https://auth.example.com/token' },",
+    "      docsUrl: 'https://example.com/docs/auth',",
+    '    },',
+    '  }],',
+    '};',
+    '',
+  ].join('\n');
+
+  it('refines a withMcpAuth mount everywhere: entry, server card, and auth.md endpoints', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(join(dir, 'ax.config.mjs'), declaringConfig, 'utf8');
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      "import { createMcpHandler, withMcpAuth } from 'mcp-handler';\n" +
+        'const handler = createMcpHandler((server) => {});\n' +
+        'const authed = withMcpAuth(handler, verifyToken, {});\n' +
+        'export { authed as GET };\n',
+      'utf8',
+    );
+
+    const { catalog, serverCardPlan, authMdPlan, report } = await generateCatalog({ cwd: dir });
+
+    // The catalog entry carries the declared descriptor, not the detection ceiling ("unknown").
+    expect(catalog.entries[0]?.auth).toEqual({
+      status: 'oauth2',
+      oauth: {
+        authorizationEndpoint: 'https://auth.example.com/authorize',
+        tokenEndpoint: 'https://auth.example.com/token',
+      },
+      docsUrl: 'https://example.com/docs/auth',
+    });
+    expect(serverCardPlan?.cards[0]?.card.authentication).toEqual({ required: true });
+    // auth.md now tells agents *how* to authenticate instead of "not statically derivable".
+    expect(authMdPlan?.content).toContain('OAuth 2.0');
+    expect(authMdPlan?.content).toContain('<https://auth.example.com/token>');
+    expect(authMdPlan?.content).toContain('Get access: <https://example.com/docs/auth>');
+    expect(authMdPlan?.content).not.toContain('not statically derivable');
+    expect(report.mcp.unreviewedMounts).toEqual([]);
+  });
+
+  it('gates an un-wrapped mount by declaration alone and marks it reviewed', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(join(dir, 'ax.config.mjs'), declaringConfig, 'utf8');
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      "import { createMcpHandler } from 'mcp-handler';\n" +
+        'const handler = createMcpHandler((server) => {});\n' +
+        'export { handler as GET };\n',
+      'utf8',
+    );
+
+    const { catalog, serverCardPlan, authMdPlan, report } = await generateCatalog({ cwd: dir });
+
+    expect(catalog.entries[0]?.auth?.status).toBe('oauth2');
+    expect(serverCardPlan?.cards[0]?.card.authentication).toEqual({ required: true });
+    expect(authMdPlan).toBeDefined();
+    // Declaring auth in config *is* the review — the mount is neither unreviewed nor silently open.
+    expect(report.mcp.unreviewedMounts).toEqual([]);
+  });
+
+  it("warns when a declared status contradicts the surface's own committed declaration", async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      [
+        'export default {',
+        "  siteUrl: 'https://example.com',",
+        "  entries: [{ identifier: 'urn:air:example.com:openapi', auth: { status: 'oauth2' } }],",
+        '};',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    mkdirSync(join(dir, 'public'), { recursive: true });
+    writeFileSync(
+      join(dir, 'public', 'openapi.json'),
+      JSON.stringify({
+        openapi: '3.1.0',
+        info: {},
+        components: { securitySchemes: { key: { type: 'apiKey', in: 'header', name: 'X-K' } } },
+      }),
+      'utf8',
+    );
+
+    const warnings: string[] = [];
+    const { catalog } = await generateCatalog({ cwd: dir, onWarning: (m) => warnings.push(m) });
+
+    expect(catalog.entries[0]?.auth).toEqual({ status: 'oauth2' });
+    expect(warnings.some((w) => w.includes('"oauth2"') && w.includes('"api_key"'))).toBe(true);
+  });
+});

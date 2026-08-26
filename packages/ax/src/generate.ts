@@ -7,13 +7,18 @@ import { loadAxConfig } from './config.js';
 import { detectAgentsMd } from './detect-agents-md.js';
 import { detectJsonLd } from './detect-json-ld.js';
 import { detectLlmsTxt } from './detect-llms-txt.js';
-import { buildMcpEntries, detectMcpMounts, type McpMount } from './detect-mcp.js';
+import {
+  applyDeclaredMountAuth,
+  buildMcpEntries,
+  detectMcpMounts,
+  type McpMount,
+} from './detect-mcp.js';
 import { detectOpenApi } from './detect-openapi.js';
 import { detectRobots } from './detect-robots.js';
 import { detectSitemap } from './detect-sitemap.js';
 import { detectWebMcp } from './detect-webmcp.js';
 import { buildDiscoveryRecommendations } from './discovery.js';
-import { applyEntryOverrides, entryUrlPath } from './entries.js';
+import { applyEntryOverrides, entryUrlPath, sanitizeOverrideAuth } from './entries.js';
 import { defaultIsGated, resolveGating, type GateTarget, type IsGated } from './gating.js';
 import { loadProjectEnv } from './load-project-env.js';
 import { buildMarkdownAlternateRecommendation } from './markdown-alternate.js';
@@ -416,7 +421,23 @@ export async function generateCatalog(
   // dropped: the committed cards are the persistence layer for the gating decisions, so they must
   // exist to record them.
   const gating = resolveGating(config.isGated);
-  const detectedMounts = detectMcpMounts({ cwd, warn, router });
+
+  // Sanitize any config-declared entry `auth` once, up front — both consumers below (the MCP
+  // mount routing and the entry-override merge) then see the same clean, secret-free descriptors
+  // and dropped fields are warned exactly once.
+  const entryOverrides = sanitizeOverrideAuth(config.entries, warn);
+
+  // A declared auth on an MCP server's entry override refines the mount itself (not just the
+  // catalog entry): the mount is what the server card and the generated /auth.md read, and a
+  // declaration is how the developer supplies the endpoints detection can never derive
+  // (withMcpAuth only ever yields status "unknown"). Applied before gating resolves, so a
+  // declaration — like a detected wrapper — marks its mount gated and reviewed.
+  const detectedMounts = applyDeclaredMountAuth({
+    mounts: detectMcpMounts({ cwd, warn, router }),
+    overrides: entryOverrides,
+    siteUrl,
+    warn,
+  });
   const {
     mounts: mcpMounts,
     unreviewed: unreviewedMcpMounts,
@@ -504,7 +525,7 @@ export async function generateCatalog(
   // (`applyEntryOverrides().notes`) are meant for a build summary rather than surfaced as warnings
   // here. A gating decision, below, is worth warning about: a gated surface either carries an auth
   // descriptor or is dropped, and both are worth recording in the build output/report.
-  const { entries: overridden } = applyEntryOverrides(inferredEntries, config.entries);
+  const { entries: overridden } = applyEntryOverrides(inferredEntries, entryOverrides, warn);
   const entries = applyGating(overridden, gating, warn);
 
   // Reference the server cards from the catalog: an mcp entry's type promises card JSON, and the

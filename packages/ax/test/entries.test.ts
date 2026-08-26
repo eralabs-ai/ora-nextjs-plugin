@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { applyEntryOverrides, entryUrlPath } from '../src/entries.js';
+import { applyEntryOverrides, entryUrlPath, sanitizeOverrideAuth } from '../src/entries.js';
 import type { CatalogEntry } from '../src/types.js';
 
 const mcpEntry: CatalogEntry = {
@@ -54,6 +54,86 @@ describe('applyEntryOverrides', () => {
       [{ identifier: 'urn:demo:mcp', displayName: 'Renamed' }],
     );
     expect(entries[0]?.displayName).toBe('Renamed');
+  });
+
+  it('a declared auth wins over a detected one, but a status disagreement is warned', () => {
+    const warnings: string[] = [];
+    const { entries } = applyEntryOverrides(
+      [{ ...mcpEntry, auth: { status: 'api_key' } }],
+      [{ identifier: 'urn:demo:mcp', auth: { status: 'oauth2' } }],
+      (message) => warnings.push(message),
+    );
+    expect(entries[0]?.auth).toEqual({ status: 'oauth2' });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('"oauth2"');
+    expect(warnings[0]).toContain('"api_key"');
+  });
+
+  it('does not warn when declared and detected auth agree on status', () => {
+    const warnings: string[] = [];
+    const { entries } = applyEntryOverrides(
+      [{ ...mcpEntry, auth: { status: 'unknown' } }],
+      [
+        {
+          identifier: 'urn:demo:mcp',
+          auth: { status: 'unknown', docsUrl: 'https://example.com/docs/auth' },
+        },
+      ],
+      (message) => warnings.push(message),
+    );
+    expect(entries[0]?.auth).toEqual({
+      status: 'unknown',
+      docsUrl: 'https://example.com/docs/auth',
+    });
+    expect(warnings).toEqual([]);
+  });
+});
+
+describe('sanitizeOverrideAuth', () => {
+  it('leaves overrides that declare no auth untouched (same object, no copy)', () => {
+    const override = { identifier: 'urn:demo:docs', url: '/docs' };
+    expect(sanitizeOverrideAuth([override], () => {})[0]).toBe(override);
+  });
+
+  it('keeps a valid declared auth and warns nothing', () => {
+    const warnings: string[] = [];
+    const [result] = sanitizeOverrideAuth(
+      [
+        {
+          identifier: 'urn:demo:api',
+          auth: { status: 'oauth2', oauth: { tokenEndpoint: 'https://auth.example.com/token' } },
+        },
+      ],
+      (message) => warnings.push(message),
+    );
+    expect(result?.auth).toEqual({
+      status: 'oauth2',
+      oauth: { tokenEndpoint: 'https://auth.example.com/token' },
+    });
+    expect(warnings).toEqual([]);
+  });
+
+  it('strips a non-http(s) URL field with a warning naming the entry and the field', () => {
+    const warnings: string[] = [];
+    const [result] = sanitizeOverrideAuth(
+      [{ identifier: 'urn:demo:api', auth: { status: 'api_key', docsUrl: 'javascript:alert(1)' } }],
+      (message) => warnings.push(message),
+    );
+    expect(result?.auth).toEqual({ status: 'api_key' });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('urn:demo:api');
+    expect(warnings[0]).toContain('auth.docsUrl');
+  });
+
+  it('removes a wholly unusable auth so an inferred descriptor survives the merge', () => {
+    const warnings: string[] = [];
+    const [result] = sanitizeOverrideAuth(
+      // The config schema rejects this at load time; simulate a direct-API caller bypassing it.
+      [{ identifier: 'urn:demo:api', auth: { status: 'not-a-status' } } as never],
+      (message) => warnings.push(message),
+    );
+    expect(result).not.toHaveProperty('auth');
+    expect(warnings).toHaveLength(1);
   });
 });
 

@@ -1,6 +1,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { relative } from 'node:path';
 
+import type { AxEntryOverride } from './config-schema.js';
 import { buildRouterModel, type RouterModel } from './router-model.js';
 import { scrubSource } from './scrub-source.js';
 import { buildArtifactUrl, buildUrn, NO_SITE_URL_HINT } from './site-url.js';
@@ -153,11 +154,7 @@ export function buildMcpEntries(options: BuildMcpEntriesOptions): CatalogEntry[]
 
   const multiple = mounts.length > 1;
   return mounts.map((mount): CatalogEntry => {
-    // ARD URN format (spec §4.2.1): publisher domain + logical name; a second segment
-    // disambiguates only when the app mounts more than one server.
-    const identifier = multiple
-      ? buildUrn(siteUrl, 'mcp-server', mount.pathname)
-      : buildUrn(siteUrl, 'mcp-server');
+    const identifier = mcpMountIdentifier(siteUrl, mount.pathname, multiple);
     return {
       identifier,
       type: 'application/mcp-server-card+json',
@@ -167,6 +164,69 @@ export function buildMcpEntries(options: BuildMcpEntriesOptions): CatalogEntry[]
       ...(mount.capabilities.length > 0 ? { capabilities: mount.capabilities } : {}),
       ...(mount.auth !== undefined ? { auth: mount.auth } : {}),
     };
+  });
+}
+
+/**
+ * The catalog identifier an MCP mount's entry gets — ARD URN format (spec §4.2.1): publisher
+ * domain + logical name, with a second segment disambiguating only when the app mounts more than
+ * one server. This is also the key a config entry override targets, so it's shared between
+ * `buildMcpEntries` and `applyDeclaredMountAuth`.
+ */
+export function mcpMountIdentifier(siteUrl: string, pathname: string, multiple: boolean): string {
+  return multiple ? buildUrn(siteUrl, 'mcp-server', pathname) : buildUrn(siteUrl, 'mcp-server');
+}
+
+export interface ApplyDeclaredMountAuthOptions {
+  mounts: McpMount[];
+  /** Config entry overrides whose `auth` was already sanitized (see `sanitizeOverrideAuth`). */
+  overrides: readonly AxEntryOverride[];
+  siteUrl: string | undefined;
+  warn: (message: string) => void;
+}
+
+/**
+ * Routes a config-declared `auth` on an MCP server's entry override into the mount itself, keyed
+ * by the entry identifier the mount's card entry will carry. The mount — not the entry — is what
+ * the server card and the generated `/auth.md` read, so without this an override's declared auth
+ * would reach the catalog entry but leave both of those saying "scheme unknown". Runs *before*
+ * mount gating resolves: a declared descriptor, like a detected `withMcpAuth` wrapper, marks the
+ * mount gated and reviewed. Detection can only ever say `status: "unknown"` (the endpoints aren't
+ * statically derivable), so a declaration refines it rather than contradicting it — except a
+ * declared `"none"`, which would un-gate the surface; openness is what the review gate / committed
+ * server card records, so that claim is warned and ignored.
+ *
+ * With no known site URL the identifiers can't be computed, so declared auth can't be matched to
+ * a mount — but no MCP entries are emitted then either, and `buildMcpEntries` already warns about
+ * the missing site URL, so this quietly changes nothing.
+ */
+export function applyDeclaredMountAuth(options: ApplyDeclaredMountAuthOptions): McpMount[] {
+  const { mounts, overrides, siteUrl, warn } = options;
+  if (mounts.length === 0) return mounts;
+  const declaring = overrides.filter((override) => override.auth !== undefined);
+  if (declaring.length === 0) return mounts;
+
+  const multiple = mounts.length > 1;
+  return mounts.map((mount) => {
+    const override =
+      siteUrl !== undefined
+        ? declaring.find(
+            (candidate) =>
+              candidate.identifier === mcpMountIdentifier(siteUrl, mount.pathname, multiple),
+          )
+        : undefined;
+    if (override?.auth === undefined) return mount;
+    const declared = override.auth;
+    if (declared.status === 'none') {
+      warn(
+        `Entry "${override.identifier}" declares auth.status "none" for the MCP server at ` +
+          `${mount.pathname} — a declaration can describe how a gated server authenticates, but ` +
+          "can't assert it open; that decision is recorded by the review gate / committed server " +
+          'card. Ignoring it.',
+      );
+      return mount;
+    }
+    return { ...mount, auth: declared };
   });
 }
 
