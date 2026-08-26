@@ -671,10 +671,13 @@ function printAgentHandoff(
   }
   stdout('[ax]');
   stdout(`[ax] Find your report at: ${reportPath}`);
+  stdout('[ax]');
   stdout('[ax] 📋 Copy this prompt to your coding agent:');
   stdout('[ax]');
+  // No "[ax]" prefix on the prompt itself: it's the one line meant to be selected and pasted
+  // verbatim, and a triple-click terminal selection would otherwise drag the prefix along.
   const prompt =
-    `[ax]   Read ${reportPath} and work through every check marked "actionable": create or ` +
+    `Read ${reportPath} and work through every check marked "actionable": create or ` +
     'improve those artifacts to make this site more agent-ready (each check may carry a note ' +
     'with the exact next step, and the markdownTwins.skipped section lists why any route has ' +
     'no markdown twin), then rebuild and confirm the report marks them addressed.';
