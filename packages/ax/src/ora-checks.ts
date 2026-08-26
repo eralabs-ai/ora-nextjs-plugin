@@ -35,13 +35,16 @@ export interface OraCheckStatus {
 export type OraArtifact =
   | 'ai-catalog.json'
   | 'llms.txt'
+  | 'markdown-twins'
   | 'robots.txt'
   | 'sitemap'
   | 'agents.md'
   | 'json-ld'
   | 'openapi.json'
   | 'mcp-server'
-  | 'webmcp';
+  | 'mcp-server-card'
+  | 'auth.md'
+  | 'middleware';
 
 export interface OraArtifactChecks {
   artifact: OraArtifact;
@@ -56,41 +59,57 @@ export interface OraArtifactChecks {
 export const ORA_CHECK_MAP: readonly OraArtifactChecks[] = [
   { artifact: 'ai-catalog.json', checks: ['ard-catalog', 'agent-discovery-file'] },
   { artifact: 'llms.txt', checks: ['llms-txt-exists', 'llms-txt-formatting'] },
+  // Ora's probe fetches the homepage's .md fallback and checks the agreed frontmatter keys — both
+  // are exactly what the markdown-twin pass produces, so the twin state answers these checks.
+  { artifact: 'markdown-twins', checks: ['markdown-url-fallback', 'markdown-frontmatter'] },
   { artifact: 'robots.txt', checks: ['robots-ai-policy-quality'] },
   { artifact: 'sitemap', checks: ['sitemap'] },
   { artifact: 'agents.md', checks: ['agent-instruction'] },
   { artifact: 'json-ld', checks: ['json-ld', 'org-schema-completeness'] },
   { artifact: 'openapi.json', checks: ['openapi-spec'] },
-  { artifact: 'mcp-server', checks: ['mcp-server', 'mcp-server-card'] },
-  { artifact: 'webmcp', checks: ['webmcp'] },
+  { artifact: 'mcp-server', checks: ['mcp-server'] },
+  // The card is its own artifact, not a free rider on the mount: Ora probes the well-known card
+  // path itself, so the check is addressed only when this build actually has a card to write
+  // (a mount alone isn't one — e.g. no known site origin), and N/A when there's no MCP server
+  // for a card to describe.
+  { artifact: 'mcp-server-card', checks: ['mcp-server-card'] },
+  // The generated gated-surface guide. Only emitted when the site actually has gated surfaces —
+  // with nothing gated, the caller marks it 'not-applicable' and the checks are omitted entirely
+  // (an absent check is "this build can't speak to it", never a claim the site fails it).
+  { artifact: 'auth.md', checks: ['auth-md-exists', 'auth-md-structure'] },
+  // Ora's negotiation checks dual-fetch a page URL with and without `Accept: text/markdown` and
+  // expect different content-types plus `Vary: Accept` on the markdown variant — runtime behavior
+  // only the negotiation middleware provides. Addressed when a middleware file wires the ax
+  // runtime entry (whose header helper makes the Vary check unfailable by construction); N/A on a
+  // site with no page routes, where there is nothing to negotiate.
+  { artifact: 'middleware', checks: ['markdown-negotiation', 'markdown-negotiation-vary'] },
+  // No 'webmcp' entry for now: WebMCP is still a W3C draft, and steering a coding agent toward a
+  // non-official spec confuses more than it helps — until it is official we don't recommend it,
+  // so the report carries no check for it. Re-add `{ artifact: 'webmcp', checks: ['webmcp'] }`
+  // when the spec lands.
 ];
 
-/** The MCP server that serves Ora's `agent-ready-website` skill (tools: `list_skills`, `get_skill`). */
-export const ORA_SKILL_MCP_URL = 'https://ora.ai/skill/mcp';
-
-/** The same skill as a plain document, for agents that read files rather than speak MCP. */
-export const ORA_SKILL_URL = 'https://ora.ai/.well-known/agent-skills/agent-ready-website/SKILL.md';
-
-/** Ora's scan endpoints — how an agent verifies its work against the deployed site. */
-export const ORA_SCAN_API = {
-  scan: 'POST https://ora.ai/api/scan',
-  score: 'GET https://ora.ai/api/score/{domain}',
-} as const;
-
-/** Whether each mapped artifact was found (or generated) during this build. */
-export type OraArtifactPresence = Record<OraArtifact, boolean>;
+/**
+ * Whether each mapped artifact was found (or generated) during this build. `'not-applicable'`
+ * omits the artifact's checks from the report entirely — for checks that only exist when the site
+ * has the underlying surface at all (auth.md with no gated surfaces, a homepage markdown fallback
+ * on a site with no page routes).
+ */
+export type OraArtifactPresence = Record<OraArtifact, boolean | 'not-applicable'>;
 
 /**
  * Expands the artifact map into a flat, per-check list: `addressed` for every check whose artifact
- * this build has, `actionable` for the rest. `notes` attaches a per-artifact next step (e.g. "the
- * component was scaffolded, now import it") to that artifact's checks — a note never changes a
- * check's state, it only explains an `actionable` one that isn't simply "missing".
+ * this build has, `actionable` for the rest, nothing at all for `'not-applicable'` artifacts.
+ * `notes` attaches a per-artifact next step (e.g. "the component was scaffolded, now import it")
+ * to that artifact's checks — a note never changes a check's state, it only explains an
+ * `actionable` one that isn't simply "missing".
  */
 export function buildOraChecks(
   present: OraArtifactPresence,
   notes: Partial<Record<OraArtifact, string>> = {},
 ): OraCheckStatus[] {
   return ORA_CHECK_MAP.flatMap(({ artifact, checks }) => {
+    if (present[artifact] === 'not-applicable') return [];
     const status: OraCheckState = present[artifact] ? 'addressed' : 'actionable';
     const note = status === 'actionable' ? notes[artifact] : undefined;
     return checks.map((id) => ({

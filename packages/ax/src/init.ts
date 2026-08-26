@@ -3,19 +3,28 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 
 import { AxConfigError, findExistingConfig } from './config.js';
+import { detectMcpMounts, type McpMount } from './detect-mcp.js';
 import { generateCatalog } from './generate.js';
-import { defaultIsGated, type GateTarget } from './gating.js';
 import {
   configFileName,
   type ConfigFileTarget,
-  type GatingAnswer,
   type InitAnswers,
   renderAxConfig,
 } from './init-config.js';
-import { planPostbuildWiring, POSTBUILD_COMMAND } from './init-package-json.js';
-import { createReadlinePrompter, type MultiSelectChoice, type Prompter } from './prompt.js';
+import {
+  planPostbuildWiring,
+  planPrebuildWiring,
+  POSTBUILD_COMMAND,
+  PREBUILD_COMMAND,
+} from './init-package-json.js';
+import { writeServingManifest } from './manifest.js';
+import { createReadlinePrompter, type MultiSelectRow, type Prompter } from './prompt.js';
+import { buildRouteTreeLines, renderRouteTree, type RouteTreeInput } from './route-tree.js';
 import { buildRouterModel, type RouterKind } from './router-model.js';
+import { buildMcpServerCardPlan } from './server-card.js';
+import { readSiteMetadata } from './site-metadata.js';
 import { readSiteUrlFromEnv, servedPath } from './site-url.js';
+import { writeServerCards } from './write.js';
 
 export interface InitIO {
   cwd?: string;
@@ -135,25 +144,45 @@ export function validateSiteUrl(
   return { ok: true, value: url.origin };
 }
 
-/** A gated-surface candidate the multi-select offers, plus whether it starts selected. */
-interface GateCandidate {
-  value: string;
-  label: string;
-  selected: boolean;
+/** A candidate `siteUrl` default plus a human-readable label for where it was found. */
+interface SiteUrlDefault {
+  value?: string;
+  source?: string;
 }
 
-/** Sentinel value for the built-in floor row in the gated multi-select. */
-const FLOOR_VALUE = '__ax_floor__';
+/**
+ * The `siteUrl` to prefill and where it came from, in the same precedence a build resolves it. The
+ * source label matters: it turns "is this URL right?" from a guess into an informed check ("that's
+ * my NEXT_PUBLIC_SITE_URL — yes"). `.env*` files are already loaded into `process.env` by the
+ * detection pass that runs before this, so reading them here is enough.
+ */
+function detectSiteUrlDefault(flagSiteUrl: string | undefined): SiteUrlDefault {
+  if (flagSiteUrl !== undefined) return { value: flagSiteUrl, source: '--site-url' };
+  const env = (name: string): SiteUrlDefault | undefined => {
+    const value = process.env[name]?.trim();
+    return value ? { value, source: name } : undefined;
+  };
+  const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
+  return (
+    env('SITE_URL') ??
+    env('NEXT_PUBLIC_SITE_URL') ??
+    (vercel ? { value: `https://${vercel}`, source: 'VERCEL_PROJECT_PRODUCTION_URL' } : {})
+  );
+}
 
 interface InitFindings {
   routers: RouterKind[];
-  staticRouteCount: number;
+  /** Every statically addressable page route, for the route-tree summary. */
+  pageRoutes: string[];
+  /** Every API route that resolves to a stable URL (MCP mounts included), for the route tree. */
+  apiRoutePaths: string[];
   /**
-   * `next.config` `basePath` (`''` when unset). Gated-surface candidates are prefixed with it, so
-   * the `isGated` the wizard writes matches the basePath-prefixed `target.path` a real build passes.
+   * `next.config` `basePath` (`''` when unset). Every displayed path is prefixed with it, so what
+   * the tree and the gating question show is exactly the served path a real build gates on.
    */
   basePath: string;
-  mcpMounts: { pathname: string; tools: string[] }[];
+  /** Detected mounts, kept whole: the gating card is built from these after the answers land. */
+  mcpMounts: McpMount[];
   openApiFound: boolean;
   webMcpToolNames: string[];
   /** Presence of each detect-and-recommend artifact, for the findings summary. */
@@ -178,11 +207,24 @@ async function gatherFindings(cwd: string): Promise<InitFindings> {
   const generated = await generateCatalog({ cwd });
   const { report } = generated;
   const router = buildRouterModel(cwd);
+  // Re-run the mount scan directly (cheap — the router model is shared) because the report's mount
+  // list carries no auth posture, and both the pre-selection heuristic and the gating card need
+  // the whole mounts (withMcpAuth detection, source file, resource-metadata path).
+  const mounts = detectMcpMounts({ cwd, warn: () => {}, router });
+  const apiRoutePaths = [
+    ...new Set(
+      router
+        .listApiEndpoints()
+        .map((endpoint) => endpoint.url)
+        .filter((url): url is string => url !== undefined),
+    ),
+  ].sort();
   return {
     routers: report.routers,
-    staticRouteCount: router.listPageRoutes().length,
+    pageRoutes: router.listPageRoutes(),
+    apiRoutePaths,
     basePath: report.basePath,
-    mcpMounts: report.mcp.mounts.map((mount) => ({ pathname: mount.pathname, tools: mount.tools })),
+    mcpMounts: mounts,
     openApiFound: report.artifacts.openapi.found,
     webMcpToolNames: generated.webMcpToolNames,
     artifacts: {
@@ -196,24 +238,55 @@ async function gatherFindings(cwd: string): Promise<InitFindings> {
   };
 }
 
-function printFindings(findings: InitFindings, stdout: (line: string) => void): void {
+/** The findings' `RouteTreeInput` — one derivation shared by the plain tree and the gating rows. */
+function findingsTreeInput(findings: InitFindings): RouteTreeInput {
+  return {
+    routers: findings.routers,
+    pageRoutes: findings.pageRoutes,
+    // Plain API routes are agent-usable only when an OpenAPI doc describes them — without one,
+    // an agent can't call them, so listing them in the tree would just be noise.
+    apiRoutePaths: findings.openApiFound ? findings.apiRoutePaths : [],
+    basePath: findings.basePath,
+    mounts: findings.mcpMounts.map((mount) => ({
+      pathname: mount.pathname,
+      tools: mount.capabilities,
+      authDetected: mount.auth !== undefined,
+    })),
+  };
+}
+
+function printFindings(
+  findings: InitFindings,
+  stdout: (line: string) => void,
+  options: { tree: boolean },
+): void {
   stdout("[ax] Scanned your project (no build needed) — here's what I found:");
-  stdout(
-    `[ax]   • Router: ${findings.routers.length > 0 ? findings.routers.join(' + ') : 'none detected'}`,
-  );
-  stdout(`[ax]   • Statically addressable routes: ${findings.staticRouteCount}`);
+  // The route tree exists to serve the MCP gating decision, so it renders only when there is an
+  // MCP server to decide about; without one, a one-line count carries the same information. When
+  // the gating question is about to be asked, it renders the tree itself (checkbox on the server
+  // node), so printing it here too would just show the same tree twice.
   if (findings.mcpMounts.length > 0) {
+    if (options.tree) {
+      stdout('[ax]');
+      for (const line of renderRouteTree(findingsTreeInput(findings))) {
+        stdout(`[ax] ${line}`.trimEnd());
+      }
+      stdout('[ax]');
+    }
+  } else {
+    const pages = findings.pageRoutes.length;
+    const apis = findings.apiRoutePaths.length;
     stdout(
-      `[ax]   • MCP server${findings.mcpMounts.length === 1 ? '' : 's'}: ` +
-        findings.mcpMounts.map((m) => m.pathname).join(', '),
+      `[ax]   • Routes: ${pages} page${pages === 1 ? '' : 's'}, ${apis} API route` +
+        `${apis === 1 ? '' : 's'} — no MCP server detected`,
     );
   }
-  if (findings.openApiFound) stdout('[ax]   • OpenAPI doc: public/openapi.json');
   if (findings.webMcpToolNames.length > 0) {
     stdout(`[ax]   • WebMCP tools: ${findings.webMcpToolNames.join(', ')}`);
   }
   const present = [
     findings.artifacts.llmsTxt && 'llms.txt',
+    findings.artifacts.openapi && 'openapi.json',
     findings.artifacts.robotsTxt && 'robots.txt',
     findings.artifacts.sitemap && 'sitemap',
     findings.artifacts.agentsMd && 'agents.md',
@@ -225,109 +298,281 @@ function printFindings(findings: InitFindings, stdout: (line: string) => void): 
 }
 
 /**
- * The gated-surface candidates: the built-in floor (always offered, so it can be deselected) plus
- * every detected surface an `isGated` matcher can name. A surface starts selected only when the
- * built-in floor would already gate it — the wizard proposes what's safe by default and lets the
- * user add the rest, rather than guessing that a detected mount is private.
- *
- * A candidate's `value` is the *served* path (basePath prefix included), because that is exactly
- * what a real build passes as `isGated`'s `target.path` (`entryUrlPath` reads it off the
- * basePath-prefixed entry URL). Matching on the raw router pathname instead would make the generated
- * matcher silently miss on any `basePath` app — publishing a surface the user marked gated as open.
+ * Runs the gating question — per MCP *server*, because auth is declared at the server level in the
+ * MCP conventions (the card's `authentication` block). The prompt *is* the route tree: the
+ * checkbox sits on each MCP server node, and every other route and tool leaf renders as
+ * display-only context, so the decision is made looking at the app's whole surface in one layout.
+ * Selected means **public**: pressing Enter with everything selected says "none require logging
+ * in", and an unselected server is published as *requiring auth* (recorded in its server card),
+ * never advertised as open. A `withMcpAuth`-wrapped mount starts deselected — its own code already
+ * demands auth, which the tree's per-row "auth detected" annotation already says, so the question
+ * itself stays short. The built-in auth/webhook floor always applies on top. Returns the pathnames
+ * of the gated mounts.
  */
-function gateCandidates(findings: InitFindings): GateCandidate[] {
-  const candidates: GateCandidate[] = [
-    {
-      value: FLOOR_VALUE,
-      label: 'Built-in floor: /api/auth/** and /api/webhooks/** (recommended)',
-      selected: true,
-    },
-  ];
+async function askGating(
+  prompter: Prompter,
+  findings: InitFindings,
+  stdout: (line: string) => void,
+): Promise<Set<string>> {
+  if (findings.mcpMounts.length === 0) return new Set();
   const served = (pathname: string): string => servedPath(findings.basePath, pathname);
-  const preselect = (kind: GateTarget['kind'], path: string): boolean =>
-    defaultIsGated({ kind, path });
-  for (const mount of findings.mcpMounts) {
-    const path = served(mount.pathname);
-    candidates.push({
-      value: path,
-      label: `MCP server (${path})${mount.tools.length > 0 ? ` — ${mount.tools.join(', ')}` : ''}`,
-      selected: preselect('mcp', path),
-    });
-  }
-  if (findings.openApiFound) {
-    const path = served('/openapi.json');
-    candidates.push({
-      value: path,
-      label: `OpenAPI doc (${path})`,
-      selected: preselect('openapi', path),
-    });
-  }
-  return candidates;
-}
 
-/** Turns the multi-select result back into the floor/extra-paths shape the config renderer wants. */
-function toGatingAnswer(selected: string[]): GatingAnswer {
-  return {
-    floorKept: selected.includes(FLOOR_VALUE),
-    gatedPaths: selected.filter((v) => v !== FLOOR_VALUE),
-  };
+  const authDetected = new Map(
+    findings.mcpMounts.map((mount) => [mount.pathname, mount.auth !== undefined]),
+  );
+  const rows: MultiSelectRow[] = [
+    { text: '' },
+    ...buildRouteTreeLines(findingsTreeInput(findings)).map((line): MultiSelectRow =>
+      line.mountPathname !== undefined
+        ? {
+            value: line.mountPathname,
+            label: line.text,
+            selected: authDetected.get(line.mountPathname) !== true,
+          }
+        : { text: line.text },
+    ),
+  ];
+
+  const question = 'Select only the PUBLIC MCP servers — press Enter to save:';
+  const publicValues = new Set(await prompter.multiSelect(question, rows));
+
+  const gated = new Set(
+    findings.mcpMounts.map((mount) => mount.pathname).filter((p) => !publicValues.has(p)),
+  );
+  const publicList = findings.mcpMounts
+    .filter((mount) => !gated.has(mount.pathname))
+    .map((mount) => served(mount.pathname));
+  const gatedList = [...gated].map(served);
+  stdout(
+    `[ax]   Public (advertised to agents): ${publicList.length > 0 ? publicList.join(', ') : 'none'}`,
+  );
+  if (gatedList.length > 0) {
+    stdout(`[ax]   Requires login (not advertised as open): ${gatedList.join(', ')}`);
+  }
+  return gated;
 }
 
 /**
+ * Resolves which MCP server is primary (owns the root well-known card path) — only for a host
+ * with several servers. With exactly one *public* server the answer isn't a judgment call at all:
+ * the root path is probed blind by registries, so the one server agents can use without
+ * credentials is its only sensible owner — picked silently, no question. The question is asked
+ * only when it's genuinely ambiguous (several public servers, or none). The gating question just
+ * rendered the full route tree, so the prompt lists only the MCP server rows (same markers,
+ * gating answers as annotations) — re-printing the identical tree back-to-back would be pure
+ * noise. Returns the chosen mount's pathname.
+ */
+async function askPrimary(
+  prompter: Prompter,
+  findings: InitFindings,
+  gatedMounts: Set<string>,
+  stdout: (line: string) => void,
+): Promise<string | undefined> {
+  if (findings.mcpMounts.length <= 1) return findings.mcpMounts[0]?.pathname;
+
+  const served = (pathname: string): string => servedPath(findings.basePath, pathname);
+  const mounts = [...findings.mcpMounts].sort((a, b) =>
+    served(a.pathname).localeCompare(served(b.pathname)),
+  );
+  const publics = mounts.filter((mount) => !gatedMounts.has(mount.pathname));
+
+  if (publics.length === 1 && publics[0] !== undefined) {
+    stdout(`[ax]   Primary MCP server: ${served(publics[0].pathname)} (the public one)`);
+    return publics[0].pathname;
+  }
+
+  const defaultMount = publics[0] ?? mounts[0];
+  const width = Math.max(...mounts.map((mount) => served(mount.pathname).length));
+  const rows: MultiSelectRow[] = mounts.map((mount) => ({
+    value: mount.pathname,
+    label:
+      `ƒ ${served(mount.pathname).padEnd(width + 2)}MCP server` +
+      (gatedMounts.has(mount.pathname) ? ' · requires login' : ''),
+    selected: mount.pathname === defaultMount?.pathname,
+  }));
+  const question = 'Which MCP server is the PRIMARY (the path agents probe first)?';
+  const chosen = (await prompter.select(question, rows)) ?? defaultMount?.pathname;
+  if (chosen !== undefined) {
+    stdout(`[ax]   Primary MCP server: ${served(chosen)}`);
+  }
+  return chosen;
+}
+
+/**
+ * Writes the well-known MCP server cards straight from the wizard — the actionable artifact
+ * `init` exists to produce for an app that already has an MCP server, and the *persistence* for
+ * the answers: each card's `authentication` block is what the next build reads back for that
+ * server's gating decision, and the root card's identity records which server is primary, so the
+ * questions are asked once, not on every build.
+ */
+function writeGatingCards(
+  cwd: string,
+  findings: InitFindings,
+  siteUrl: string,
+  gatedMounts: Set<string>,
+  primaryMount: string | undefined,
+  stdout: (line: string) => void,
+): void {
+  if (findings.mcpMounts.length === 0) return;
+  const mounts = findings.mcpMounts.map((mount) =>
+    gatedMounts.has(mount.pathname) && mount.auth === undefined
+      ? { ...mount, auth: { status: 'unknown' as const } }
+      : mount,
+  );
+  const plan = buildMcpServerCardPlan({
+    mounts,
+    primaryPathname: primaryMount,
+    siteUrl,
+    basePath: findings.basePath,
+    site: readSiteMetadata(cwd),
+  });
+  if (plan === undefined) return;
+  const result = writeServerCards(cwd, plan);
+
+  const primary = plan.cards.find((emission) => emission.primary);
+  if (plan.multi) {
+    // Several cards land at once (the root card plus a per-server named slot each), but the build's
+    // own artifact tree renders their full shape minutes later — repeating it here would just be
+    // the same information twice. One line with the count (and, for a multi-server host, which
+    // mount is primary) is enough for the wizard's own recap.
+    const cardCount = 1 + result.named.length;
+    const primaryNote =
+      primary !== undefined
+        ? ` (primary: ${servedPath(findings.basePath, primary.mountPathname)})`
+        : '';
+    stdout(`[ax] ✓ wrote ${cardCount} MCP server cards${primaryNote}`);
+  } else {
+    stdout(
+      `[ax] ✓ wrote ${relative(cwd, result.rootPath)} (MCP server card` +
+        `${primary?.card.authentication !== undefined ? ' — marked as requiring auth' : ''})`,
+    );
+  }
+}
+
+/**
+ * The stable key for each item in the setup multi-select — doubles as the value round-tripped
+ * through `Prompter.multiSelect`. Kept separate from `InitAnswers`' field names (and from
+ * `wireManifest`, which isn't a config field at all) so the mapping in {@link collectInteractive} is
+ * one explicit switch rather than a name-matching convention.
+ */
+type SetupOptionValue =
+  'llmsTxt' | 'jsonLd' | 'robots' | 'agent404' | 'markdownTwins' | 'report' | 'manifest';
+
+/**
+ * The seven setup choices, each pre-selected — replaces what used to be seven sequential y/n
+ * confirms. One question reads faster than seven, and a list makes the *shape* of what's on offer
+ * visible at a glance instead of trickling out one item at a time. Labels stay short; a clause is
+ * added only where the name alone doesn't say what the user would be giving up by deselecting it,
+ * and that clause states the value to the user/agents, not the mechanism.
+ */
+const SETUP_OPTIONS: Array<{ value: SetupOptionValue; label: string; selected: true }> = [
+  {
+    value: 'llmsTxt',
+    label: 'Scaffold llms.txt — a guided map so agents know how to navigate your site',
+    selected: true,
+  },
+  {
+    value: 'jsonLd',
+    label:
+      'Scaffold Organization JSON-LD — machine-readable identity so agents gain trust in your site',
+    selected: true,
+  },
+  {
+    value: 'robots',
+    label:
+      'Add robots.txt pointers + AI-crawler rules — so agent crawlers find (and may read) your artifacts',
+    selected: true,
+  },
+  {
+    value: 'agent404',
+    label: 'Scaffold an agent-aware 404 page — steers lost agents back',
+    selected: true,
+  },
+  {
+    value: 'markdownTwins',
+    label: 'Markdown twins on every build (/docs → /docs.md)',
+    selected: true,
+  },
+  {
+    value: 'report',
+    label: 'Write .ora/report.json',
+    selected: true,
+  },
+  {
+    value: 'manifest',
+    label:
+      'Wire "prebuild": "ax manifest" — so your middleware always serves agents the current surface',
+    selected: true,
+  },
+];
+
+/**
  * Asks the questions the source tree can't answer, each with a default. Returns undefined only when
- * a required answer (a valid siteUrl) couldn't be obtained after several tries.
+ * a required answer (a valid siteUrl) couldn't be obtained after several tries. The gating answer
+ * comes back separately from the config answers: it lands in the server card, never in ax.config.
  */
 async function collectInteractive(
   prompter: Prompter,
   findings: InitFindings,
-  defaultSiteUrl: string | undefined,
+  siteUrlDefault: SiteUrlDefault,
   stdout: (line: string) => void,
-): Promise<InitAnswers | undefined> {
+): Promise<
+  | {
+      answers: InitAnswers;
+      gatedMounts: Set<string>;
+      primaryMount: string | undefined;
+      wireManifest: boolean;
+    }
+  | undefined
+> {
+  // Gating first: its prompt renders the route tree, so it reads as the continuation of the
+  // findings summary the user just saw — decide about the surface while looking at it. The
+  // primary question follows immediately (same tree, same context) so its public-server default
+  // can honor the gating answers just given.
+  const gatedMounts = await askGating(prompter, findings, stdout);
+  const primaryMount = await askPrimary(prompter, findings, gatedMounts, stdout);
+
+  // One line: the question names the prefill source inline, so "is this right?" is an informed
+  // check rather than a mystery string. The value itself is prefilled as editable input.
+  stdout('[ax]');
+  const siteUrlQuestion =
+    siteUrlDefault.value !== undefined && siteUrlDefault.source !== undefined
+      ? `Your public production site URL (prefilled from ${siteUrlDefault.source} — press Enter to approve, or edit)`
+      : 'Your public production site URL (e.g. https://yourdomain.com)';
   let siteUrl: string | undefined;
   for (let attempt = 0; attempt < 5 && siteUrl === undefined; attempt++) {
-    const raw = await prompter.text(
-      "Your site's public production URL (written into the published catalog)",
-      defaultSiteUrl,
-    );
+    const raw = await prompter.text(siteUrlQuestion, siteUrlDefault.value);
     const result = validateSiteUrl(raw);
     if (result.ok) siteUrl = result.value;
     else stdout(`[ax] ${result.reason}`);
   }
   if (siteUrl === undefined) return undefined;
 
-  const gating = toGatingAnswer(
-    await prompter.multiSelect(
-      'Which surfaces are gated behind auth? (ax will never advertise these as open)',
-      gateCandidates(findings) as MultiSelectChoice[],
-    ),
+  // Every setup item defaults to selected in the list: config defaults are false because a *silent*
+  // write into a source tree is invasive, but here the ask itself is the opt-in and the user is
+  // present to deselect anything they don't want. Same yes-when-asked / no-when-silent policy the
+  // README documents — just collapsed from seven yes/no questions into one list, since none of these
+  // choices depend on another's answer.
+  stdout('[ax]');
+  const setupValues = new Set(
+    await prompter.multiSelect('What should ax set up? (All are recommended)', SETUP_OPTIONS),
   );
-
-  // Scaffolds default to yes in the wizard: config defaults are false because a *silent* write into
-  // a source tree is invasive, but here the ask itself is the opt-in and the user is present to say
-  // no. Same yes-when-asked / no-when-silent policy the README documents.
-  const scaffoldLlmsTxt = await prompter.confirm(
-    'Scaffold a starter llms.txt from your routes?',
-    true,
-  );
-  const scaffoldJsonLd = await prompter.confirm(
-    'Scaffold an Organization JSON-LD component?',
-    true,
-  );
-  const scaffoldRobots = await prompter.confirm(
-    'Add discovery pointers + AI-crawler rules to robots.txt?',
-    true,
-  );
-  const scaffoldAgent404 = await prompter.confirm('Scaffold an agent-aware 404 page?', true);
-  const report = await prompter.confirm('Write .ora/report.json (the agent handoff report)?', true);
+  const setupSelected = (value: SetupOptionValue): boolean => setupValues.has(value);
 
   return {
-    siteUrl,
-    scaffoldLlmsTxt,
-    scaffoldJsonLd,
-    scaffoldRobots,
-    scaffoldAgent404,
-    report,
-    gating,
+    answers: {
+      siteUrl,
+      scaffoldLlmsTxt: setupSelected('llmsTxt'),
+      scaffoldJsonLd: setupSelected('jsonLd'),
+      scaffoldRobots: setupSelected('robots'),
+      scaffoldAgent404: setupSelected('agent404'),
+      // Twin *intent* lands in config; generation happens at build (twins need the prerendered output).
+      markdownTwins: setupSelected('markdownTwins'),
+      report: setupSelected('report'),
+    },
+    gatedMounts,
+    primaryMount,
+    wireManifest: setupSelected('manifest'),
   };
 }
 
@@ -346,9 +591,13 @@ function resolveConfigTarget(cwd: string): ConfigFileTarget {
   return { language, moduleSystem };
 }
 
-/** Adds a `"postbuild": "ax"` script after `build`, preserving the rest of package.json verbatim. */
+/**
+ * Adds a `"postbuild": "ax"` script after `build` (and, opted in, a `"prebuild": "ax manifest"`
+ * before it), preserving the rest of package.json verbatim.
+ */
 function wirePackageJson(
   cwd: string,
+  wireManifest: boolean,
   stdout: (line: string) => void,
   warn: (line: string) => void,
 ): void {
@@ -381,36 +630,52 @@ function wirePackageJson(
     return;
   }
   const scripts = rawScripts as Record<string, unknown> | undefined;
-  const plan = planPostbuildWiring(scripts);
+  const postbuildPlan = planPostbuildWiring(scripts);
+  const prebuildPlan = wireManifest ? planPrebuildWiring(scripts) : undefined;
 
-  if (plan.action === 'already-wired') {
+  if (postbuildPlan.action === 'already-wired') {
     stdout('[ax] package.json already runs ax on postbuild — leaving it as is.');
-    return;
+  } else if (postbuildPlan.action === 'manual') {
+    stdout(`[ax] ${postbuildPlan.instruction}`);
   }
-  if (plan.action === 'manual') {
-    stdout(`[ax] ${plan.instruction}`);
-    return;
+  if (prebuildPlan?.action === 'already-wired') {
+    stdout('[ax] package.json already runs ax on prebuild — leaving it as is.');
+  } else if (prebuildPlan?.action === 'manual') {
+    stdout(`[ax] ${prebuildPlan.instruction}`);
   }
 
-  // action === 'add': insert postbuild right after build so the two read together. Any pre-existing
-  // `postbuild` key is dropped as it's re-copied — `add` only fires when it was absent or blank, and
-  // re-emitting it later in iteration order would otherwise clobber the "ax" we just inserted.
+  const addPostbuild = postbuildPlan.action === 'add';
+  const addPrebuild = prebuildPlan?.action === 'add';
+  if (!addPostbuild && !addPrebuild) return;
+
+  // Insert prebuild right before `build` and postbuild right after it, so the three read together.
+  // Any pre-existing key being added is dropped as it's re-copied — an `add` only fires when the
+  // slot was absent or blank, and re-emitting it later in iteration order would otherwise clobber
+  // the command we just inserted.
   const rebuilt: Record<string, unknown> = {};
   const source = scripts ?? {};
-  let inserted = false;
+  let insertedPre = false;
+  let insertedPost = false;
   for (const [key, value] of Object.entries(source)) {
-    if (key === 'postbuild') continue;
+    if (addPostbuild && key === 'postbuild') continue;
+    if (addPrebuild && key === 'prebuild') continue;
+    if (addPrebuild && key === 'build' && !insertedPre) {
+      rebuilt.prebuild = PREBUILD_COMMAND;
+      insertedPre = true;
+    }
     rebuilt[key] = value;
-    if (key === 'build') {
+    if (addPostbuild && key === 'build') {
       rebuilt.postbuild = POSTBUILD_COMMAND;
-      inserted = true;
+      insertedPost = true;
     }
   }
-  if (!inserted) rebuilt.postbuild = POSTBUILD_COMMAND;
+  if (addPrebuild && !insertedPre) rebuilt.prebuild = PREBUILD_COMMAND;
+  if (addPostbuild && !insertedPost) rebuilt.postbuild = POSTBUILD_COMMAND;
 
   pkg.scripts = rebuilt;
   writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8');
-  stdout('[ax] ✓ added "postbuild": "ax" to package.json');
+  if (addPostbuild) stdout('[ax] ✓ added "postbuild": "ax" to package.json');
+  if (addPrebuild) stdout(`[ax] ✓ added "prebuild": "${PREBUILD_COMMAND}" to package.json`);
 }
 
 /** Detects the package manager from a lockfile so the build offer runs the right one. */
@@ -487,11 +752,15 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
     }
     throw err;
   }
-  printFindings(findings, stdout);
 
   const interactive =
     io.prompter !== undefined ||
     (process.stdin.isTTY === true && process.stdout.isTTY === true && !process.env.CI);
+
+  // On an interactive run the gating question renders the route tree itself (checkbox on the MCP
+  // server node), so the findings summary skips it rather than showing the same tree twice.
+  printFindings(findings, stdout, { tree: args.yes || !interactive });
+  stdout('[ax]');
 
   if (!args.yes && !interactive) {
     stderr(
@@ -517,64 +786,87 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
       stderr(`[ax] ${validated.reason}`);
       return 1;
     }
-    // Non-interactive applies every default: scaffolds and report on (yes-when-asked), and the
-    // gating floor kept with no extra surfaces (so `isGated` is omitted — the floor is the default).
+    // Non-interactive applies every default: scaffolds and report on (yes-when-asked). No gating
+    // question means no server card is written here — the first build detects the mounts, asks (or
+    // warns in CI) about any without a recorded decision, and writes the card that records it.
     const answers: InitAnswers = {
       siteUrl: validated.value,
       scaffoldLlmsTxt: true,
       scaffoldJsonLd: true,
       scaffoldRobots: true,
       scaffoldAgent404: true,
+      markdownTwins: true,
       report: true,
-      gating: { floorKept: true, gatedPaths: [] },
     };
-    const fileName = writeConfigAndWire(cwd, answers, stdout);
-    printNextSteps(fileName, answers, false, stdout);
+    writeConfigAndWire(cwd, answers, true, stdout);
+    await createServingManifest(cwd, stdout);
+    printNextSteps(false, stdout);
     return 0;
   }
 
   let prompter = io.prompter;
   let close = (): void => {};
+  let closed = false;
   if (prompter === undefined) {
     const created = await createReadlinePrompter();
     prompter = created;
     close = () => created.close();
   }
   try {
-    const answers = await collectInteractive(
+    const collected = await collectInteractive(
       prompter,
       findings,
-      args.siteUrl ?? readSiteUrlFromEnv(),
+      detectSiteUrlDefault(args.siteUrl),
       stdout,
     );
-    if (answers === undefined) {
+    if (collected === undefined) {
       stderr('[ax] No valid site URL provided — aborting without writing anything.');
       return 1;
     }
+    const { answers, gatedMounts, primaryMount, wireManifest } = collected;
 
-    const fileName = writeConfigAndWire(cwd, answers, stdout);
+    writeConfigAndWire(cwd, answers, wireManifest, stdout);
+    if (wireManifest) await createServingManifest(cwd, stdout);
+    writeGatingCards(cwd, findings, answers.siteUrl, gatedMounts, primaryMount, stdout);
 
     // Offer the first build so the report shows up immediately. Default no — spawning a full
     // `next build` is heavy and should never happen without an explicit yes.
+    stdout('[ax]');
+    const wantBuild = await prompter.confirm(
+      'Run the first build now so you can see the report?',
+      false,
+    );
+
+    // Release the TTY *before* spawning the build: its `postbuild` step is `ax`, which opens its own
+    // readline for the review-before-publish gate. Two readline interfaces reading one stdin
+    // deadlock — the parent (still attached) swallows the keystrokes the child is waiting on — so the
+    // publish prompt would hang forever. Closing here hands stdin cleanly to the child.
+    close();
+    closed = true;
+
     let ranBuild = false;
-    if (await prompter.confirm('Run the first build now so you can see the report?', false)) {
+    if (wantBuild) {
+      stdout(
+        '[ax] Running your build — the review-before-publish gate will show the exact surface and ask before writing.',
+      );
       const spawnBuild = io.spawnBuild ?? defaultSpawnBuild;
       const code = await spawnBuild(cwd);
       ranBuild = code === 0;
       if (!ranBuild) stdout('[ax] ⚠ Build did not finish cleanly — run it yourself when ready.');
     }
 
-    printNextSteps(fileName, answers, ranBuild, stdout);
+    printNextSteps(ranBuild, stdout);
     return 0;
   } finally {
-    close();
+    if (!closed) close();
   }
 }
 
-/** Writes `ax.config.*` and wires the postbuild script; returns the config filename written. */
+/** Writes `ax.config.*` and wires the build scripts; returns the config filename written. */
 function writeConfigAndWire(
   cwd: string,
   answers: InitAnswers,
+  wireManifest: boolean,
   stdout: (line: string) => void,
 ): string {
   const target = resolveConfigTarget(cwd);
@@ -582,26 +874,31 @@ function writeConfigAndWire(
   const fileName = configFileName(target);
   writeFileSync(join(cwd, fileName), source, 'utf8');
   stdout(`[ax] ✓ wrote ${fileName}`);
-  wirePackageJson(cwd, stdout, (message) => stdout(`[ax] ⚠ ${message}`));
+  wirePackageJson(cwd, wireManifest, stdout, (message) => stdout(`[ax] ⚠ ${message}`));
   return fileName;
 }
 
-function printNextSteps(
-  fileName: string,
-  answers: InitAnswers,
-  ranBuild: boolean,
-  stdout: (line: string) => void,
-): void {
-  stdout('[ax] Done. Next steps:');
-  stdout(`[ax]   1. Review ${fileName} — every field has a comment explaining why it's there.`);
+/**
+ * Creates the serving-manifest module right away, so the wired `prebuild` step regenerates a file
+ * that already exists (and the user sees what they opted into) instead of the module first
+ * appearing mid-build. The write itself is `ax manifest`'s logic, so the two can't drift.
+ */
+async function createServingManifest(cwd: string, stdout: (line: string) => void): Promise<void> {
+  try {
+    const result = await writeServingManifest(cwd, (message) => stdout(`[ax] ⚠ ${message}`));
+    stdout(`[ax] ✓ wrote ${result.path} (serving manifest — regenerated by the prebuild step)`);
+  } catch (err) {
+    stdout(`[ax] ⚠ Could not write the serving manifest (${(err as Error).message}).`);
+  }
+}
+
+function printNextSteps(ranBuild: boolean, stdout: (line: string) => void): void {
+  // Keep this short: the build's own output (and .ora/report.json) is where the per-artifact
+  // detail lives — no need to restate it here.
+  stdout('[ax] ✓ All set — your site is ready to meet agents.');
   if (!ranBuild) {
     stdout(
-      '[ax]   2. Run your build; the postbuild step generates the catalog and shows the report.',
-    );
-  }
-  if (answers.scaffoldJsonLd) {
-    stdout(
-      '[ax]   • JSON-LD: after the build, add the printed import/element to your layout — ax never edits it for you.',
+      '[ax]   Next: run your build — the postbuild `ax` step publishes the catalog and prints the report.',
     );
   }
 }

@@ -1,0 +1,32 @@
+{
+  "name": "com.example.mcp-gated-fixture/mcp-adapter-gated",
+  "description": "mcp-adapter-gated MCP server",
+  "version": "0.0.0",
+  "serverUrl": "https://mcp-gated-fixture.example.com/mcp",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mcp-gated-fixture.example.com/mcp"
+    }
+  ],
+  "tools": [
+    {
+      "name": "roll_dice"
+    }
+  ],
+  "serverInfo": {
+    "name": "mcp-adapter-gated",
+    "version": "0.0.0"
+  },
+  "transport": {
+    "type": "streamable-http",
+    "endpoint": "https://mcp-gated-fixture.example.com/mcp"
+  },
+  "capabilities": {
+    "tools": {}
+  },
+  "authentication": {
+    "required": true,
+    "resourceMetadata": "https://mcp-gated-fixture.example.com/.well-known/oauth-protected-resource"
+  }
+}

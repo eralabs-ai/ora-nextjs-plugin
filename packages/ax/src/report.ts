@@ -1,5 +1,5 @@
 import type { ArtifactSize } from './artifact-size.js';
-import type { WebMcpToolSite } from './detect-webmcp.js';
+import type { TwinSkipReason, TwinTier } from './markdown-twins.js';
 import type { OraCheckStatus } from './ora-checks.js';
 import type { RouterKind } from './router-model.js';
 import type { JsonLdScaffoldResult } from './scaffold-json-ld.js';
@@ -32,17 +32,44 @@ export interface ReportScaffolds {
 }
 
 /**
- * The Ora-facing section: where to get the agent-readiness skill, how to verify a deployed site,
- * and how this build's findings map onto Ora's named checks. This is what makes the report a
- * handoff rather than a log — an agent reads `checks`, works the `actionable` ones, then re-scans.
+ * What the markdown-twin pass did (and, more importantly, *refused to do and why*): one entry per
+ * twin written or already covered by a user-authored source, and one per route skipped with the
+ * reason and its next step. The skip list is the actionable half — an agent working the report
+ * reads it as "these pages have no markdown representation yet, and here is what would give them
+ * one". The terminal only carries counts; the prose lives here.
+ */
+export interface ReportMarkdownTwins {
+  /** `ax.config` `markdownTwins`, resolved (default `true`). */
+  enabled: boolean;
+  /**
+   * Twins written this run: which route, where it landed, and which tier derived it. `source:
+   * 'metadata'` marks the lowest-confidence rung — a client-rendered page's twin derived from its
+   * own metadata, honest about describing (not mirroring) the page.
+   */
+  written: Array<{
+    route: string;
+    path: string;
+    tier: TwinTier;
+    source: 'mdx' | 'prerender' | 'metadata';
+  }>;
+  /** Routes already covered by a user-authored markdown source ax never touches. */
+  userOwned: Array<{ route: string; source: string }>;
+  /** Routes with no twin, each with its reason code and a human-actionable sentence. */
+  skipped: Array<{ route: string; reason: TwinSkipReason; detail: string }>;
+  /** Count of page files with dynamic URL segments — no statically knowable twin target. */
+  dynamicRouteCount: number;
+  /** Stale generated twins removed this run (their route no longer exists or qualifies). */
+  deleted: string[];
+  /** The generated auth guide, when gated surfaces exist. */
+  authMd?: { path: string; surfaceCount: number };
+}
+
+/**
+ * How this build's findings map onto Ora's named agent-readiness checks. This is what makes the
+ * report a handoff rather than a log — an agent reads `checks` and works the `actionable` ones.
+ * Deliberately just the mapping: no service URLs, so the report describes the site, not a vendor.
  */
 export interface OraReport {
-  /** MCP server serving Ora's `agent-ready-website` skill (tools: `list_skills`, `get_skill`). */
-  skillMcp: string;
-  /** The same skill as a document, for agents that read files rather than speak MCP. */
-  skillUrl: string;
-  /** Ora's scan endpoints, as `METHOD url` strings. */
-  scanApi: { scan: string; score: string };
   /** One entry per Ora check this build can speak to. See ora-checks.ts for the mapping. */
   checks: OraCheckStatus[];
 }
@@ -69,14 +96,29 @@ export interface BuildReport {
   mcp: {
     /** `mcp-handler` mounts detected in `app/`. */
     mounts: Array<{ pathname: string; tools: string[] }>;
-    /** Path the well-known server card was written to, when one was emitted. */
+    /** Path the root well-known server card (the primary server's) was written to, when emitted. */
     serverCardPath?: string;
+    /** Named per-server cards written for a multi-server host: which mount, and where its card landed. */
+    serverCards?: Array<{ mount: string; path: string }>;
+    /**
+     * The mount whose card owns the root well-known path — present only with several mounts.
+     * `primaryUnreviewed` marks a defaulted (public-server) choice with no committed root card
+     * confirming it: an interactive build asks, and the next card write records the answer.
+     */
+    primaryMount?: string;
+    primaryUnreviewed?: boolean;
+    /**
+     * Served paths of detected mounts with no gating decision on record (no config `isGated`, no
+     * detected auth wrapper, not covered by a previously written server card). Advertised as open
+     * this run; an interactive build asks about them at the review gate, and a coding agent reading
+     * this report should get a decision recorded (run an interactive build, or gate via `isGated`).
+     */
+    unreviewedMounts: string[];
   };
-  webmcp: {
-    /** Distinct, browser-reachable in-page tool names. */
-    toolNames: string[];
-    sites: WebMcpToolSite[];
-  };
+  // No `webmcp` section for now: WebMCP is still a W3C draft, and pointing a coding agent at a
+  // non-official spec confuses more than it helps — until it is an official spec we don't
+  // recommend it, so the report doesn't surface it. Detection itself still runs (existing in-page
+  // tools become catalog entries and CLI notices); re-add the section here when the spec lands.
   /** Presence of the discovery/access artifacts the plugin detects-and-recommends. */
   artifacts: {
     robotsTxt: ReportArtifact;
@@ -92,8 +134,21 @@ export interface BuildReport {
     agentAware: boolean;
     source?: string;
   };
+  /**
+   * The negotiation middleware: whether a `middleware.{ts,js}` exists and whether it wires the
+   * `@ora-ai/ax/middleware` runtime entry. When it doesn't, the wiring instructions live in the
+   * `markdown-negotiation` ora-check note and in `recommendations` — ax never writes or edits the
+   * user's middleware singleton.
+   */
+  middleware: {
+    present: boolean;
+    wiredToAx: boolean;
+    source?: string;
+  };
   /** What the opt-in source-tree scaffolds wrote, appended, or skipped this run. */
   scaffolds: ReportScaffolds;
+  /** The markdown-twin pass: what was written, what was refused and why (see the type). */
+  markdownTwins: ReportMarkdownTwins;
   /**
    * Byte and estimated-token size of each artifact this build generated. Tokens (`chars / 4`) are
    * the unit that constrains the agent that later reads the artifact; an entry over the truncation

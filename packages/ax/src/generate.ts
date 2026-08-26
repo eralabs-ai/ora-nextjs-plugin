@@ -1,38 +1,42 @@
 import { existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 
 import { manageAgent404 } from './agent-404.js';
+import { buildAuthMd, type AuthMdPlan } from './auth-md.js';
 import { loadAxConfig } from './config.js';
 import { detectAgentsMd } from './detect-agents-md.js';
 import { detectJsonLd } from './detect-json-ld.js';
 import { detectLlmsTxt } from './detect-llms-txt.js';
-import { buildMcpEntries, detectMcpMounts } from './detect-mcp.js';
+import { buildMcpEntries, detectMcpMounts, type McpMount } from './detect-mcp.js';
 import { detectOpenApi } from './detect-openapi.js';
 import { detectRobots } from './detect-robots.js';
 import { detectSitemap } from './detect-sitemap.js';
 import { detectWebMcp } from './detect-webmcp.js';
 import { buildDiscoveryRecommendations } from './discovery.js';
 import { applyEntryOverrides, entryUrlPath } from './entries.js';
-import { resolveGating, type GateTarget } from './gating.js';
+import { defaultIsGated, resolveGating, type GateTarget, type IsGated } from './gating.js';
 import { loadProjectEnv } from './load-project-env.js';
 import { buildMarkdownAlternateRecommendation } from './markdown-alternate.js';
+import { planMarkdownTwins, type MarkdownTwinPlan } from './markdown-twins.js';
+import { buildMiddlewareWiringInstruction, detectMiddleware } from './middleware-wiring.js';
 import { loadNextConfig } from './next-config.js';
-import {
-  buildOraChecks,
-  ORA_SCAN_API,
-  ORA_SKILL_MCP_URL,
-  ORA_SKILL_URL,
-  type OraArtifact,
-} from './ora-checks.js';
+import { buildOraChecks, type OraArtifact } from './ora-checks.js';
 import type { BuildReport, ReportArtifact, ReportScaffolds } from './report.js';
 import { buildRouterModel } from './router-model.js';
 import type { JsonLdScaffoldResult } from './scaffold-json-ld.js';
 import { SPEC_VERSION } from './schema.js';
-import { buildMcpServerCard, type McpServerCard } from './server-card.js';
+import { buildMcpServerCardPlan, type McpServerCardPlan } from './server-card.js';
+import { allServerCardRecords, readServerCardRecords } from './server-card-record.js';
 import { readSiteMetadata } from './site-metadata.js';
-import { hostnameFromUrl, readSiteUrlFromEnv, resolveSiteUrl } from './site-url.js';
+import {
+  buildArtifactUrl,
+  hostnameFromUrl,
+  readSiteUrlFromEnv,
+  resolveSiteUrl,
+  servedPath,
+} from './site-url.js';
 import type { AiCatalog, CatalogEntry, EntryAuth } from './types.js';
-import type { EmissionTarget } from './write.js';
+import { type EmissionTarget, namedServerCardUrlPath } from './write.js';
 
 export interface GenerateCatalogOptions {
   /** Project root to read `package.json` / `next.config.*` / `ax.config.*` from. Defaults to `process.cwd()`. */
@@ -52,11 +56,13 @@ export interface GenerateCatalogResult {
   /** Emission target resolved from `ax.config` `emit` — which output `writeCatalog` should write. */
   emit: EmissionTarget;
   /**
-   * The well-known MCP server card to emit alongside the catalog, or undefined when there's no
-   * (single, resolvable) `mcp-handler` mount to describe. Agents discover MCP via this card, not the
-   * ARD catalog entry, so it's written to `/.well-known/mcp/server-card.json` by the CLI.
+   * The well-known MCP server cards to emit alongside the catalog, or undefined when no resolvable
+   * `mcp-handler` mount (or no site origin) exists. Agents discover MCP via these cards, not the
+   * ARD catalog entries: the CLI writes the primary server's card to
+   * `/.well-known/mcp/server-card.json` and, for a multi-server host, every server's card to its
+   * named `/.well-known/mcp/server-card/<server-name>.json` slot.
    */
-  serverCard?: McpServerCard;
+  serverCardPlan?: McpServerCardPlan;
   /**
    * Distinct in-page WebMCP tool names detected (declarative + browser-reachable imperative) — for
    * the CLI's build summary. Empty when the app registers no WebMCP tools.
@@ -75,6 +81,13 @@ export interface GenerateCatalogResult {
    * this rather than the `route.ts` file on disk, so the reported tokens match what an agent fetches.
    */
   scaffoldedLlmsTxtBody?: string;
+  /**
+   * This build's markdown-twin plan — computed here (pure, so the review gate can show it), applied
+   * by the CLI only after the gate, alongside the catalog write.
+   */
+  twinPlan: MarkdownTwinPlan;
+  /** The generated `/auth.md`, when gated surfaces exist. Written by the CLI with the twins. */
+  authMdPlan?: AuthMdPlan;
 }
 
 /** Presence-shape shared by the detect-and-recommend detectors (`{found, source?}`). */
@@ -98,6 +111,105 @@ function gateKindForEntry(entry: CatalogEntry): GateTarget['kind'] {
 }
 
 /**
+ * Resolves each MCP mount's gated status and attaches the auth descriptor it implies. Auth is
+ * declared per *server* in the MCP conventions, so this is a whole-mount decision, resolved in
+ * precedence order:
+ *   1. A developer-supplied `isGated` owns the whole policy (as everywhere else).
+ *   2. Otherwise: the built-in floor, a detected `withMcpAuth` wrapper, or the decision a
+ *      previously written server card records (`authentication.required`) — the committed cards
+ *      (the root one, and each named per-server one) are the persistence layer for the user's
+ *      answers from `ax init` or a build's review gate.
+ * A gated mount is never dropped: "requires auth" *is* its description, so it's published with
+ * `auth.status "unknown"` and its card carries `authentication.required` — more discoverable than
+ * hiding it, and the write is what records the decision for the next build.
+ *
+ * A mount matched by none of the sources is *unreviewed*: advertised as open (the zero-config
+ * default) but returned in `unreviewed` so the CLI can ask interactively or warn in CI.
+ *
+ * The same read-back resolves which mount is *primary* — whose card owns the root well-known path.
+ * That is a judgment call ax never guesses silently: the committed root card records the answer;
+ * without one, the first public mount is the default and `primaryUnreviewed` tells the CLI to ask
+ * interactively (or warn headless) before the write persists it.
+ */
+function resolveMcpMountGating(options: {
+  mounts: McpMount[];
+  isGated: IsGated | undefined;
+  basePath: string;
+  siteUrl: string | undefined;
+  cwd: string;
+}): {
+  mounts: McpMount[];
+  unreviewed: string[];
+  primaryPathname: string | undefined;
+  primaryUnreviewed: boolean;
+} {
+  const { mounts, isGated, basePath, siteUrl, cwd } = options;
+  if (mounts.length === 0) {
+    return { mounts, unreviewed: [], primaryPathname: undefined, primaryUnreviewed: false };
+  }
+
+  const records = readServerCardRecords(cwd);
+  const allRecords = allServerCardRecords(records);
+  const unreviewed: string[] = [];
+  const mountServerUrl = (mount: McpMount): string | undefined =>
+    siteUrl ? buildArtifactUrl(siteUrl, basePath, mount.pathname) : undefined;
+
+  const resolved = mounts.map((mount) => {
+    const path = servedPath(basePath, mount.pathname);
+    const target: GateTarget = {
+      kind: 'mcp',
+      path,
+      ...(mount.capabilities.length > 0 ? { tools: mount.capabilities } : {}),
+    };
+    const serverUrl = mountServerUrl(mount);
+    const recorded =
+      serverUrl !== undefined
+        ? allRecords.find((record) => record.serverUrl === serverUrl)
+        : undefined;
+
+    let gated: boolean;
+    if (isGated !== undefined) {
+      gated = isGated(target);
+    } else {
+      gated = defaultIsGated(target) || mount.auth !== undefined || recorded?.authRequired === true;
+      const reviewed = defaultIsGated(target) || mount.auth !== undefined || recorded !== undefined;
+      if (!reviewed) unreviewed.push(path);
+    }
+
+    return gated && mount.auth === undefined
+      ? { ...mount, auth: { status: 'unknown' as const } }
+      : mount;
+  });
+
+  // A single mount is trivially primary; several mounts take the root card's recorded answer.
+  // Without a record, exactly one *public* server is no judgment call either: the root path is
+  // the one registries probe blind, so the one server agents can use without credentials is its
+  // only sensible owner — picked silently. Only the ambiguous cases (several public servers, or
+  // none) fall back to the first candidate AND set `primaryUnreviewed`, so an interactive build
+  // asks and a headless one warns.
+  const sortedByPath = [...resolved].sort((a, b) =>
+    servedPath(basePath, a.pathname).localeCompare(servedPath(basePath, b.pathname)),
+  );
+  const publicMounts = sortedByPath.filter((mount) => mount.auth === undefined);
+  let primaryPathname = resolved[0]?.pathname;
+  let primaryUnreviewed = false;
+  if (resolved.length > 1) {
+    const rootMatch =
+      records.root !== undefined
+        ? resolved.find((mount) => mountServerUrl(mount) === records.root?.serverUrl)
+        : undefined;
+    if (rootMatch !== undefined) {
+      primaryPathname = rootMatch.pathname;
+    } else {
+      primaryPathname = (publicMounts[0] ?? sortedByPath[0])?.pathname;
+      primaryUnreviewed = publicMounts.length !== 1;
+    }
+  }
+
+  return { mounts: resolved, unreviewed, primaryPathname, primaryUnreviewed };
+}
+
+/**
  * Applies the resolved `isGated` policy to the entry set. Precision over recall, applied to gating:
  *   - An entry ax can describe (a detector attached an `auth` descriptor, or the developer declared
  *     one) is *published with that descriptor* — more discoverable than dropping it. If `isGated`
@@ -105,7 +217,9 @@ function gateKindForEntry(entry: CatalogEntry): GateTarget['kind'] {
  *     explicit config wins: the descriptor is downgraded to `unknown` and the disagreement warned.
  *   - An entry ax *can't* describe (no descriptor) that `isGated` marks gated is dropped — never
  *     advertised as an open surface. This is the safety net the default floor (`/api/auth/**`,
- *     `/api/webhooks/**`) relies on.
+ *     `/api/webhooks/**`) relies on. MCP entries never reach this branch: a gated mount's status
+ *     *is* its description, so `resolveMcpMountGating` attaches `auth.status "unknown"` upstream
+ *     and the entry publishes as gated rather than disappearing.
  *   - Everything else is published unchanged. `isGated` is never consulted to assert "open": an
  *     entry it returns `false` for just keeps whatever descriptor it already had (usually none).
  * Entries with no URL path (spec allows `data`-only) have nothing to match, so they pass through.
@@ -171,8 +285,45 @@ function applyGating(
 function oraCheckNotes(scaffolds: {
   llmsTxtScaffolded?: string;
   jsonLd?: JsonLdScaffoldResult;
+  twinPlan?: MarkdownTwinPlan;
+  authMdMissing?: boolean;
+  mcpCardMissing?: boolean;
+  middlewareWiring?: string;
 }): Partial<Record<OraArtifact, string>> {
   const notes: Partial<Record<OraArtifact, string>> = {};
+
+  if (scaffolds.middlewareWiring !== undefined) {
+    notes['middleware'] = scaffolds.middlewareWiring;
+  }
+
+  if (scaffolds.mcpCardMissing === true) {
+    notes['mcp-server-card'] =
+      'MCP server mounts were detected but no server card could be written because no site URL ' +
+      'is known — set siteUrl in ax.config (or SITE_URL / NEXT_PUBLIC_SITE_URL) and rebuild to ' +
+      'publish the card agents probe.';
+  }
+
+  const twinPlan = scaffolds.twinPlan;
+  if (twinPlan !== undefined) {
+    if (!twinPlan.enabled) {
+      notes['markdown-twins'] =
+        'markdownTwins is disabled in ax.config, so no .md fallbacks are generated. Set it back ' +
+        'to true (the default) to address these checks.';
+    } else {
+      const rootSkip = twinPlan.skips.find((skip) => skip.route === '/');
+      notes['markdown-twins'] =
+        (rootSkip !== undefined
+          ? `No markdown twin could be derived for the homepage (${rootSkip.reason}): ${rootSkip.detail}`
+          : 'No markdown twin exists for the homepage — the URL Ora’s markdown-fallback probe fetches.') +
+        ' The report’s markdownTwins.skipped section lists every twin-less route with its reason.';
+    }
+  }
+
+  if (scaffolds.authMdMissing === true) {
+    notes['auth.md'] =
+      'This site has gated surfaces but markdownTwins is disabled in ax.config, so the generated ' +
+      'public/auth.md (how agents obtain access) is not written. Set markdownTwins back to true.';
+  }
 
   if (scaffolds.llmsTxtScaffolded !== undefined) {
     notes['llms.txt'] =
@@ -257,18 +408,69 @@ export async function generateCatalog(
     detectedDomain: site.domain,
   });
 
-  // Scan route handlers for MCP mounts once, then feed the same mounts to both the catalog entry and
-  // the well-known server card (agents discover MCP via the card, not the entry — see server-card.ts).
-  const mcpMounts = detectMcpMounts({ cwd, warn, router });
+  // Scan route handlers for MCP mounts once, resolve each mount's gated status (config isGated,
+  // the built-in floor, a detected withMcpAuth wrapper, or the decision a previously written
+  // server card records), then feed the same resolved mounts to both the catalog entries and the
+  // well-known server cards. A gated mount is published everywhere *with* its auth marker — the
+  // entry carries auth.status "unknown" and its card carries authentication.required — never
+  // dropped: the committed cards are the persistence layer for the gating decisions, so they must
+  // exist to record them.
+  const gating = resolveGating(config.isGated);
+  const detectedMounts = detectMcpMounts({ cwd, warn, router });
+  const {
+    mounts: mcpMounts,
+    unreviewed: unreviewedMcpMounts,
+    primaryPathname,
+    primaryUnreviewed,
+  } = resolveMcpMountGating({
+    mounts: detectedMounts,
+    isGated: config.isGated,
+    basePath,
+    siteUrl,
+    cwd,
+  });
   const inferredEntries: CatalogEntry[] = [
     ...buildMcpEntries({ mounts: mcpMounts, siteUrl, basePath, warn }),
   ];
-  const serverCard = buildMcpServerCard({ mounts: mcpMounts, siteUrl, basePath, site, recommend });
+  const serverCardPlan = buildMcpServerCardPlan({
+    mounts: mcpMounts,
+    primaryPathname,
+    siteUrl,
+    basePath,
+    site,
+  });
 
   const openApiEntry = detectOpenApi({ cwd, siteUrl, basePath, warn, recommend });
   if (openApiEntry) inferredEntries.push(openApiEntry);
 
   const openApi = openApiArtifact(cwd);
+
+  // Plan this build's markdown twins — pure computation, applied by the CLI only after the review
+  // gate. Runs before the llms.txt detector so a scaffolded starter can already link the twins and
+  // the auth guide this same run writes.
+  const twinPlan = await planMarkdownTwins({
+    cwd,
+    router,
+    isGated: gating,
+    basePath,
+    ...(nextConfig.config.distDir !== undefined ? { distDir: nextConfig.config.distDir } : {}),
+    ...(nextConfig.config.pageExtensions !== undefined
+      ? { pageExtensions: nextConfig.config.pageExtensions }
+      : {}),
+    siteUrl,
+    enabled: config.markdownTwins,
+    warn,
+    recommend,
+  });
+
+  // Whether a generated /auth.md is (very likely) being written this run — decided from the same
+  // pre-gating signals the final `buildAuthMd` reads, because the llms.txt scaffold runs before
+  // entry gating resolves. A config-declared gated entry that only materializes later would just
+  // mean the one-time starter misses the link; the auth guide itself is still written.
+  const authMdLikely =
+    config.markdownTwins &&
+    (mcpMounts.some((mount) => mount.auth !== undefined) ||
+      (openApiEntry?.auth !== undefined && openApiEntry.auth.status !== 'none'));
 
   const llmsTxtResult = detectLlmsTxt({
     cwd,
@@ -279,9 +481,15 @@ export async function generateCatalog(
     scaffold: config.scaffoldLlmsTxt,
     site,
     router,
-    // Only what this build actually found: the starter's "Machine-readable resources" section is a
-    // list of live artifacts, so a link to something that doesn't exist would be worse than none.
-    resources: { openApi: openApi.found, mcpPathnames: mcpMounts.map((mount) => mount.pathname) },
+    // Only what this build actually found (or writes this same run — the twins and auth guide land
+    // with the catalog): the starter's "Machine-readable resources" section is a list of live
+    // artifacts, so a link to something that doesn't exist would be worse than none.
+    resources: {
+      openApi: openApi.found,
+      mcpPathnames: mcpMounts.map((mount) => mount.pathname),
+      twinPaths: twinPlan.servedPaths,
+      authMd: authMdLikely,
+    },
   });
   if (llmsTxtResult.entry) inferredEntries.push(llmsTxtResult.entry);
 
@@ -297,7 +505,29 @@ export async function generateCatalog(
   // here. A gating decision, below, is worth warning about: a gated surface either carries an auth
   // descriptor or is dropped, and both are worth recording in the build output/report.
   const { entries: overridden } = applyEntryOverrides(inferredEntries, config.entries);
-  const entries = applyGating(overridden, resolveGating(config.isGated), warn);
+  const entries = applyGating(overridden, gating, warn);
+
+  // Reference the server cards from the catalog: an mcp entry's type promises card JSON, and the
+  // card — not the raw endpoint — is the discovery document agents read, so when a card is emitted
+  // its entry points at it: the primary server's entry at the root well-known path, every other
+  // server's at its named per-server slot. Rewritten only *after* gating, which must match on the
+  // mount's own served path, never the card's.
+  if (serverCardPlan !== undefined && siteUrl !== undefined) {
+    for (const emission of serverCardPlan.cards) {
+      const cardPath = emission.primary
+        ? '/.well-known/mcp/server-card.json'
+        : namedServerCardUrlPath(emission.serverName);
+      const cardUrl = buildArtifactUrl(siteUrl, basePath, cardPath);
+      for (const entry of entries) {
+        if (
+          entry.type === 'application/mcp-server-card+json' &&
+          entry.url === emission.card.serverUrl
+        ) {
+          entry.url = cardUrl;
+        }
+      }
+    }
+  }
 
   // Detect-and-recommend for the discovery/access artifacts that affect agent-readiness. These
   // never add catalog entries and never fail a build — they only surface advisory recommendations.
@@ -327,13 +557,34 @@ export async function generateCatalog(
   });
   for (const message of buildDiscoveryRecommendations({ siteUrl, basePath })) recommend(message);
 
-  // Markdown-twin alternate link. ax does not generate markdown twins yet, and nothing names them,
-  // so `twinPaths` is empty today and this adds nothing to a current build — the recommendation
-  // lands the moment there is a twin for a `<link rel="alternate">` to point at.
+  // The generated /auth.md (gated-surface guide), from the final published surface: gated MCP
+  // mounts plus entries carrying an auth descriptor. Undefined when nothing is gated — an auth
+  // guide with nothing to say would itself be noise. Built unconditionally (it's pure and cheap)
+  // so the ora checks can distinguish "nothing gated" (auth.md not applicable) from "gated but the
+  // feature is off" (actionable); only an enabled run actually writes it.
+  const authMdCandidate = buildAuthMd({
+    mounts: mcpMounts,
+    entries,
+    siteUrl,
+    basePath,
+    siteDisplayName: site.displayName,
+  });
+  const authMdPlan = config.markdownTwins ? authMdCandidate : undefined;
+  if (authMdPlan !== undefined) {
+    recommend(
+      'Gated routes should keep their honest 401/403 status and point agents at the auth guide: ' +
+        'add a WWW-Authenticate header and a Link (or body) pointer to ' +
+        `${authMdPlan.servedPath} in your gated route handlers. A 200 "this is gated" page is a ` +
+        'soft auth wall agents are built to distrust; ax generates the guide but never rewrites ' +
+        'your handlers.',
+    );
+  }
+
+  // Markdown-twin alternate link: fires only once twins exist for the tag to point at.
   for (const message of buildMarkdownAlternateRecommendation({
     siteUrl,
     basePath,
-    twinPaths: [],
+    twinPaths: twinPlan.servedPaths,
   })) {
     recommend(message);
   }
@@ -351,6 +602,17 @@ export async function generateCatalog(
     recommend,
     router,
   });
+
+  // The negotiation middleware: detect-and-recommend only. `middleware.ts` is the user's singleton,
+  // so ax never writes or edits it — an unwired project gets the exact wiring lines (also carried
+  // as the negotiation checks' note), a wired one gets nothing. No page routes → nothing to
+  // negotiate, so no nudge either.
+  const middlewareStatus = detectMiddleware(cwd);
+  const middlewareWiring =
+    router.listPageRoutes().length > 0 && !middlewareStatus.wiredToAx
+      ? buildMiddlewareWiringInstruction(cwd, router, middlewareStatus)
+      : undefined;
+  if (middlewareWiring !== undefined) recommend(middlewareWiring);
 
   // Derive the `did:web:` host from the resolved origin so it's consistent whatever the origin's
   // source (config, env var, or Vercel domain), not just when `siteUrl` was set in config.
@@ -394,12 +656,20 @@ export async function generateCatalog(
     },
     mcp: {
       mounts: mcpMounts.map((mount) => ({ pathname: mount.pathname, tools: mount.capabilities })),
+      unreviewedMounts: unreviewedMcpMounts,
+      ...(mcpMounts.length > 1 && primaryPathname !== undefined
+        ? { primaryMount: primaryPathname, ...(primaryUnreviewed ? { primaryUnreviewed } : {}) }
+        : {}),
     },
-    webmcp: { toolNames: webMcp.toolNames, sites: webMcp.sites },
     agent404: {
       notFoundPresent: agent404.notFoundPresent,
       agentAware: agent404.agentAware,
       ...(agent404.source !== undefined ? { source: agent404.source } : {}),
+    },
+    middleware: {
+      present: middlewareStatus.present,
+      wiredToAx: middlewareStatus.wiredToAx,
+      ...(middlewareStatus.source !== undefined ? { source: middlewareStatus.source } : {}),
     },
     artifacts: {
       robotsTxt: artifact(robots),
@@ -413,27 +683,69 @@ export async function generateCatalog(
       openapi: openApi,
     },
     scaffolds,
+    // Planned values; the CLI reconciles `written`/`deleted`/`authMd` after it applies the plan
+    // (post-review-gate), the same way it patches in the catalog path.
+    markdownTwins: {
+      enabled: twinPlan.enabled,
+      written: twinPlan.writes.map((twin) => ({
+        route: twin.route,
+        path: relative(cwd, twin.filePath),
+        tier: twin.tier,
+        source: twin.source,
+      })),
+      userOwned: twinPlan.userOwned.map((twin) => ({
+        route: twin.route,
+        source: twin.sourcePath,
+      })),
+      skipped: twinPlan.skips,
+      dynamicRouteCount: twinPlan.dynamicRouteCount,
+      deleted: [],
+      ...(authMdPlan !== undefined
+        ? { authMd: { path: join('public', 'auth.md'), surfaceCount: authMdPlan.surfaceCount } }
+        : {}),
+    },
     // Filled in by the CLI once artifacts are on disk (it knows the written catalog / server-card
     // paths and can read the scaffolded files back), so the generator leaves it empty.
     sizes: [],
     ora: {
-      skillMcp: ORA_SKILL_MCP_URL,
-      skillUrl: ORA_SKILL_URL,
-      scanApi: { ...ORA_SCAN_API },
       checks: buildOraChecks(
         {
           // The catalog is the one artifact every run produces, so its checks are always addressed.
           'ai-catalog.json': true,
           'llms.txt': llmsTxtResult.found,
+          // Ora's probe fetches the *homepage's* .md fallback, so the root twin is what answers
+          // it — a site with no page routes at all has nothing for the probe to fetch (N/A).
+          'markdown-twins':
+            router.listPageRoutes().length === 0
+              ? 'not-applicable'
+              : twinPlan.writes.some((twin) => twin.route === '/') ||
+                twinPlan.userOwned.some((twin) => twin.route === '/'),
           'robots.txt': robots.found,
           sitemap: sitemap.found,
           'agents.md': agentsMd.found,
           'json-ld': jsonLd.found,
           'openapi.json': openApi.found,
           'mcp-server': mcpMounts.length > 0,
-          webmcp: webMcp.toolNames.length > 0,
+          // The card check is answered by the card, not the mount: addressed only when this run
+          // actually has cards to write (mounts + a known site origin), N/A with no mounts at all.
+          'mcp-server-card':
+            mcpMounts.length === 0 ? 'not-applicable' : serverCardPlan !== undefined,
+          // With nothing gated there is nothing an auth guide could say — the checks are omitted,
+          // never claimed addressed or held actionable.
+          'auth.md': authMdCandidate === undefined ? 'not-applicable' : authMdPlan !== undefined,
+          // Negotiation is runtime behavior on page URLs: N/A with no page routes, addressed once
+          // a middleware file wires the ax runtime entry.
+          middleware:
+            router.listPageRoutes().length === 0 ? 'not-applicable' : middlewareStatus.wiredToAx,
         },
-        oraCheckNotes({ llmsTxtScaffolded: llmsTxtResult.scaffoldedPath, jsonLd: jsonLd.scaffold }),
+        oraCheckNotes({
+          llmsTxtScaffolded: llmsTxtResult.scaffoldedPath,
+          jsonLd: jsonLd.scaffold,
+          twinPlan,
+          authMdMissing: authMdCandidate !== undefined && authMdPlan === undefined,
+          mcpCardMissing: mcpMounts.length > 0 && serverCardPlan === undefined,
+          ...(middlewareWiring !== undefined ? { middlewareWiring } : {}),
+        }),
       ),
     },
     warnings,
@@ -446,7 +758,9 @@ export async function generateCatalog(
     webMcpToolNames: webMcp.toolNames,
     report,
     reportTarget: config.report,
-    ...(serverCard ? { serverCard } : {}),
+    twinPlan,
+    ...(authMdPlan !== undefined ? { authMdPlan } : {}),
+    ...(serverCardPlan ? { serverCardPlan } : {}),
     ...(llmsTxtResult.scaffoldedBody !== undefined
       ? { scaffoldedLlmsTxtBody: llmsTxtResult.scaffoldedBody }
       : {}),

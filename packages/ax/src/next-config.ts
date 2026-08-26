@@ -7,6 +7,8 @@ export interface ExtractedNextConfig {
   basePath?: string;
   distDir?: string;
   output?: string;
+  /** `pageExtensions`, when declared — how markdown-twin derivation knows an MDX page routes. */
+  pageExtensions?: string[];
 }
 
 export interface LoadNextConfigResult {
@@ -87,5 +89,11 @@ function extract(value: unknown): ExtractedNextConfig {
   if (typeof obj.basePath === 'string') config.basePath = obj.basePath;
   if (typeof obj.distDir === 'string') config.distDir = obj.distDir;
   if (typeof obj.output === 'string') config.output = obj.output;
+  if (
+    Array.isArray(obj.pageExtensions) &&
+    obj.pageExtensions.every((ext): ext is string => typeof ext === 'string')
+  ) {
+    config.pageExtensions = obj.pageExtensions;
+  }
   return config;
 }

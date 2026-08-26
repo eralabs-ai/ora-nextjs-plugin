@@ -3,9 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
   buildOraChecks,
   ORA_CHECK_MAP,
-  ORA_SCAN_API,
-  ORA_SKILL_MCP_URL,
-  ORA_SKILL_URL,
   type OraArtifact,
   type OraArtifactPresence,
 } from '../src/ora-checks.js';
@@ -15,13 +12,16 @@ function nothingPresent(): OraArtifactPresence {
   return {
     'ai-catalog.json': false,
     'llms.txt': false,
+    'markdown-twins': false,
     'robots.txt': false,
     sitemap: false,
     'agents.md': false,
     'json-ld': false,
     'openapi.json': false,
     'mcp-server': false,
-    webmcp: false,
+    'mcp-server-card': false,
+    'auth.md': false,
+    middleware: false,
   };
 }
 
@@ -43,25 +43,17 @@ describe('ORA_CHECK_MAP', () => {
     expect(artifacts).toEqual([
       'ai-catalog.json',
       'llms.txt',
+      'markdown-twins',
       'robots.txt',
       'sitemap',
       'agents.md',
       'json-ld',
       'openapi.json',
       'mcp-server',
-      'webmcp',
+      'mcp-server-card',
+      'auth.md',
+      'middleware',
     ]);
-  });
-
-  it('publishes the Ora endpoints an agent needs to close the loop', () => {
-    expect(ORA_SKILL_MCP_URL).toBe('https://ora.ai/skill/mcp');
-    expect(ORA_SKILL_URL).toBe(
-      'https://ora.ai/.well-known/agent-skills/agent-ready-website/SKILL.md',
-    );
-    expect(ORA_SCAN_API).toEqual({
-      scan: 'POST https://ora.ai/api/scan',
-      score: 'GET https://ora.ai/api/score/{domain}',
-    });
   });
 });
 
@@ -88,8 +80,20 @@ describe('buildOraChecks', () => {
   it('carries the artifact each check was derived from, so a fix has an address', () => {
     const present = { ...nothingPresent(), 'mcp-server': true };
     const mcpChecks = buildOraChecks(present).filter((check) => check.artifact === 'mcp-server');
-    expect(mcpChecks.map((check) => check.id)).toEqual(['mcp-server', 'mcp-server-card']);
+    expect(mcpChecks.map((check) => check.id)).toEqual(['mcp-server']);
     expect(mcpChecks.every((check) => check.status === 'addressed')).toBe(true);
+  });
+
+  it('keeps the mcp-server-card check independent of the mount: a mount alone is not a card', () => {
+    // The exact drift this split fixes: a detected mount used to mark the card check addressed
+    // even when no card was written (several mounts, or no site origin).
+    const present = { ...nothingPresent(), 'mcp-server': true };
+    const cardChecks = buildOraChecks(present).filter(
+      (check) => check.artifact === 'mcp-server-card',
+    );
+    expect(cardChecks.map((check) => ({ id: check.id, status: check.status }))).toEqual([
+      { id: 'mcp-server-card', status: 'actionable' },
+    ]);
   });
 
   it('attaches a note to an actionable artifact, on every check it maps to', () => {
@@ -117,5 +121,28 @@ describe('buildOraChecks', () => {
     const present = { ...nothingPresent(), 'json-ld': true };
     const checks = buildOraChecks(present, { 'json-ld': 'stale advice' });
     expect(checks.every((check) => check.note === undefined)).toBe(true);
+  });
+});
+
+describe("buildOraChecks 'not-applicable' artifacts", () => {
+  it('omits a not-applicable artifact’s checks entirely — absent, never actionable', () => {
+    const present = { ...nothingPresent(), 'auth.md': 'not-applicable' as const };
+    const checks = buildOraChecks(present);
+    expect(checks.some((check) => check.artifact === 'auth.md')).toBe(false);
+    // The other artifacts are unaffected.
+    expect(checks.some((check) => check.id === 'markdown-url-fallback')).toBe(true);
+  });
+
+  it('maps the markdown twins and auth guide onto Ora’s real check ids', () => {
+    const present = { ...nothingPresent(), 'markdown-twins': true, 'auth.md': true };
+    const addressed = buildOraChecks(present)
+      .filter((check) => check.status === 'addressed')
+      .map((check) => check.id);
+    expect(addressed).toEqual([
+      'markdown-url-fallback',
+      'markdown-frontmatter',
+      'auth-md-exists',
+      'auth-md-structure',
+    ]);
   });
 });

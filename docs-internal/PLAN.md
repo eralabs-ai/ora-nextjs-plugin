@@ -644,6 +644,34 @@ authors judgment content. **This is the immediate work.**
       Precision over recall: no `$schema` URL is guessed and no `authentication` block is asserted (auth
       is Phase 2.8). Emitted via the same `emit` (static/route) logic as the catalog (`write.ts`
       `writeServerCard`); the card is gitignored fixture build output like the catalog.
+      **Update (2026-08-23): multi-server hosts + path divergence, verified before changing anything.**
+      Phase 9 demo testing (a real app with a public `/api/public/mcp` and a `withMcpAuth`-gated
+      `/api/mcp`) showed ax skipped the card entirely with >1 mount ("publish one by hand") — designed
+      against an older draft. Both moving targets were re-verified on 2026-08-23:
+      1. **SEP-2127** (superseded SEP-1649; PR modelcontextprotocol/modelcontextprotocol#2127, still
+         OPEN, last updated 2026-08-20) has moved *again*: the `/.well-known/mcp-server-card/{name}`
+         scheme from the interim draft is gone. The current revision hosts cards at any URI with
+         `<streamable-http-url>/server-card` as the recommended location, and does domain-level
+         multi-server discovery via an **AI Catalog at `/.well-known/ai-catalog.json`** (the
+         `experimental-ext-server-card` repo owns the schema + `docs/discovery.md`).
+      2. **Ora's `mcp-server-card` check** (live `list_checks`, 2026-08-23) still probes
+         `/.well-known/mcp/server-card.json` — the path ax already emits.
+      Since Ora's probed path is load-bearing for the score and *every* draft path has churned, ax
+      keeps the Ora namespace and extends it: the **primary** server's card stays at
+      `/.well-known/mcp/server-card.json`, and every server's card also lands at
+      `/.well-known/mcp/server-card/<server-name>.json` (`<server-name>` = the mount pathname
+      slugified, e.g. `api-public-mcp` — unique, stable, and the read-back key for per-mount gating
+      persistence). "Primary": with exactly one *public* server it is picked silently — the root
+      path is probed blind, so the credential-free server is its only sensible owner (not a guess).
+      Only the ambiguous cases (several public servers, or none) are asked — in `ax init` and at
+      the build review gate (default = first public) — persisted by the root card's `serverUrl`.
+      **Known divergence + revisit trigger:** the named sub-path scheme is ax's own (neither the
+      current SEP revision nor Ora define one). When **SEP-2127 merges** (watch the PR) or **Ora's
+      `mcp-server-card`/`mcp-well-known-discovery` checks change their probed path**, revisit: likely
+      additions are `<mount>/server-card` route aliases and a `/.well-known/ai-catalog.json`-shaped
+      card listing — note ax's ARD catalog *already* lives at `/.well-known/ai-catalog.json`, so if
+      the SEP's AI-Catalog format and the ARD catalog converge, the existing entries may satisfy it
+      outright.
 - [x] Fixture + tests for each: OpenAPI-absent recommendation, JSON-LD detect/recommend, and a
       server-card emission fixture. Re-scan a deployed MCP fixture to confirm the `mcp-*` checks flip
       (the 0-point result becomes a measured win). (Unit tests per module + generate/cli wiring tests +
@@ -1180,9 +1208,20 @@ review gate sees the wizard's `siteUrl`). No new dependencies.
 **For Phase 9/10:** the wizard is where markdown-twin *intent* should be captured once twins exist —
 add a scaffold-style question and render a new `ax.config` field in `src/init-config.ts`'s
 `renderAxConfig` (its field list is the single place to extend, with the same yes-when-asked policy).
-The generated `isGated` the wizard writes is already the matcher Phase 9's Tier-2 twin derivation must
-consult ("never derive a twin from a route `isGated` matches"), so no new gating surface is needed
-there — the wizard and the twin generator read the same predicate.
+(Stale note, corrected 2026-08-19: the wizard no longer writes `isGated` — since PR #20, MCP server
+gating is per-server and persisted in the committed server card, read back via
+`src/server-card-record.ts` / `resolveMcpMountGating`. For page/route paths — the surface Tier-2's
+"never derive a twin from a gated route" guard needs — use `resolveGating(config.isGated)` from
+`src/gating.ts`, which applies the built-in `/api/auth/**` + `/api/webhooks/**` floor unless the
+user supplied their own matcher. Still no new gating surface needed.)
+
+**Amendment (2026-08-23):** the seven setup questions (`scaffoldLlmsTxt`, `scaffoldJsonLd`,
+`scaffoldRobots`, `scaffoldAgent404`, `markdownTwins`, `report`, `wireManifest`) collapsed from
+sequential y/n confirms into one multi-select checklist (`SETUP_OPTIONS` in `src/init.ts`), every
+item pre-selected with a one-line "why" in its label (e.g. "Scaffold llms.txt — a guided map so
+agents know how to navigate your site"). Same yes-when-asked/no-when-silent policy as before — the
+list itself is now the single ask, deselecting an item is the opt-out — just collapsed from seven
+prompts into one, since none of the seven choices depends on another's answer.
 
 ---
 
@@ -1203,14 +1242,14 @@ in a fork of generated output.
 The whole design is one question — *where does the markdown come from?* — answered as a ladder of
 decreasing certainty, so precision-over-recall maps onto it directly:
 
-- [ ] **Tier 1 — reference/derive from markdown-shaped sources (no build output needed).** Detect
+- [x] **Tier 1 — reference/derive from markdown-shaped sources (no build output needed).** Detect
       routes whose content already lives as markdown in the repo: `app/**/page.mdx`, existing
       markdown route handlers, stray `public/*.md`. Map route → source. For MDX, emit the twin
       only when the file is *mostly markdown* (guard: fraction of lines that are imports/exports/
       JSX blocks below a threshold — strip those, keep the markdown); otherwise recommend instead
       of guessing. Highest fidelity — the markdown is the source, not a reconstruction — and it
       covers the docs-site audience with zero conversion machinery.
-- [ ] **Tier 2 — derive from the build output for prerendered routes.** After `next build`, every
+- [x] **Tier 2 — derive from the build output for prerendered routes.** After `next build`, every
       statically prerendered route's final HTML exists in the build output (App Router:
       `.next/server/app/**.html` — **verify the location per supported Next minor and cover it in
       the Phase 5.2 canary job; this is a semi-stable internal**). Pipeline per route: locate the
@@ -1224,31 +1263,31 @@ decreasing certainty, so precision-over-recall maps onto it directly:
       would be a beautifully-converted login page, the exact artifact auth-gate audits exist to
       catch); assert an even code-fence count post-conversion. Every skip is recorded in the
       report **with its reason** — the skip list is itself the "what to do next" guidance.
-- [ ] **Tier 3 — dynamic/SSR routes: refuse.** No build-time HTML exists, so no twin, no guessing
+- [x] **Tier 3 — dynamic/SSR routes: refuse.** No build-time HTML exists, so no twin, no guessing
       (same policy as dynamic segments in llms.txt and the agent-404). The manifest records "no
       markdown target"; the CLI recommends what the developer could do (add a markdown source, or
       prerender the route).
 
 ### 9.2 Twin output & metadata
 
-- [ ] Twins are written as **static files in `public/`**: route `/docs/getting-started` →
+- [x] Twins are written as **static files in `public/`**: route `/docs/getting-started` →
       `public/docs/getting-started.md`; the root route → `public/index.md` (which also satisfies
       Ora's `markdown-url-fallback` homepage probe). *Why static files:* the `.md`-URL twin then
       works with **zero runtime** — Next serves `public/` as-is — so one of the three retrieval
       mechanisms (`.md` URL / Accept header / agent UA) passes before any middleware ships, and
       the middleware (Phase 10) becomes an upgrade, not a requirement. Same emission path and
       deploy-verification story as the catalog.
-- [ ] Every twin opens with **YAML frontmatter** carrying the four keys the agreed audit criteria
+- [x] Every twin opens with **YAML frontmatter** carrying the four keys the agreed audit criteria
       check for, all derivable at build time: `title` (page `<title>`/first H1), `description`
       (meta description when present), `canonical_url` (siteUrl + route — the attribution link
       back to the HTML page), `last_updated` (build time — truthful: twins are exactly as fresh as
       the build). Plus a `generated-by: @ora-ai/ax` marker so humans and tools know not to
       hand-edit.
-- [ ] Twins never become catalog entries (the per-route-entry prohibition stands — nobody indexes
+- [x] Twins never become catalog entries (the per-route-entry prohibition stands — nobody indexes
       per-page entries); they surface via the scaffolded `llms.txt` (Machine-readable resources
       section), the `<link rel="alternate" type="text/markdown">` recommendation (Phase 7), and
       the manifest (9.4).
-- [ ] **Review gate extension:** twins change the site's public surface, so the first run that
+- [x] **Review gate extension:** twins change the site's public surface, so the first run that
       would write them extends the Phase 2.3 "about to expose" summary with the twin count + sample
       paths, behind the same `--yes` / interactive confirm.
 
@@ -1259,7 +1298,7 @@ wall, status-code lying of exactly the kind agents are built to distrust (the 20
 is legitimate only for 404s, which have no honest next step; a 401 has one). The policy, split by
 who can implement it:
 
-- [ ] **Generated `/auth.md` (build-side, this phase):** one markdown document derived from the
+- [x] **Generated `/auth.md` (build-side, this phase):** one markdown document derived from the
       auth detection Phase 2.8 already does — the gated surfaces (paths + kind), the auth scheme
       per surface (from the `EntryAuth` descriptors: oauth2 endpoints / api_key / unknown), the
       `resourceMetadataPath` cross-link when `withMcpAuth` declared one, and where a human obtains
@@ -1268,21 +1307,21 @@ who can implement it:
       *Why one doc instead of N gated twins:* it aggregates what agents actually need (how do I
       get access?), it's fully derivable, and Ora's agent-simulation checks already look for
       auth-docs artifacts. One honest, derivable artifact doing the job N invented ones would.
-- [ ] **Recommendation (advisory, this phase):** for detected gated routes, recommend keeping the
+- [x] **Recommendation (advisory, this phase):** for detected gated routes, recommend keeping the
       honest 401/403 status and adding a `WWW-Authenticate` header + a body/`Link` pointer to
       `/auth.md` — the gated cousin of the agent-404. Route-handler *behavior* is the developer's
       code, so this stays a recommendation (with the report carrying it), never a rewrite.
 
 ### 9.4 The serving manifest (the piece Phase 10 consumes)
 
-- [ ] Generate a **manifest data module** (pattern proven by `app/not-found-agent-data.*`):
+- [x] Generate a **manifest data module** (pattern proven by `app/not-found-agent-data.*`):
       regenerated every run, importable by user middleware, containing — the route table
       (static routes only), which routes have markdown twins (and the twin path), which paths are
       gated (from `isGated` results), and where the discovery artifacts actually live
       (basePath-aware). This is what makes our middleware **never rewrite blind** — the specific
       middleware weakness the strategy sync identified (a Next.js middleware alone cannot check a
       rewrite target exists).
-- [ ] **Build-ordering wrinkle (design decision needed at implementation time):** `middleware.ts`
+- [x] **Build-ordering wrinkle (design decision needed at implementation time):** `middleware.ts`
       is compiled *during* `next build`, but ax runs *post*build — so a manifest generated
       postbuild is consumed by the *next* build (one-build staleness). The manifest is derived
       from the **source tree** (router model + config), not from build output, so the fix is
@@ -1297,13 +1336,28 @@ who can implement it:
 - **Twins default-on vs opt-in.** Leaning **default-on behind the existing first-publish review
   gate** (the confirmation makes default-on safe, and it's the stronger product statement — the
   wizard asks anyway); but every scaffold precedent is opt-in. Product call, deliberately not
-  derivable. _pending_
+  derivable. **Resolved 2026-08-19: default-on behind the review gate.** Twins are generated
+  artifacts, not scaffolds, so the scaffold opt-in precedent doesn't bind them; the review gate is
+  the consent ceremony. Config gets a `markdownTwins` switch (default `true`) so opting *out* is
+  one line.
 - **HTML→markdown converter dependency** (Tier 2 only; Tier 1 needs none). A turndown-class
   library would be the first non-trivial CLI dependency beyond ajv/jiti. Options: smallest
   maintained converter vs. a minimal internal one (headings/paragraphs/lists/links/code — refuse
   exotic HTML rather than mis-convert it, consistent with the tier ladder). Tier 1 + manifest can
-  ship first and defer this. _pending_
-- **Tier-1 MDX "mostly markdown" threshold.** Pick empirically against fixtures. _pending_
+  ship first and defer this. **Resolved 2026-08-19: take the dependency — `turndown` (+ GFM
+  plugin for tables), CLI-side only, never in the runtime/middleware import graph.** Checked
+  `@vercel/agent-readability` first: it ships no converter at all (negotiation only), confirming
+  there is nothing lighter to borrow and that generating the markdown is exactly ax's
+  differentiation.
+- **Tier-1 MDX "mostly markdown" threshold.** Pick empirically against fixtures.
+  **Resolved 2026-08-19: start at ≤25% non-markdown lines** (imports/exports/JSX-block lines over
+  non-blank lines), tuned against the `mdx-content` fixture; component-heavy pages get a
+  recommendation instead of a twin.
+- **9.4 manifest ordering (resolved 2026-08-19): `ax manifest` prebuild subcommand.** The manifest
+  is source-tree+config-derived, so a fast `ax manifest` subcommand regenerates it before
+  `next build` compiles middleware; `ax init` wires it as `prebuild` (same never-overwrite rules
+  as the `postbuild` wiring). The full postbuild run also refreshes it, so unwired projects
+  converge with one-build staleness.
 
 **Fixtures:** an `mdx-content` fixture (Tier 1), a prerendered-pages fixture with `<main>`
 (Tier 2 happy path), a JS-shell page (Tier 2 skip: too little text), a gated route (Tier 2 skip:
@@ -1313,6 +1367,45 @@ the Phase 7 born-passing assertions.
 **Done when:** Tier 1 + manifest + `/auth.md` ship with the review-gate extension and fixtures;
 Tier 2 ships behind the converter decision; every generated twin passes the born-passing suite;
 the report's skip list names a reason for every twin-less route.
+
+**✓ shipped (2026-08-19).** All three tiers plus `/auth.md`, the serving manifest, and `ax
+manifest` in one PR (the converter decision resolved same-day, so Tier 2 didn't need to trail).
+Modules: `src/markdown-artifact.ts` (frontmatter + generated-by marker + fence counting, the
+shared generated-markdown contract), `src/mdx-twin.ts` (Tier 1 line-based stripping, ≤25% guard),
+`src/html-twin.ts` (Tier 2: domino parse → `<main>`/`<article>` region → turndown+GFM, all four
+refusals), `src/markdown-twins.ts` (the ladder orchestrator: user-owned detection via the marker,
+stale-twin sweep, dynamic-route tally; plans are pure, applied by the CLI only after the review
+gate), `src/auth-md.ts`, `src/manifest.ts` (+ `ax manifest` in cli.ts, `prebuild` wiring +
+`markdownTwins` question in the wizard). Report gained a `markdownTwins` section (written /
+user-owned / skipped-with-reason / deleted / authMd); llms.txt starter links twins + the auth
+guide; `buildMarkdownAlternateRecommendation` now receives real twin paths. Fixtures
+`markdown-twins` (all Tier-2 paths + user-owned + gated + dynamic) and `mdx-content` (@next/mdx,
+both threshold outcomes); twin snapshots live in `fixtures/*/twins.golden/` (normalized
+`last_updated`, written/verified by the report-snapshot script) and the born-passing suite asserts
+the frontmatter/fence contract on both synthetic output and every committed snapshot.
+
+Deviations, each with its reason:
+- **Tier-2 HTML is located by walking `<distDir>/server/{app,pages}` for `.html`** (route groups
+  dropped, `index` collapsing) rather than parsing `app-path-routes-manifest.json` — the walk
+  covers both routers with one code path and degrades to "nothing prerendered" when the semi-stable
+  layout shifts; the Phase 5.2 canary still owns version drift.
+- **A gated route's twin skip is decided by `resolveGating(config.isGated)` with a new `'page'`
+  GateTarget kind** — the Phase 8 note claiming the wizard's written `isGated` would be the
+  matcher was stale (see the correction there); the wizard writes no isGated since PR #20.
+- **Turning `markdownTwins` off does not delete previously generated files** — deleting public/
+  content on a config flip is not a decision to make silently; the stale sweep only runs while the
+  feature is on.
+- **The manifest module is refresh-if-present on full runs** (created only by `ax manifest` / the
+  wizard's opt-in wiring), so a plain build never introduces a new source-tree file silently.
+
+Amendment (2026-08-23, from demo manual testing): a **metadata rung** was added between Tiers 2
+and 3 — a content-less (client-rendered) page whose `page.tsx` declares its *own* metadata gets a
+minimal twin from the rendered head (title/description + an explicit "content renders in the
+browser" note), labeled `source: 'metadata'` in the report. Ownership is read from the page source
+(the rendered head can't distinguish page metadata from the layout cascade) and values from the
+render; heads shared across routes are refused as inherited-in-practice. Skip guidance was also
+reworded: wrap {children} in <main> at the layout (never per-page placeholder pre-hydration DOM,
+which paints and flickers), and declare per-page metadata for client-rendered pages.
 
 ---
 
@@ -1334,25 +1427,36 @@ browser contains "cursor" in its UA and must get HTML).
 
 ### 10.1 Packaging
 
-- [ ] New export `"./middleware"` in `packages/ax/package.json` `exports`, built as its own tsup
+- [x] New export `"./middleware"` in `packages/ax/package.json` `exports`, built as its own tsup
       entry. **Zero dependencies, Web-API only** (Edge-safe) — ajv/jiti must not enter this
       entry's import graph (the CLI keeps them; the runtime entry is the only code a consumer's
       app imports at runtime). `next` becomes an **optional peer dependency** (types only),
       `sideEffects: false` stays.
+      (Shipped: `./middleware` → `dist/middleware.{js,d.ts}` via a named tsup entry; the built
+      bundle's whole import graph is two dependency-free chunks (agent-ua + markdown-headers).
+      `test/middleware-import-graph.test.ts` asserts the source-level closure: relative runtime
+      imports only, no packages, no Node built-ins, `next/server` type-only. `next >=14` optional
+      peer + devDep for typechecking. `sideEffects: false` didn't exist yet — added, not kept.)
 
 ### 10.2 Detection (`src/middleware/detection.ts`)
 
-- [ ] Implement the 3-layer cascade exactly as specified in the sync section, consuming the
+- [x] Implement the 3-layer cascade exactly as specified in the sync section, consuming the
       Phase 7 corpus: (1) UA-substring match, suppressed on real browser document navigations;
       (2) `Signature-Agent` header contains a known domain; (3) heuristic — `sec-fetch-mode`
       absent + `BOT_LIKE_REGEX` UA + not in `TRADITIONAL_BOT_PATTERNS`. Return a discriminated
       result (`{ detected, method }`) so `onDetection` can log the method. Cover the agreed edge
       cases (embedded-browser UA like Cursor's must stay HTML; Googlebot never rerouted;
       Signature-Agent positive) as table tests.
+      (Shipped with one strengthening: the `TRADITIONAL_BOT_PATTERNS` veto runs **before all
+      three layers**, not just inside the heuristic — "never rerouted" is non-optional, so a UA
+      naming a search/preview/uptime bot short-circuits everything. `acceptsMarkdown` is checked
+      independently of detection: an explicit `Accept: text/markdown` from any client — a search
+      crawler included — is honest content negotiation, not cloaking. Table tests in
+      `test/middleware-detection.test.ts` use real UA strings.)
 
 ### 10.3 Behavior (`src/middleware/index.ts`)
 
-- [ ] A composing HOF (working name `withAx(options, existingMiddleware?)` — final name open),
+- [x] A composing HOF (working name `withAx(options, existingMiddleware?)` — final name open),
       taking the **generated manifest** (imported module, Phase 9.4) plus `onDetection?` and
       `canonicalUrl?` overrides. Per request, in order:
       1. Not an agent and no markdown `Accept` → fall through to the wrapped middleware /
@@ -1369,36 +1473,82 @@ browser contains "cursor" in its UA and must get HTML).
          the discovery artifacts that exist) — the runtime completion of the Phase 4.5 agent-404,
          and the "agents discard 404 bodies" doctrine applied with real build-derived data instead
          of a generic template. Plain clients keep the honest 404 via the normal app path.
-- [ ] **Armored `onDetection`:** sync throws swallowed; promises to `event.waitUntil()`.
+- [x] **Armored `onDetection`:** sync throws swallowed; promises to `event.waitUntil()`.
       Telemetry must never break serving.
-- [ ] **Canonical-URL hardening:** when deriving the canonical from request headers (proxy
+- [x] **Canonical-URL hardening:** when deriving the canonical from request headers (proxy
       setups), round-trip `Host`/`X-Forwarded-Proto` through the URL parser and rebuild from
       parsed components; unparseable → omit the Link header rather than reflect raw input
       (header-injection guard — hostile `Host` values must never corrupt a response header).
+      (10.3 shipped as specced with four deliberate deltas, each with its reason:
+      **(a) name resolved: `withAx`** (product call, 2026-08-23). **(b) The gated check runs
+      *before* the twin check** — the plan ordered twin first, but a stray user `.md` shadowing a
+      gated route would then serve markdown for a gated path; the gate must win. **(c) `next` is
+      honored as *types-only*:** nothing from `next/server` is imported at runtime — the rewrite
+      is a plain `Response` carrying `x-middleware-rewrite` (exactly what `NextResponse.rewrite`
+      sets, confirmed against next@15.5.20 source) and fall-through returns `undefined` (Next's
+      documented "continue the chain"); the fixture's `next start` dogfood pins the contract.
+      **(d) A new manifest field, `dynamicRoutePrefixes`** (`RouterModel.listDynamicRoutePrefixes`:
+      `/blog/[slug]` → `/blog`): with a static-routes-only manifest, step 4 would answer a real
+      dynamic page (`/blog/hello`) with a "this URL does not exist" body — a lie of exactly the
+      kind the twin ladder refuses — so under a dynamic prefix the middleware always falls
+      through and the app (and its agent-404) answers. Also: the wayfinding 200 carries
+      `Vary: Accept` but no canonical Link (a URL on no route has no canonical HTML page), and the
+      exported `axMatcher` is documentation — the wiring instruction pastes the literal, because
+      Next only statically analyzes `config.matcher`.)
 
 ### 10.4 Wiring (same rules as every scaffold)
 
-- [ ] Never edit an existing `middleware.ts`. The CLI prints the exact 3-line wiring (import,
+- [x] Never edit an existing `middleware.ts`. The CLI prints the exact 3-line wiring (import,
       wrap, matcher) phrased for a coding agent, and `.ora/report.json` carries the same strings —
       identical to the JSON-LD wiring pattern.
+      (Shipped as `src/middleware-wiring.ts`: `detectMiddleware` (root or `src/`, wiring detected
+      textually via the `@ora-ai/ax/middleware` specifier — same posture as the agent-404
+      signpost check) + `buildMiddlewareWiringInstruction` (one string, manifest-location-aware,
+      prefixed with the `ax manifest` step when no module exists, "wrap your existing default
+      export" when a middleware is present). It flows through `recommend()` *and* a new
+      `middleware` ora artifact mapped to `markdown-negotiation` / `markdown-negotiation-vary`
+      (addressed when wired, N/A with no page routes), plus a `middleware` report section
+      (`present`/`wiredToAx`/`source`).)
 - [ ] Optionally scaffold `middleware.ts` **only when none exists** (write-once, behind an opt-in
       flag / the wizard question).
+      (**Deliberately deferred, 2026-08-23 (product call): this PR ships wiring-instructions
+      only.** The scaffold + wizard question follow in a small later PR — keeps this one focused
+      on the runtime entry; nothing here blocks it.)
 
 ### 10.5 Verification
 
-- [ ] Unit: detection table tests; manifest gating (gated path never rewritten; unlisted path
+- [x] Unit: detection table tests; manifest gating (gated path never rewritten; unlisted path
       never rewritten); header invariants (Vary deduped against pre-existing values; canonical
       Link not duplicated); 404-negotiation body renders from a manifest fixture.
-- [ ] **Dogfood target:** a fixture app running `next start` must pass Ora's
+      (`test/middleware.test.ts` — includes a compile-time assignability check that the writer's
+      `ServingManifestData` stays readable as the runtime's `AxServingManifest`, and born-passing
+      assertions on the wayfinding body: H1, links, zero code fences, under the size ceiling.)
+- [x] **Dogfood target:** a fixture app running `next start` must pass Ora's
       `markdown-negotiation-vary` semantics — dual-fetch of the same URL (with and without
       `Accept: text/markdown`) returns different content-types, correct bodies both ways, and
       `Vary: Accept` on the negotiated response. This is the strictest known external check; the
       header helper should make failing it impossible. Live-deploy confirmation folds into the
       existing Vercel deploy steps.
+      (Shipped as `fixtures/middleware` + `scripts/dogfood-middleware.mjs` (`pnpm
+      dogfood:middleware`, run by CI's fixtures job after the snapshot verify): 18 probes — the
+      dual fetch, both cloaking guards, twin-less/gated/dynamic fall-throughs, and the
+      wayfinding-vs-honest-404 pair. Fixture design notes: `"prebuild": "ax manifest"` +
+      committed hand-authored `public/docs.md` so the *first* build's manifest already lists a
+      twin (the generated homepage twin demonstrates — and documents — the one-build staleness
+      instead); `ax-manifest.ts` is gitignored + cleaned as fixture build output. Two probe
+      gotchas worth remembering: Node's fetch/undici strips `sec-fetch-*` request headers, so the
+      embedded-browser probe goes through curl; React SSR interleaves comment markers between text
+      nodes, so body assertions never match joined strings.)
 
 **Done when:** the fixture passes the dual-fetch dogfood test locally; no rewrite ever fires for a
 gated or unlisted path (asserted); the wiring instructions appear in CLI output + report; the
 runtime entry's bundle contains no CLI dependencies.
+✓ All four hold (2026-08-23): dogfood 18/18 locally + wired into CI; gated/unlisted never rewritten
+(unit-asserted, incl. a twin deliberately shadowing a gated route); wiring strings in
+recommendations + the negotiation checks' note; the built `dist/middleware.js` import graph is two
+dependency-free chunks. Remaining from this phase: the opt-in `middleware.ts` scaffold + wizard
+question (10.4, deferred by product call) and the live Vercel-deploy confirmation, which folds into
+the existing deploy steps.
 
 ---
 

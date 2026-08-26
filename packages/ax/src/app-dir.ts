@@ -33,8 +33,16 @@ export function resolvePagePathname(
   const rel = relative(appDir, absolutePath);
   const base = rel.split(/[/\\]/).pop() ?? '';
   if (!PAGE_FILE_RE.test(base)) return undefined;
-  const segments = pathSegments(join(rel, '..'));
+  return resolveStaticSegments(rel);
+}
 
+/**
+ * The URL a page file's directory serves at, from its path relative to the app dir. Route groups
+ * contribute no segment; a dynamic/parallel/private/intercepting segment makes the URL statically
+ * unknowable, so this returns undefined rather than guess.
+ */
+function resolveStaticSegments(relPageFile: string): string | undefined {
+  const segments = pathSegments(join(relPageFile, '..'));
   const resolved: string[] = [];
   for (const segment of segments) {
     if (segment === '.' || segment === '') continue;
@@ -43,6 +51,30 @@ export function resolvePagePathname(
     resolved.push(segment);
   }
   return `/${resolved.join('/')}`;
+}
+
+/** An App Router MDX/markdown page (`page.mdx` / `page.md`) paired with the route it serves. */
+export interface MdxPageFile {
+  /** Absolute path of the page source. */
+  file: string;
+  route: string;
+}
+
+/**
+ * Every `page.mdx` / `page.md` under the app dir whose route is statically addressable, sorted by
+ * route. Deliberately separate from {@link listStaticPageRoutes}: whether an MDX page actually
+ * routes depends on `next.config` `pageExtensions` (which the synchronous router model never
+ * loads), so callers that know the configured extensions — markdown-twin derivation — filter on
+ * them, and the general route list never over-claims a route that Next.js may not serve.
+ */
+export function listMdxPageFiles(appDir: string): MdxPageFile[] {
+  const pages: MdxPageFile[] = [];
+  for (const file of walkFiles(appDir, (name) => /^page\.mdx?$/.test(name))) {
+    const rel = relative(appDir, file.absolutePath);
+    const route = resolveStaticSegments(rel);
+    if (route !== undefined) pages.push({ file: file.absolutePath, route });
+  }
+  return pages.sort((a, b) => a.route.localeCompare(b.route));
 }
 
 /**
@@ -58,6 +90,37 @@ export function listStaticPageRoutes(appDir: string): string[] {
     if (pathname !== undefined) routes.add(pathname);
   }
   return [...routes].sort();
+}
+
+/**
+ * The static URL prefix of every dynamic page route, sorted and deduplicated:
+ * `app/blog/[slug]/page.tsx` → `/blog`, `app/[locale]/page.tsx` → `/`. The static route list
+ * refuses to guess a dynamic URL; this is the complementary honesty for consumers that answer
+ * *misses* (the negotiation middleware's wayfinding): under one of these prefixes a URL may well
+ * be a real page, so "not found" must never be claimed there. Parallel/intercepting/private
+ * segments still contribute nothing — they aren't URL-addressable at a knowable prefix.
+ */
+export function listDynamicRoutePrefixes(appDir: string): string[] {
+  const prefixes = new Set<string>();
+  for (const file of walkFiles(appDir, (name) => PAGE_FILE_RE.test(name))) {
+    const rel = relative(appDir, file.absolutePath);
+    const prefix = dynamicRoutePrefix(pathSegments(join(rel, '..')));
+    if (prefix !== undefined) prefixes.add(prefix);
+  }
+  return [...prefixes].sort();
+}
+
+/** The URL segments before the first dynamic one, or undefined when the route has none. */
+function dynamicRoutePrefix(segments: string[]): string | undefined {
+  const resolved: string[] = [];
+  for (const segment of segments) {
+    if (segment === '.' || segment === '') continue;
+    if (segment.startsWith('(') && segment.endsWith(')')) continue; // route group — no URL segment
+    if (segment.startsWith('[')) return `/${resolved.join('/')}` || '/';
+    if (/^[@_(]/.test(segment)) return undefined; // parallel/private/intercepting
+    resolved.push(segment);
+  }
+  return undefined;
 }
 
 /** An App Router route handler (`route.*`) file paired with the URL it mounts at. */

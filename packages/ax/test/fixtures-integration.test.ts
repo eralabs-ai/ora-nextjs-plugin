@@ -68,14 +68,15 @@ describe('generateCatalog zero-config detection against the fixture corpus', () 
     );
     expect(entry).toMatchObject({
       type: 'application/mcp-server-card+json',
-      url: 'https://mcp-adapter-fixture.example.com/mcp',
+      url: 'https://mcp-adapter-fixture.example.com/.well-known/mcp/server-card.json',
       capabilities: ['roll_dice'],
     });
   });
 
   it('builds a well-known MCP server card from the mcp-adapter fixture mount', async () => {
-    const { serverCard } = await generateCatalog({ cwd: `${fixturesDir}mcp-adapter` });
-    expect(serverCard).toMatchObject({
+    const { serverCardPlan } = await generateCatalog({ cwd: `${fixturesDir}mcp-adapter` });
+    expect(serverCardPlan?.multi).toBe(false);
+    expect(serverCardPlan?.cards[0]?.card).toMatchObject({
       name: 'com.example.mcp-adapter-fixture/mcp-adapter',
       serverUrl: 'https://mcp-adapter-fixture.example.com/mcp',
       remotes: [{ type: 'streamable-http', url: 'https://mcp-adapter-fixture.example.com/mcp' }],
@@ -84,7 +85,7 @@ describe('generateCatalog zero-config detection against the fixture corpus', () 
   });
 
   it('marks the gated mcp-adapter-gated mount with auth and a server-card authentication block', async () => {
-    const { catalog, serverCard } = await generateCatalog({
+    const { catalog, serverCardPlan } = await generateCatalog({
       cwd: `${fixturesDir}mcp-adapter-gated`,
     });
     expect(validateCatalogArd(catalog).valid).toBe(true);
@@ -94,10 +95,10 @@ describe('generateCatalog zero-config detection against the fixture corpus', () 
     );
     expect(entry).toMatchObject({
       type: 'application/mcp-server-card+json',
-      url: 'https://mcp-gated-fixture.example.com/mcp',
+      url: 'https://mcp-gated-fixture.example.com/.well-known/mcp/server-card.json',
       auth: { status: 'unknown' },
     });
-    expect(serverCard?.authentication).toEqual({
+    expect(serverCardPlan?.cards[0]?.card.authentication).toEqual({
       required: true,
       resourceMetadata:
         'https://mcp-gated-fixture.example.com/.well-known/oauth-protected-resource',
@@ -286,7 +287,7 @@ describe('generateCatalog against the Pages Router fixtures', () => {
 
   it('detects the pages/api/[transport].ts MCP mount at /api/mcp (entry, server card, and report)', async () => {
     const recommendations: string[] = [];
-    const { catalog, serverCard, report } = await generateCatalog({
+    const { catalog, serverCardPlan, report } = await generateCatalog({
       cwd: `${fixturesDir}pages-mcp`,
       onRecommendation: (m) => recommendations.push(m),
     });
@@ -298,10 +299,10 @@ describe('generateCatalog against the Pages Router fixtures', () => {
     );
     expect(entry).toMatchObject({
       type: 'application/mcp-server-card+json',
-      url: 'https://pages-mcp-fixture.example.com/api/mcp',
+      url: 'https://pages-mcp-fixture.example.com/.well-known/mcp/server-card.json',
       capabilities: ['roll_dice'],
     });
-    expect(serverCard).toMatchObject({
+    expect(serverCardPlan?.cards[0]?.card).toMatchObject({
       serverUrl: 'https://pages-mcp-fixture.example.com/api/mcp',
       tools: [{ name: 'roll_dice' }],
     });
@@ -311,13 +312,15 @@ describe('generateCatalog against the Pages Router fixtures', () => {
     expect(recommendations.some((r) => r.includes('No pages/404.tsx found'))).toBe(true);
   });
 
-  it('attributes a declarative WebMCP form to its Pages Router page URL (entry + report site)', async () => {
+  it('attributes a declarative WebMCP form to its Pages Router page URL (catalog entry)', async () => {
     const { catalog, webMcpToolNames, report } = await generateCatalog({
       cwd: `${fixturesDir}pages-webmcp-declarative`,
     });
     expect(validateCatalogArd(catalog).valid).toBe(true);
     expect(webMcpToolNames).toEqual(['subscribe_newsletter']);
 
+    // The entry URL is the Pages Router page URL `/` — proving resolveUrlForFile handles the
+    // file-is-the-route rule, not just the App Router `page.*` shape.
     const entry = catalog.entries.find(
       (e) => e.identifier === 'urn:air:pages-webmcp-fixture.example.com:webmcp',
     );
@@ -326,15 +329,9 @@ describe('generateCatalog against the Pages Router fixtures', () => {
       url: 'https://pages-webmcp-fixture.example.com/',
       capabilities: ['subscribe_newsletter'],
     });
-    // The report records the declarative site attributed to the Pages Router page URL `/` — proving
-    // resolveUrlForFile handles the file-is-the-route rule, not just the App Router `page.*` shape.
-    expect(report.webmcp.sites).toContainEqual(
-      expect.objectContaining({
-        kind: 'declarative',
-        names: ['subscribe_newsletter'],
-        pagePathname: '/',
-      }),
-    );
+    // The report carries no webmcp section: the spec is still a draft, so the report doesn't
+    // steer agents toward it (see report.ts).
+    expect('webmcp' in report).toBe(false);
   });
 
   it('scans both routers for the hybrid fixture and unions their routes', async () => {
@@ -347,5 +344,42 @@ describe('generateCatalog against the Pages Router fixtures', () => {
     // both), so there is no collision to resolve; the plugin just lists each route once.
     const routes = buildRouterModel(`${fixturesDir}hybrid`).listPageRoutes();
     expect(routes).toEqual(['/', '/about', '/dashboard']);
+  });
+});
+
+// The middleware fixture: the serving manifest its prebuild generates is the middleware's rewrite
+// contract, so the pieces the dogfood relies on must hold from the source tree alone. Assertions
+// stay independent of build state — only committed sources are asserted on (the generated homepage
+// twin and the catalog artifact appear only after a build, so they are deliberately not expected).
+describe('the middleware fixture serving manifest', () => {
+  it('lists the hand-authored twin, the gated path, and the dynamic prefix', async () => {
+    const cwd = join(fixturesDir, 'middleware');
+    const { buildServingManifest } = await import('../src/manifest.js');
+    const { resolveGating } = await import('../src/gating.js');
+    const { loadAxConfig } = await import('../src/config.js');
+
+    const { config } = await loadAxConfig(cwd);
+    const manifest = buildServingManifest({
+      cwd,
+      router: buildRouterModel(cwd),
+      isGated: resolveGating(config.isGated),
+      basePath: '',
+    });
+
+    expect(manifest.routes).toEqual(['/', '/docs', '/private', '/shell']);
+    expect(manifest.markdownTwins['/docs']).toBe('/docs.md');
+    expect(manifest.gatedPaths).toContain('/private');
+    expect(manifest.dynamicRoutePrefixes).toEqual(['/blog']);
+  });
+
+  it('wires the middleware, so its negotiation checks read addressed', async () => {
+    const { report } = await generateCatalog({ cwd: join(fixturesDir, 'middleware') });
+    expect(report.middleware).toMatchObject({ present: true, wiredToAx: true });
+    const negotiation = report.ora.checks.filter((check) => check.artifact === 'middleware');
+    expect(negotiation.map((check) => check.id).sort()).toEqual([
+      'markdown-negotiation',
+      'markdown-negotiation-vary',
+    ]);
+    expect(negotiation.every((check) => check.status === 'addressed')).toBe(true);
   });
 });

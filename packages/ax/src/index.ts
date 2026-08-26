@@ -32,18 +32,26 @@ export {
 
 export {
   writeCatalog,
-  writeServerCard,
+  writeServerCards,
   writeReport,
+  namedServerCardUrlPath,
   CATALOG_OUTPUT_PATH,
   SERVER_CARD_OUTPUT_PATH,
+  SERVER_CARD_DIR_OUTPUT_PATH,
   REPORT_OUTPUT_PATH,
   type WriteCatalogResult,
-  type WriteServerCardResult,
+  type WriteServerCardsResult,
   type WriteCatalogOptions,
   type EmissionTarget,
 } from './write.js';
 
-export type { BuildReport, ReportArtifact, ReportScaffolds, OraReport } from './report.js';
+export type {
+  BuildReport,
+  ReportArtifact,
+  ReportScaffolds,
+  ReportMarkdownTwins,
+  OraReport,
+} from './report.js';
 
 export {
   measureArtifact,
@@ -60,9 +68,6 @@ export {
 export {
   buildOraChecks,
   ORA_CHECK_MAP,
-  ORA_SCAN_API,
-  ORA_SKILL_MCP_URL,
-  ORA_SKILL_URL,
   type OraArtifact,
   type OraArtifactChecks,
   type OraArtifactPresence,
@@ -97,13 +102,14 @@ export {
   configFileName,
   CONFIG_BASENAME,
   type InitAnswers,
-  type GatingAnswer,
   type ConfigFileTarget,
 } from './init-config.js';
 
 export {
   planPostbuildWiring,
+  planPrebuildWiring,
   POSTBUILD_COMMAND,
+  PREBUILD_COMMAND,
   type PostbuildWiring,
 } from './init-package-json.js';
 
@@ -181,12 +187,15 @@ export {
 } from './detect-mcp.js';
 
 export {
-  buildMcpServerCard,
+  buildMcpServerCardPlan,
+  mountServerName,
   type McpServerCard,
   type McpServerCardTool,
   type McpServerCardRemote,
   type McpServerCardAuthentication,
-  type BuildMcpServerCardOptions,
+  type McpServerCardEmission,
+  type McpServerCardPlan,
+  type BuildMcpServerCardPlanOptions,
 } from './server-card.js';
 
 export { detectOpenApi, type DetectOpenApiOptions } from './detect-openapi.js';
@@ -249,6 +258,60 @@ export {
 } from './markdown-headers.js';
 
 export {
+  GENERATED_BY,
+  renderFrontmatter,
+  isGeneratedMarkdown,
+  fenceMarkerCount,
+  type MarkdownFrontmatter,
+} from './markdown-artifact.js';
+
+export { deriveMdxTwin, MDX_MAX_NON_MARKDOWN_FRACTION, type MdxTwinResult } from './mdx-twin.js';
+
+export {
+  deriveHtmlTwin,
+  MIN_TWIN_TEXT_CHARS,
+  MAX_TWIN_CHARS,
+  type HtmlTwinResult,
+  type HtmlTwinSkipReason,
+} from './html-twin.js';
+
+export {
+  planMarkdownTwins,
+  applyMarkdownTwinPlan,
+  twinPathnameForRoute,
+  type MarkdownTwinPlan,
+  type PlannedTwin,
+  type UserOwnedTwin,
+  type TwinSkip,
+  type TwinSkipReason,
+  type TwinTier,
+  type PlanMarkdownTwinsOptions,
+  type ApplyTwinPlanResult,
+} from './markdown-twins.js';
+
+export {
+  buildAuthMd,
+  applyAuthMdPlan,
+  AUTH_MD_PATHNAME,
+  type AuthMdPlan,
+  type BuildAuthMdOptions,
+  type ApplyAuthMdResult,
+} from './auth-md.js';
+
+export {
+  buildServingManifest,
+  writeServingManifest,
+  refreshServingManifestIfPresent,
+  existingManifestModulePath,
+  manifestModulePath,
+  renderManifestModule,
+  MANIFEST_MODULE_BASE,
+  type ServingManifestData,
+  type BuildServingManifestOptions,
+  type WriteServingManifestResult,
+} from './manifest.js';
+
+export {
   AI_AGENT_UA_PATTERNS,
   SIGNATURE_AGENT_DOMAINS,
   TRADITIONAL_BOT_PATTERNS,
@@ -258,4 +321,12 @@ export {
   UA_CORPUS_REVIEWED,
 } from './agent-ua.js';
 
-export { listStaticPageRoutes, resolvePagePathname } from './app-dir.js';
+export { listStaticPageRoutes, resolvePagePathname, listMdxPageFiles } from './app-dir.js';
+
+export {
+  detectMiddleware,
+  buildMiddlewareWiringInstruction,
+  MIDDLEWARE_ENTRY_SPECIFIER,
+  MIDDLEWARE_MATCHER_LITERAL,
+  type MiddlewareStatus,
+} from './middleware-wiring.js';

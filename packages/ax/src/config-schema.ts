@@ -93,14 +93,26 @@ export interface AxConfig {
    */
   scaffoldJsonLd?: boolean;
   /**
+   * Whether to generate markdown twins — per-page markdown files in `public/` (route `/docs` →
+   * `/docs.md`) derived from markdown sources (`page.mdx`) or the build's prerendered HTML, plus a
+   * `public/auth.md` guide when gated surfaces exist. **Default `true`**, unlike the scaffolds:
+   * twins are *generated artifacts* (regenerated every build, marked generated-by, never yours to
+   * edit), not one-time source-tree scaffolds, and the first run that would write them is confirmed
+   * at the review-before-publish gate, so nothing ships silently. Set `false` to opt out entirely.
+   */
+  markdownTwins?: boolean;
+  /**
    * Marks an artifact (MCP server, OpenAPI/REST surface, or a config-declared entry) as gated
    * behind auth. Supersedes the old `denylist`/`allowlist` pair: a single matcher subsumes both
    * (return `false` to re-include a path the built-in floor would gate). A gated artifact is never
    * advertised as an *open* surface — one ax can describe (a detected `withMcpAuth` /
    * `securitySchemes`) is emitted with a secret-free `auth` descriptor; one it can't describe is
-   * dropped rather than published. With no `isGated`, a built-in floor gates `/api/auth/**` and
-   * `/api/webhooks/**` (see {@link import('./gating.js').defaultIsGated}); supplying `isGated`
-   * replaces that floor wholesale, so call `defaultIsGated` from your own matcher to keep it.
+   * dropped rather than published — except an MCP server, whose gated status *is* its
+   * description: a gated mount is always published with `auth.status "unknown"` and a server card
+   * whose `authentication.required` is true, never dropped. With no `isGated`, a built-in floor
+   * gates `/api/auth/**` and `/api/webhooks/**` (see
+   * {@link import('./gating.js').defaultIsGated}); supplying `isGated` replaces that floor
+   * wholesale, so call `defaultIsGated` from your own matcher to keep it.
    *
    * A function, so it is validated at load time by a `typeof` check rather than the JSON Schema
    * (which has no function type) — see validate-config.ts.
@@ -163,6 +175,7 @@ export const axConfigSchema: Record<string, unknown> = {
     scaffoldAgent404: { type: 'boolean' },
     scaffoldRobots: { type: 'boolean' },
     scaffoldJsonLd: { type: 'boolean' },
+    markdownTwins: { type: 'boolean' },
     report: { anyOf: [{ type: 'boolean' }, { type: 'string', minLength: 1 }] },
     entries: { type: 'array', items: entryOverrideSchema },
   },

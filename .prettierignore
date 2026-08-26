@@ -5,6 +5,11 @@ out/
 pnpm-lock.yaml
 coverage/
 
+# Sibling git worktrees checked out under the repo — their files belong to other branches, and the
+# anchored patterns below (fixtures/**, spec/...) don't match under this prefix, so a root
+# `pnpm format` would reformat another branch's byte-exact goldens.
+.claude/
+
 # Keep the user's plan and the vendored upstream prose spec verbatim
 PLAN.md
 spec/ai-catalog.md
@@ -20,3 +25,7 @@ spec/ard/conformance/
 # JSON.stringify on each `reports:regen`) — reformatting them would drift from what that script
 # writes and break the next regen's diff.
 fixtures/**/report.golden.json
+
+# Twin snapshots are byte-exact copies of what ax generates (normalized timestamps only) — a
+# reformat would diverge them from the generated output the snapshot script diffs against.
+fixtures/**/twins.golden/

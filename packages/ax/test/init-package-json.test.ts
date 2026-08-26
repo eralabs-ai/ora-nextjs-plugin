@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { planPostbuildWiring } from '../src/init-package-json.js';
+import { planPostbuildWiring, planPrebuildWiring } from '../src/init-package-json.js';
 
 describe('planPostbuildWiring', () => {
   it('adds a postbuild when scripts are absent entirely', () => {
@@ -47,5 +47,28 @@ describe('planPostbuildWiring', () => {
   it('does not mistake a script whose name merely contains "ax" for ax itself', () => {
     // `relax` starts with the letters of `ax` but is not the ax command.
     expect(planPostbuildWiring({ postbuild: 'relax-thing' }).action).toBe('manual');
+  });
+});
+
+describe('planPrebuildWiring', () => {
+  it('adds when no prebuild exists or it is blank', () => {
+    expect(planPrebuildWiring(undefined)).toEqual({ action: 'add' });
+    expect(planPrebuildWiring({ build: 'next build' })).toEqual({ action: 'add' });
+    expect(planPrebuildWiring({ prebuild: '  ' })).toEqual({ action: 'add' });
+  });
+
+  it('recognizes an existing ax manifest wiring in any runner form', () => {
+    expect(planPrebuildWiring({ prebuild: 'ax manifest' })).toEqual({ action: 'already-wired' });
+    expect(planPrebuildWiring({ prebuild: 'npx ax manifest' })).toEqual({
+      action: 'already-wired',
+    });
+  });
+
+  it('never chains into a foreign prebuild — prints the exact edit instead', () => {
+    const plan = planPrebuildWiring({ prebuild: 'node scripts/env.js' });
+    expect(plan.action).toBe('manual');
+    if (plan.action !== 'manual') return;
+    expect(plan.instruction).toContain('"prebuild"');
+    expect(plan.instruction).toContain('node scripts/env.js && ax manifest');
   });
 });

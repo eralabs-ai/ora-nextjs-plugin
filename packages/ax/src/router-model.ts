@@ -1,11 +1,13 @@
 import {
   findAppDir,
   listAppApiEndpoints,
+  listDynamicRoutePrefixes,
   listStaticPageRoutes,
   resolvePagePathname,
 } from './app-dir.js';
 import {
   findPagesDir,
+  listDynamicPagesRoutePrefixes,
   listPagesApiEndpoints,
   listStaticPagesRoutes,
   resolvePagesPathname,
@@ -47,6 +49,13 @@ export interface RouterModel {
   /** Every statically addressable page route across both routers, deduped and sorted. */
   listPageRoutes(): string[];
   /**
+   * The static URL prefix of every dynamic page route across both routers, deduped and sorted
+   * (`/blog/[slug]` → `/blog`; a root-level dynamic segment → `/`). Where `listPageRoutes` refuses
+   * to guess, this records *where the guessing would be* — so a consumer answering misses (the
+   * negotiation middleware's wayfinding) never claims "not found" under a prefix the app may serve.
+   */
+  listDynamicRoutePrefixes(): string[];
+  /**
    * The URL a source file is served at, for attribution of a whole-tree scan (e.g. a WebMCP
    * `<form toolname>` page). Tries the App Router first, then the Pages Router; undefined when the
    * file is neither a statically addressable page.
@@ -86,6 +95,15 @@ export function buildRouterModel(cwd: string): RouterModel {
       if (appDir) for (const route of listStaticPageRoutes(appDir)) routes.add(route);
       if (pagesDir) for (const route of listStaticPagesRoutes(pagesDir)) routes.add(route);
       return [...routes].sort();
+    },
+
+    listDynamicRoutePrefixes() {
+      const prefixes = new Set<string>();
+      if (appDir) for (const prefix of listDynamicRoutePrefixes(appDir)) prefixes.add(prefix);
+      if (pagesDir) {
+        for (const prefix of listDynamicPagesRoutePrefixes(pagesDir)) prefixes.add(prefix);
+      }
+      return [...prefixes].sort();
     },
 
     resolveUrlForFile(absolutePath) {

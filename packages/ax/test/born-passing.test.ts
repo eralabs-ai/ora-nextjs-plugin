@@ -1,11 +1,25 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { buildAuthMd } from '../src/auth-md.js';
 import { detectLlmsTxt } from '../src/detect-llms-txt.js';
+import { defaultIsGated } from '../src/gating.js';
+import { planMarkdownTwins } from '../src/markdown-twins.js';
+import { buildRouterModel } from '../src/router-model.js';
 import { scaffoldRobots } from '../src/scaffold-robots.js';
+import { walkFiles } from '../src/walk-files.js';
 
 // Born-passing: the black-box audits a deployed site faces are acceptance criteria for what ax
 // generates, so "ax ran" implies "the mechanical half of an agent-readiness audit is already green."
@@ -187,5 +201,90 @@ describe('born-passing: generated robots.txt', () => {
     expect(isDisallowedFromRoot(groups, 'gptbot')).toBe(true);
     // A crawler with no specific group falls through to the wildcard Allow.
     expect(isDisallowedFromRoot(groups, 'claudebot')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Markdown twins + /auth.md (Phase 7 deferred these until markdown was generated). Every
+// generated markdown artifact must open with the agreed frontmatter keys, carry the generated-by
+// marker, stay under the truncation ceiling, and never leave a code fence open. Asserted twice:
+// against freshly generated synthetic output here, and against every committed fixture twin
+// snapshot (fixtures/*/twins.golden/**), so a conversion regression can't slip in via either path.
+// ---------------------------------------------------------------------------
+
+/** Asserts the generated-markdown contract on a twin/auth.md body. */
+function expectValidGeneratedMarkdown(body: string): void {
+  expect(body.startsWith('---\n')).toBe(true);
+  const end = body.indexOf('\n---', 3);
+  expect(end).toBeGreaterThan(0);
+  const frontmatter = body.slice(0, end);
+  expect(frontmatter).toMatch(/^title: /m);
+  expect(frontmatter).toMatch(/^canonical_url: /m);
+  expect(frontmatter).toMatch(/^last_updated: /m);
+  expect(frontmatter).toMatch(/^generated-by: "@ora-ai\/ax"$/m);
+  expect(body.length).toBeLessThanOrEqual(100_000);
+  expect(fenceMarkerCount(body) % 2).toBe(0);
+}
+
+describe('born-passing: generated markdown twins and auth.md', () => {
+  it('a Tier-2 twin derived from prerendered HTML meets the generated-markdown contract', async () => {
+    const filler = 'Real page content that an agent would want to read, not chrome. '.repeat(5);
+    mkdirSync(join(dir, 'app', 'docs'), { recursive: true });
+    writeFileSync(join(dir, 'app', 'docs', 'page.tsx'), 'export default () => null;', 'utf8');
+    mkdirSync(join(dir, '.next', 'server', 'app'), { recursive: true });
+    writeFileSync(
+      join(dir, '.next', 'server', 'app', 'docs.html'),
+      `<html><head><title>Docs</title></head><body><main><h1>Docs</h1><p>${filler}</p><pre><code>npm i</code></pre></main></body></html>`,
+      'utf8',
+    );
+
+    const plan = await planMarkdownTwins({
+      cwd: dir,
+      router: buildRouterModel(dir),
+      isGated: defaultIsGated,
+      basePath: '',
+      siteUrl: 'https://example.com',
+      enabled: true,
+      warn,
+      recommend: () => {},
+    });
+    expect(plan.writes).toHaveLength(1);
+    expectValidGeneratedMarkdown(plan.writes[0]?.content ?? '');
+  });
+
+  it('a generated auth.md meets the generated-markdown contract', () => {
+    const plan = buildAuthMd({
+      mounts: [
+        {
+          filePath: '/x/route.ts',
+          pathname: '/api/mcp',
+          capabilities: [],
+          auth: { status: 'unknown' },
+        },
+      ],
+      entries: [],
+      siteUrl: 'https://example.com',
+      basePath: '',
+      siteDisplayName: 'Demo',
+    });
+    expect(plan).toBeDefined();
+    expectValidGeneratedMarkdown(plan?.content ?? '');
+  });
+
+  it('every committed fixture twin snapshot passes the same contract', () => {
+    const fixturesDir = fileURLToPath(new URL('../../../fixtures/', import.meta.url));
+    const snapshots: string[] = [];
+    for (const fixture of readdirSync(fixturesDir)) {
+      const goldenDir = join(fixturesDir, fixture, 'twins.golden');
+      if (!existsSync(goldenDir)) continue;
+      for (const file of walkFiles(goldenDir, (name) => name.endsWith('.md'))) {
+        snapshots.push(file.absolutePath);
+      }
+    }
+    // The markdown-twins fixture commits snapshots, so an empty list means the glob broke.
+    expect(snapshots.length).toBeGreaterThan(0);
+    for (const snapshot of snapshots) {
+      expectValidGeneratedMarkdown(readFileSync(snapshot, 'utf8'));
+    }
   });
 });

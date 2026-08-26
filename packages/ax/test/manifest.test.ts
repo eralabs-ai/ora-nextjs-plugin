@@ -1,0 +1,201 @@
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { defaultIsGated } from '../src/gating.js';
+import {
+  buildServingManifest,
+  existingManifestModulePath,
+  manifestModulePath,
+  refreshServingManifestIfPresent,
+  renderManifestModule,
+  writeServingManifest,
+} from '../src/manifest.js';
+import { GENERATED_BY } from '../src/markdown-artifact.js';
+import { buildRouterModel } from '../src/router-model.js';
+
+let dir: string;
+const warnings: string[] = [];
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), 'ax-manifest-'));
+  warnings.length = 0;
+});
+afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+function write(relPath: string, content: string): void {
+  const abs = join(dir, relPath);
+  mkdirSync(dirname(abs), { recursive: true });
+  writeFileSync(abs, content, 'utf8');
+}
+
+describe('buildServingManifest', () => {
+  it('records routes, twin mappings, gated paths, and present artifacts — all served paths', () => {
+    write('app/page.tsx', 'export default () => null;');
+    write('app/docs/page.tsx', 'export default () => null;');
+    write('app/api/auth/login/route.ts', 'export function POST() {}');
+    write('public/docs.md', '# docs twin\n');
+    write('public/stray.md', '# no matching route\n');
+    write('public/auth.md', `---\ntitle: "Auth"\ngenerated-by: "${GENERATED_BY}"\n---\n\nx\n`);
+    write('public/openapi.json', '{"openapi":"3.1.0"}');
+    write('public/llms.txt', '# hi\n');
+
+    const data = buildServingManifest({
+      cwd: dir,
+      router: buildRouterModel(dir),
+      isGated: defaultIsGated,
+      basePath: '',
+    });
+
+    expect(data.basePath).toBe('');
+    expect(data.routes).toEqual(['/', '/docs']);
+    expect(data.markdownTwins).toEqual({ '/docs': '/docs.md' });
+    // The built-in floor gates the auth endpoint; stray.md maps to no route so it is nobody's twin.
+    expect(data.gatedPaths).toEqual(['/api/auth/login']);
+    expect(data.artifacts).toEqual({
+      llmsTxt: '/llms.txt',
+      authMd: '/auth.md',
+      openapi: '/openapi.json',
+    });
+  });
+
+  it('records the root server card and every named per-server card as served paths', () => {
+    write('app/page.tsx', 'export default () => null;');
+    write('public/.well-known/mcp/server-card.json', '{"serverUrl":"https://x.test/api/a"}');
+    write('public/.well-known/mcp/server-card/api-a.json', '{"serverUrl":"https://x.test/api/a"}');
+    write('public/.well-known/mcp/server-card/api-b.json', '{"serverUrl":"https://x.test/api/b"}');
+
+    const data = buildServingManifest({
+      cwd: dir,
+      router: buildRouterModel(dir),
+      isGated: defaultIsGated,
+      basePath: '/app',
+    });
+
+    expect(data.artifacts.mcpServerCard).toBe('/app/.well-known/mcp/server-card.json');
+    expect(data.artifacts.mcpServerCards).toEqual([
+      '/app/.well-known/mcp/server-card/api-a.json',
+      '/app/.well-known/mcp/server-card/api-b.json',
+    ]);
+  });
+
+  it('prefixes every recorded path with the basePath, and matchers see the served path', () => {
+    write('app/docs/page.tsx', 'export default () => null;');
+    write('public/docs.md', '# docs twin\n');
+
+    const seen: string[] = [];
+    const data = buildServingManifest({
+      cwd: dir,
+      router: buildRouterModel(dir),
+      isGated: ({ path }) => {
+        seen.push(path);
+        return false;
+      },
+      basePath: '/base',
+    });
+
+    expect(data.routes).toEqual(['/base/docs']);
+    expect(data.markdownTwins).toEqual({ '/base/docs': '/base/docs.md' });
+    // The matcher is asked about served paths — the same contract resolveMcpMountGating uses.
+    expect(seen).toContain('/base/docs');
+  });
+
+  it('records the static prefixes of dynamic routes, served-path form', () => {
+    write('app/page.tsx', 'export default () => null;');
+    write('app/blog/[slug]/page.tsx', 'export default () => null;');
+    write('pages/docs/[id].tsx', 'export default () => null;');
+
+    const data = buildServingManifest({
+      cwd: dir,
+      router: buildRouterModel(dir),
+      isGated: defaultIsGated,
+      basePath: '/base',
+    });
+
+    expect(data.routes).toEqual(['/base/']);
+    expect(data.dynamicRoutePrefixes).toEqual(['/base/blog', '/base/docs']);
+  });
+
+  it('maps public/index.md to the root route', () => {
+    write('app/page.tsx', 'export default () => null;');
+    write('public/index.md', '# home twin\n');
+    const data = buildServingManifest({
+      cwd: dir,
+      router: buildRouterModel(dir),
+      isGated: defaultIsGated,
+      basePath: '',
+    });
+    expect(data.markdownTwins).toEqual({ '/': '/index.md' });
+  });
+});
+
+describe('module path + rendering', () => {
+  it('writes beside src/ when the router dirs live there, with the project language', () => {
+    write('src/app/page.tsx', 'export default () => null;');
+    write('tsconfig.json', '{}');
+    expect(manifestModulePath(dir, buildRouterModel(dir))).toBe(join(dir, 'src', 'ax-manifest.ts'));
+  });
+
+  it('writes at the root as .js for a root-app JS project', () => {
+    write('app/page.jsx', 'export default () => null;');
+    expect(manifestModulePath(dir, buildRouterModel(dir))).toBe(join(dir, 'ax-manifest.js'));
+  });
+
+  it('renders a marked module with an as-const export for TypeScript', () => {
+    const source = renderManifestModule(
+      {
+        basePath: '',
+        routes: ['/'],
+        dynamicRoutePrefixes: [],
+        markdownTwins: {},
+        gatedPaths: [],
+        artifacts: {},
+      },
+      true,
+    );
+    expect(source).toContain('Generated by ax');
+    expect(source).toContain('export const axManifest = {');
+    expect(source).toContain('} as const;');
+    expect(
+      renderManifestModule(
+        {
+          basePath: '',
+          routes: [],
+          dynamicRoutePrefixes: [],
+          markdownTwins: {},
+          gatedPaths: [],
+          artifacts: {},
+        },
+        false,
+      ),
+    ).not.toContain('as const');
+  });
+});
+
+describe('writeServingManifest / refreshServingManifestIfPresent', () => {
+  it('writes the module end to end and the refresh regenerates it', async () => {
+    write('app/page.tsx', 'export default () => null;');
+    write('tsconfig.json', '{}');
+
+    const result = await writeServingManifest(dir, (m) => warnings.push(m));
+    expect(result.path).toBe('ax-manifest.ts');
+    const modulePath = join(dir, 'ax-manifest.ts');
+    expect(readFileSync(modulePath, 'utf8')).toContain('"routes": [');
+    expect(existingManifestModulePath(dir)).toBe(modulePath);
+
+    // A twin appears (a postbuild wrote it); the refresh must pick it up.
+    write('public/index.md', '# home twin\n');
+    const refreshed = await refreshServingManifestIfPresent(dir, (m) => warnings.push(m));
+    expect(refreshed?.data.markdownTwins).toEqual({ '/': '/index.md' });
+  });
+
+  it('refresh-if-present does nothing when no module exists (no silent new file)', async () => {
+    write('app/page.tsx', 'export default () => null;');
+    const refreshed = await refreshServingManifestIfPresent(dir, (m) => warnings.push(m));
+    expect(refreshed).toBeUndefined();
+    expect(existsSync(join(dir, 'ax-manifest.ts'))).toBe(false);
+    expect(existsSync(join(dir, 'ax-manifest.js'))).toBe(false);
+  });
+});

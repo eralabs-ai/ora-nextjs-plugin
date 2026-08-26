@@ -5,7 +5,12 @@ import { join, relative } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { runCli } from '../src/cli.js';
-import { CATALOG_OUTPUT_PATH, REPORT_OUTPUT_PATH, SERVER_CARD_OUTPUT_PATH } from '../src/write.js';
+import {
+  CATALOG_OUTPUT_PATH,
+  REPORT_OUTPUT_PATH,
+  SERVER_CARD_DIR_OUTPUT_PATH,
+  SERVER_CARD_OUTPUT_PATH,
+} from '../src/write.js';
 
 /** Writes a minimal app with a single mcp-handler mount and a configured siteUrl. */
 function writeMcpFixture(dir: string): void {
@@ -37,6 +42,9 @@ function writeFullyAgentReadyApp(dir: string): void {
   const publicDir = join(dir, 'public');
   mkdirSync(publicDir, { recursive: true });
   writeFileSync(join(publicDir, 'llms.txt'), '# demo\n', 'utf8');
+  // A hand-authored homepage twin (no generated-by marker): the markdown-fallback checks read as
+  // addressed without this synthetic app needing a real prerendered build output.
+  writeFileSync(join(publicDir, 'index.md'), '# demo home\n', 'utf8');
   writeFileSync(join(publicDir, 'robots.txt'), 'User-agent: *\nAllow: /\n', 'utf8');
   writeFileSync(join(publicDir, 'sitemap.xml'), '<urlset></urlset>\n', 'utf8');
   writeFileSync(join(publicDir, 'agents.md'), '# When to use\n', 'utf8');
@@ -58,6 +66,16 @@ function writeFullyAgentReadyApp(dir: string): void {
     'export default function Page() {\n' +
       '  return <form toolname="subscribe" tooldescription="Subscribe" />;\n' +
       '}\n',
+    'utf8',
+  );
+
+  // A wired negotiation middleware (detection is textual — the import specifier is the signal),
+  // so the markdown-negotiation checks read as addressed.
+  writeFileSync(
+    join(dir, 'middleware.ts'),
+    "import { withAx } from '@ora-ai/ax/middleware';\n" +
+      "import { axManifest } from './ax-manifest';\n" +
+      'export default withAx({ manifest: axManifest });\n',
     'utf8',
   );
 }
@@ -92,7 +110,7 @@ describe('runCli', () => {
 
     expect(code).toBe(0);
     expect(existsSync(join(dir, CATALOG_OUTPUT_PATH))).toBe(true);
-    expect(stdout.some((l) => l.includes('wrote'))).toBe(true);
+    expect(stdout.some((l) => l.includes('✓ Following artifacts generated'))).toBe(true);
     expect(stderr).toEqual([]);
   });
 
@@ -253,6 +271,27 @@ describe('runCli', () => {
     expect(stdout.some((l) => l.includes('MCP server card'))).toBe(true);
   });
 
+  it('writes a gated MCP mount with auth markers on both the entry and the server card', async () => {
+    // A gated server is published *as gated*, never dropped and never advertised as open: the
+    // entry carries auth.status "unknown" and the card authentication.required — and that written
+    // card is what records the decision for future builds.
+    writeMcpFixture(dir);
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com', isGated: (t) => ['/mcp'].includes(t.path) };\n",
+      'utf8',
+    );
+
+    const code = await runCli(['--yes'], { ...io, cwd: dir });
+
+    expect(code).toBe(0);
+    const catalog = JSON.parse(readFileSync(join(dir, CATALOG_OUTPUT_PATH), 'utf8'));
+    expect(catalog.entries).toHaveLength(1);
+    expect(catalog.entries[0].auth).toEqual({ status: 'unknown' });
+    const card = JSON.parse(readFileSync(join(dir, SERVER_CARD_OUTPUT_PATH), 'utf8'));
+    expect(card.authentication).toEqual({ required: true });
+  });
+
   it('writes no server card when there is no MCP mount', async () => {
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
 
@@ -291,7 +330,6 @@ describe('runCli', () => {
         mounts: [{ pathname: '/mcp', tools: ['roll_dice'] }],
         serverCardPath: join(dir, SERVER_CARD_OUTPUT_PATH),
       },
-      webmcp: { toolNames: [], sites: [] },
     });
     // Every detect-and-recommend artifact reports presence; this fixture has none of them.
     expect(report.artifacts.robotsTxt).toEqual({ found: false });
@@ -308,7 +346,11 @@ describe('runCli', () => {
     const code = await runCli(['--report'], { ...io, cwd: dir });
 
     expect(code).toBe(0);
-    expect(stdout.some((l) => l.includes('Generated artifact sizes'))).toBe(true);
+    expect(
+      stdout.some((l) =>
+        l.includes('✓ Following artifacts generated (estimated tokens = chars ÷ 4):'),
+      ),
+    ).toBe(true);
     expect(stdout.some((l) => /ai-catalog\.json — \d+ B \(~\d+ tokens\)/.test(l))).toBe(true);
 
     const report = JSON.parse(readFileSync(join(dir, REPORT_OUTPUT_PATH), 'utf8'));
@@ -450,6 +492,63 @@ describe('runCli review-before-publish gate', () => {
     expect(stdout.some((l) => l.includes('Aborted'))).toBe(true);
   });
 
+  it('asks about an unreviewed MCP mount at the gate and records "requires login" in the card', async () => {
+    // No card on disk and no isGated → the mount has never been reviewed. The interactive gate
+    // shows the route tree, asks per server, and the answer lands in the card it writes — so the
+    // question is asked once, not per build.
+    writeMcpFixture(dir);
+
+    const questions: string[] = [];
+    const code = await runCli([], {
+      ...noConfirmIo,
+      cwd: dir,
+      confirm: async (question: string) => {
+        questions.push(question);
+        // "Is the MCP server at /mcp public…?" → no (requires login); "Generate this catalog?" → yes.
+        return !question.includes('public');
+      },
+    });
+
+    expect(code).toBe(0);
+    expect(questions.some((q) => q.includes('/mcp') && q.includes('public'))).toBe(true);
+    expect(stdout.some((l) => l.includes('no gating decision on record'))).toBe(true);
+    expect(stdout.some((l) => l.includes('⚙ roll_dice'))).toBe(true);
+    const card = JSON.parse(readFileSync(join(dir, SERVER_CARD_OUTPUT_PATH), 'utf8'));
+    expect(card.authentication).toEqual({ required: true });
+    const catalog = JSON.parse(readFileSync(join(dir, CATALOG_OUTPUT_PATH), 'utf8'));
+    expect(catalog.entries[0].auth).toEqual({ status: 'unknown' });
+
+    // Second run: the committed card is the record — the gating question is not asked again.
+    questions.length = 0;
+    expect(
+      await runCli([], {
+        ...noConfirmIo,
+        cwd: dir,
+        confirm: async (question: string) => {
+          questions.push(question);
+          return true;
+        },
+      }),
+    ).toBe(0);
+    expect(questions.some((q) => q.includes('public'))).toBe(false);
+    // And the gated decision survives the rebuild.
+    const rebuilt = JSON.parse(readFileSync(join(dir, SERVER_CARD_OUTPUT_PATH), 'utf8'));
+    expect(rebuilt.authentication).toEqual({ required: true });
+  });
+
+  it('warns (instead of asking) about an unreviewed mount under --yes, and notes it in the report', async () => {
+    writeMcpFixture(dir);
+
+    const code = await runCli(['--yes', '--report'], { ...io, cwd: dir });
+
+    expect(code).toBe(0);
+    expect(
+      stdout.some((l) => l.includes('no gating decision on record') && l.includes('/mcp')),
+    ).toBe(true);
+    const report = JSON.parse(readFileSync(join(dir, '.ora', 'report.json'), 'utf8'));
+    expect(report.mcp.unreviewedMounts).toEqual(['/mcp']);
+  });
+
   it('--dry-run prints the exposure summary and writes nothing', async () => {
     writeMcpFixture(dir);
 
@@ -458,7 +557,7 @@ describe('runCli review-before-publish gate', () => {
     expect(code).toBe(0);
     expect(existsSync(join(dir, CATALOG_OUTPUT_PATH))).toBe(false);
     expect(existsSync(join(dir, SERVER_CARD_OUTPUT_PATH))).toBe(false);
-    expect(stdout.some((l) => l.includes('About to expose'))).toBe(true);
+    expect(stdout.some((l) => l.includes('About to reference'))).toBe(true);
     expect(stdout.some((l) => l.includes('nothing written'))).toBe(true);
   });
 
@@ -468,9 +567,18 @@ describe('runCli review-before-publish gate', () => {
     await runCli(['--yes'], { ...io, cwd: dir });
 
     const output = stdout.join('\n');
-    expect(output).toContain('About to expose');
-    expect(output).toContain('urn:air:example.com:mcp-server');
-    expect(output).toContain('MCP server card → https://example.com/mcp');
+    expect(output).toContain('About to reference 1 catalog entry:');
+    // One short line: the friendly name and the server it points at — no URN or media type.
+    expect(output).toContain('• MCP server card → https://example.com/mcp');
+    expect(output).not.toContain('urn:air:example.com:mcp-server (');
+    // The generated-artifacts tree includes the project's own ax.config alongside what it
+    // configured, annotated so it reads as config rather than a build output.
+    expect(output).toContain('ax.config.mjs — ax config');
+    // First-publish runs that write server cards get a one-time CTA to commit them — the cards
+    // are what let the next build skip re-asking the gating/primary questions.
+    expect(output).toContain(
+      'Commit the MCP server cards — they record your gating and primary decisions, so builds never re-ask.',
+    );
   });
 });
 
@@ -478,15 +586,33 @@ describe('runCli review-before-publish gate', () => {
 // that will do the remaining work: where the machine-readable report is, where the skill server is,
 // and how to verify the result against the deployed site.
 describe('runCli agent handoff footer', () => {
-  it('points at the written report, the skill server, and the scan endpoint', async () => {
+  it('points at the written report with a copy-paste agent prompt — no vendor pitch', async () => {
     writeMcpFixture(dir);
 
     await runCli(['--report'], { ...io, cwd: dir });
 
     const output = stdout.join('\n');
-    expect(output).toContain(`Agent handoff: ${join(dir, REPORT_OUTPUT_PATH)}`);
-    expect(output).toContain("Ora's skill server (MCP): https://ora.ai/skill/mcp");
-    expect(output).toContain('POST https://ora.ai/api/scan {"url": "https://example.com"}');
+    expect(output).toContain(`Find your report at: ${join(dir, REPORT_OUTPUT_PATH)}`);
+    expect(output).toContain('📋 Copy this prompt to your coding agent:');
+    expect(output).toContain(`Read ${join(dir, REPORT_OUTPUT_PATH)} and work through every check`);
+    // The prompt names the twin skip list, so an agent addresses twin-less routes too — not just
+    // the ora checks (the report-driven fix an early demo run missed).
+    expect(output).toContain('markdownTwins.skipped');
+    expect(output).not.toContain('ora.ai');
+  });
+
+  it('suppresses the terminal recommendation list when the report carries it', async () => {
+    writeMcpFixture(dir);
+
+    await runCli(['--report'], { ...io, cwd: dir });
+    const withReport = stdout.join('\n');
+    expect(withReport).not.toContain('Recommendations to improve agent-readiness:');
+
+    // Without a report, the recommendations still print — they'd otherwise be lost entirely.
+    stdout.length = 0;
+    rmSync(join(dir, CATALOG_OUTPUT_PATH), { force: true });
+    await runCli([], { ...io, cwd: dir });
+    expect(stdout.join('\n')).toContain('Recommendations to improve agent-readiness:');
   });
 
   it('says how to get the report when this run did not write one', async () => {
@@ -494,17 +620,7 @@ describe('runCli agent handoff footer', () => {
 
     await runCli([], { ...io, cwd: dir });
 
-    const output = stdout.join('\n');
-    expect(output).toContain('Agent handoff:');
-    expect(output).toContain('re-run with --report');
-  });
-
-  it('falls back to a placeholder domain when no site URL resolved', async () => {
-    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
-
-    await runCli([], { ...io, cwd: dir });
-
-    expect(stdout.join('\n')).toContain('{"url": "https://<your-domain>"}');
+    expect(stdout.join('\n')).toContain('re-run with --report');
   });
 
   it('prints nothing for a site that already has every artifact ax knows about', async () => {
@@ -518,7 +634,7 @@ describe('runCli agent handoff footer', () => {
       [],
     );
     // Nothing left to hand off — a build with no remaining work doesn't get a to-do list.
-    expect(stdout.join('\n')).not.toContain('Agent handoff');
+    expect(stdout.join('\n')).not.toContain('Find your report at');
   });
 });
 
@@ -569,5 +685,197 @@ describe('runCli ax init tip', () => {
     stdout = [];
     await runCli([], { ...io, cwd: dir }); // re-run
     expect(stdout.some((l) => l.includes(TIP))).toBe(false);
+  });
+});
+
+// Multi-server hosts: one card per mount (each server's persistence slot), the primary's card at
+// the root well-known path, and the primary decision itself asked-once like the gating one.
+describe('runCli multi-mount server cards', () => {
+  /** Two mounts, modeled on the demo app: an open /api/public/mcp and a withMcpAuth /api/mcp. */
+  function writeTwoMountFixture(dir: string): void {
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({ name: 'demo', version: '1.0.0' }),
+      'utf8',
+    );
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com' };\n",
+      'utf8',
+    );
+    const publicDir = join(dir, 'app', 'api', 'public', 'mcp');
+    mkdirSync(publicDir, { recursive: true });
+    writeFileSync(
+      join(publicDir, 'route.ts'),
+      `import { createMcpHandler } from 'mcp-handler';\n` +
+        `const handler = createMcpHandler((server) => { server.tool('search', 'd', {}, async () => ({})); });\n` +
+        `export { handler as GET };\n`,
+      'utf8',
+    );
+    const gatedDir = join(dir, 'app', 'api', 'mcp');
+    mkdirSync(gatedDir, { recursive: true });
+    writeFileSync(
+      join(gatedDir, 'route.ts'),
+      `import { createMcpHandler, withMcpAuth } from 'mcp-handler';\n` +
+        `const handler = createMcpHandler((server) => { server.tool('pay', 'd', {}, async () => ({})); });\n` +
+        `const auth = withMcpAuth(handler, async () => undefined);\n` +
+        `export { auth as GET };\n`,
+      'utf8',
+    );
+  }
+
+  it('writes the primary card at the root path and every card at its named slot (--yes)', async () => {
+    writeTwoMountFixture(dir);
+
+    const code = await runCli(['--yes', '--report'], { ...io, cwd: dir });
+
+    expect(code).toBe(0);
+    // Default primary = the public server; its card owns the root path.
+    const root = JSON.parse(readFileSync(join(dir, SERVER_CARD_OUTPUT_PATH), 'utf8'));
+    expect(root.serverUrl).toBe('https://example.com/api/public/mcp');
+    const namedDir = join(dir, SERVER_CARD_DIR_OUTPUT_PATH);
+    const publicCard = JSON.parse(readFileSync(join(namedDir, 'api-public-mcp.json'), 'utf8'));
+    const gatedCard = JSON.parse(readFileSync(join(namedDir, 'api-mcp.json'), 'utf8'));
+    expect(publicCard.authentication).toBeUndefined();
+    expect(gatedCard.authentication).toEqual({ required: true });
+
+    // Exactly one public server → it is the primary with nothing to confirm: no warning, and the
+    // report records the choice without flagging it unreviewed.
+    expect(stdout.some((l) => l.includes('no primary on record'))).toBe(false);
+    const report = JSON.parse(readFileSync(join(dir, REPORT_OUTPUT_PATH), 'utf8'));
+    expect(report.mcp.primaryMount).toBe('/api/public/mcp');
+    expect(report.mcp.primaryUnreviewed).toBeUndefined();
+    expect(report.mcp.serverCards).toEqual([
+      { mount: '/api/public/mcp', path: expect.stringContaining('api-public-mcp.json') },
+      { mount: '/api/mcp', path: expect.stringContaining('api-mcp.json') },
+    ]);
+    // The card check speaks to the written cards, not the mere mounts.
+    const cardCheck = report.ora.checks.find((c: { id: string }) => c.id === 'mcp-server-card');
+    expect(cardCheck).toMatchObject({ artifact: 'mcp-server-card', status: 'addressed' });
+
+    // Each entry points at its own card: primary at the root, the gated one at its named slot.
+    const catalog = JSON.parse(readFileSync(join(dir, CATALOG_OUTPUT_PATH), 'utf8'));
+    const urls = catalog.entries
+      .filter((e: { type: string }) => e.type === 'application/mcp-server-card+json')
+      .map((e: { url: string }) => e.url)
+      .sort();
+    expect(urls).toEqual([
+      'https://example.com/.well-known/mcp/server-card.json',
+      'https://example.com/.well-known/mcp/server-card/api-mcp.json',
+    ]);
+  });
+
+  it('named cards persist per-mount gating: the second build re-asks nothing', async () => {
+    writeTwoMountFixture(dir);
+    expect(await runCli(['--yes', '--report'], { ...io, cwd: dir })).toBe(0);
+
+    // Interactive second run: both mounts and the primary are on record via the committed cards.
+    stdout = [];
+    const questions: string[] = [];
+    const code = await runCli(['--report'], {
+      ...io,
+      cwd: dir,
+      confirm: async (question: string) => {
+        questions.push(question);
+        return true;
+      },
+    });
+
+    expect(code).toBe(0);
+    expect(questions.some((q) => q.includes('public') || q.includes('primary'))).toBe(false);
+    const report = JSON.parse(readFileSync(join(dir, REPORT_OUTPUT_PATH), 'utf8'));
+    expect(report.mcp.unreviewedMounts).toEqual([]);
+    expect(report.mcp.primaryUnreviewed).toBeUndefined();
+    expect(report.mcp.primaryMount).toBe('/api/public/mcp');
+  });
+
+  it('never asks the primary question when exactly one server is public — even interactively', async () => {
+    writeTwoMountFixture(dir);
+
+    const questions: string[] = [];
+    const code = await runCli([], {
+      ...io,
+      cwd: dir,
+      confirm: async (question: string) => {
+        questions.push(question);
+        return true;
+      },
+    });
+
+    expect(code).toBe(0);
+    // The gating question runs (the public mount is unreviewed); the primary one never does.
+    expect(questions.some((q) => q.includes('public'))).toBe(true);
+    expect(questions.some((q) => q.includes('be the primary'))).toBe(false);
+    const root = JSON.parse(readFileSync(join(dir, SERVER_CARD_OUTPUT_PATH), 'utf8'));
+    expect(root.serverUrl).toBe('https://example.com/api/public/mcp');
+  });
+
+  it('asks the primary question at the gate (several public servers) and persists a non-default answer', async () => {
+    // Two OPEN mounts: with several public servers the root-card owner is genuinely ambiguous,
+    // so the gate asks. Modeled as /api/alpha/mcp + /api/beta/mcp, both un-wrapped.
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({ name: 'demo', version: '1.0.0' }),
+      'utf8',
+    );
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com' };\n",
+      'utf8',
+    );
+    for (const name of ['alpha', 'beta']) {
+      const mountDir = join(dir, 'app', 'api', name, 'mcp');
+      mkdirSync(mountDir, { recursive: true });
+      writeFileSync(
+        join(mountDir, 'route.ts'),
+        `import { createMcpHandler } from 'mcp-handler';\n` +
+          `const handler = createMcpHandler((server) => { server.tool('${name}_tool', 'd', {}, async () => ({})); });\n` +
+          `export { handler as GET };\n`,
+        'utf8',
+      );
+    }
+
+    const questions: string[] = [];
+    const code = await runCli([], {
+      ...io,
+      cwd: dir,
+      confirm: async (question: string) => {
+        questions.push(question);
+        // Gating: both public (yes). Primary: decline the default (alpha), accept beta.
+        if (question.includes('be the primary')) return question.includes('at /api/beta/mcp be');
+        return true;
+      },
+    });
+
+    expect(code).toBe(0);
+    expect(questions.filter((q) => q.includes('be the primary')).length).toBe(2);
+    const root = JSON.parse(readFileSync(join(dir, SERVER_CARD_OUTPUT_PATH), 'utf8'));
+    expect(root.serverUrl).toBe('https://example.com/api/beta/mcp');
+
+    // The entry URLs follow the primary: beta's entry points at the root card, alpha's at its
+    // named slot.
+    const catalog = JSON.parse(readFileSync(join(dir, CATALOG_OUTPUT_PATH), 'utf8'));
+    const urls = catalog.entries.map((e: { url: string }) => e.url).sort();
+    expect(urls).toEqual([
+      'https://example.com/.well-known/mcp/server-card.json',
+      'https://example.com/.well-known/mcp/server-card/api-alpha-mcp.json',
+    ]);
+
+    // The next build sees the committed root card and keeps the choice without asking.
+    stdout = [];
+    const rerunQuestions: string[] = [];
+    expect(
+      await runCli([], {
+        ...io,
+        cwd: dir,
+        confirm: async (question: string) => {
+          rerunQuestions.push(question);
+          return true;
+        },
+      }),
+    ).toBe(0);
+    expect(rerunQuestions.some((q) => q.includes('be the primary'))).toBe(false);
+    const rebuilt = JSON.parse(readFileSync(join(dir, SERVER_CARD_OUTPUT_PATH), 'utf8'));
+    expect(rebuilt.serverUrl).toBe('https://example.com/api/beta/mcp');
   });
 });

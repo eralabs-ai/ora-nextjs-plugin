@@ -35,10 +35,12 @@ export function matchesAnyGlob(path: string, patterns: readonly string[]): boole
  * What an `isGated` check is asked about: the kind of artifact, the URL pathname it serves at, and
  * (for MCP) the tool names it exposes. `path` is always a server-relative pathname (e.g.
  * `/api/mcp`), never an absolute URL, so a matcher can be written against paths without parsing
- * origins.
+ * origins. `'page'` targets are content routes asked about by markdown-twin derivation — a gated
+ * page's prerender is typically a login shell, so no twin is ever derived from a path the matcher
+ * gates.
  */
 export interface GateTarget {
-  kind: 'mcp' | 'openapi' | 'entry';
+  kind: 'mcp' | 'openapi' | 'entry' | 'page';
   path: string;
   tools?: string[];
 }
@@ -46,7 +48,8 @@ export interface GateTarget {
 /**
  * A whole-artifact gating predicate the developer supplies via `ax.config` `isGated`. Returns
  * `true` when the target is behind auth (must not be advertised as an open surface). Boolean and
- * whole-artifact for v1 — no per-tool gating.
+ * whole-artifact: auth is declared per server in the MCP conventions, so gating is per surface,
+ * never per tool.
  */
 export type IsGated = (target: GateTarget) => boolean;
 
