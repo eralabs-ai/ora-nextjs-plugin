@@ -29,3 +29,7 @@ fixtures/**/report.golden.json
 # Twin snapshots are byte-exact copies of what ax generates (normalized timestamps only) — a
 # reformat would diverge them from the generated output the snapshot script diffs against.
 fixtures/**/twins.golden/
+
+# Skills snapshots are byte-exact copies of the published SKILL.md files and index.json ax
+# generates — same reasoning as twins.golden/ above.
+fixtures/**/skills.golden/

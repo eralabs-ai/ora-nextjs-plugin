@@ -24,6 +24,10 @@ const GENERATED_JSON = [
   join('public', '.well-known', 'mcp', 'server-card.json'),
   // The named per-server cards a multi-server fixture emits — the whole directory is generated.
   join('public', '.well-known', 'mcp', 'server-card'),
+  // The published agent-skills discovery index + SKILL.md copies — the whole directory is
+  // generated, so a leftover published copy from an earlier local build never survives to make a
+  // hand-edit check look stale against a fresh checkout.
+  join('public', '.well-known', 'agent-skills'),
   // The serving-manifest data module `ax manifest` (a fixture's prebuild) regenerates — build
   // output in a fixture, so the regen must start without one, exactly like a fresh checkout.
   'ax-manifest.ts',
