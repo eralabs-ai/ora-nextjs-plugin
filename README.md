@@ -182,10 +182,9 @@ process.env.DEPLOY_URL` (or whatever it is) works with no special support needed
 Optional. Loaded from your project root; `.ts`/`.mjs`/`.cjs`/`.js` all work — named after the `ax`
 tool that reads it, so the file you commit says plainly which tool it configures.
 
-> **Renamed from `ard.config.*` (2026-07-27).** An `ard.config.*` is still loaded when no
-> `ax.config.*` exists, with a deprecation warning; if both exist the `ax.config.*` wins and the
-> legacy file is ignored (also warned). The `AxConfig` type is likewise exported as `ArdConfig`,
-> deprecated. Rename the file — the fallback is a migration aid, not a supported second name.
+> If you still have an `ard.config.*` from before the 2026-07-27 rename, it's no longer read at
+> all — rename it to `ax.config.*`. A build with only an `ard.config.*` fails loudly with that
+> instruction rather than silently building with defaults, so this is safe to miss and easy to fix.
 
 ```ts
 import { defaultIsGated, type AxConfig } from '@ora-ai/ax';

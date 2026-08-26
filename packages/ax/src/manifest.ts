@@ -231,8 +231,7 @@ export async function writeServingManifest(
   cwd: string,
   warn: (message: string) => void,
 ): Promise<WriteServingManifestResult> {
-  const { config, warnings } = await loadAxConfig(cwd);
-  for (const message of warnings) warn(message);
+  const { config } = await loadAxConfig(cwd);
   const nextConfig = await loadNextConfig(cwd);
   for (const message of nextConfig.warnings) warn(message);
 

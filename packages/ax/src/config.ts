@@ -9,7 +9,13 @@ import { formatConfigErrors, validateAxConfig } from './validate-config.js';
 /** Canonical config basename, named after the `ax` CLI this package ships. */
 const CONFIG_BASENAME = 'ax.config';
 
-/** Pre-rename basename, still honoured (with a warning) so existing projects keep building. */
+/**
+ * `ax.config`'s pre-rename name. No longer loaded at all — this package is pre-1.0, so the
+ * maintainer would rather force a one-line rename now than carry a second config surface (and its
+ * own warning/precedence logic) indefinitely. Kept only to spot the file and fail loudly (see
+ * `loadAxConfig`) rather than silently build with defaults while the user's real settings sit
+ * unread.
+ */
 const LEGACY_CONFIG_BASENAME = 'ard.config';
 
 /**
@@ -25,59 +31,36 @@ export class AxConfigError extends Error {
   }
 }
 
-/** @deprecated Renamed to {@link AxConfigError} along with `ard.config.*` → `ax.config.*`. */
-export const ArdConfigError = AxConfigError;
-/** @deprecated Renamed to {@link AxConfigError} along with `ard.config.*` → `ax.config.*`. */
-export type ArdConfigError = AxConfigError;
-
 export interface LoadAxConfigResult {
   config: ResolvedAxConfig;
   /** Absolute path of the config file that was loaded, or undefined when none was found. */
   path?: string;
-  /**
-   * Non-fatal notices about *which* file was picked — a legacy `ard.config.*` being used, or an
-   * `ard.config.*` being ignored because an `ax.config.*` also exists. Empty in the normal case.
-   * Returned rather than printed so the caller decides how (and whether) to surface them.
-   */
-  warnings: string[];
 }
-
-/** @deprecated Renamed to {@link LoadAxConfigResult} along with `ard.config.*` → `ax.config.*`. */
-export type LoadArdConfigResult = LoadAxConfigResult;
 
 /**
  * Finds and loads `ax.config.{ts,mts,cts,mjs,js,cjs}` from `cwd`, validates it against this
  * package's own schema, and returns it with every optional field defaulted.
  *
- * A missing file is a normal, silent case (defaults apply, nothing to warn about). A file that
- * exists but fails to evaluate, or evaluates to something that doesn't match the schema, throws
- * `AxConfigError` — unlike `next-config.ts`'s warn-and-fall-back, this is the plugin's own config
- * surface, so an invalid one is this plugin's bug to report loudly, not paper over.
- *
- * The pre-rename `ard.config.*` is still loaded when no `ax.config.*` exists, with a deprecation
- * warning; when both exist the `ax.config.*` wins and the legacy file is ignored (also warned).
+ * A missing file is a normal, silent case (defaults apply, nothing to warn about) — *unless* a
+ * pre-rename `ard.config.*` is sitting there instead. That case must not fall through to defaults:
+ * the project has real settings, just under a name this loader no longer reads, and silently
+ * building with defaults would drop them without telling anyone. So it throws `AxConfigError`
+ * pointing at the rename, exactly as loudly as an invalid `ax.config.*` does below. When an
+ * `ax.config.*` exists, any `ard.config.*` alongside it is ignored outright — the new file already
+ * won, so there's nothing left to warn about.
  */
 export async function loadAxConfig(cwd: string): Promise<LoadAxConfigResult> {
-  const warnings: string[] = [];
   const configPath = findConfigFile(cwd, CONFIG_BASENAME);
-  const legacyPath = findConfigFile(cwd, LEGACY_CONFIG_BASENAME);
 
-  if (configPath && legacyPath) {
-    warnings.push(
-      `both ${basename(configPath)} and ${basename(legacyPath)} exist — using ` +
-        `${basename(configPath)} and ignoring ${basename(legacyPath)}. Delete the ` +
-        `${LEGACY_CONFIG_BASENAME}.* file.`,
-    );
-  } else if (!configPath && legacyPath) {
-    warnings.push(
-      `${LEGACY_CONFIG_BASENAME}.* is deprecated, rename to ${CONFIG_BASENAME}.* ` +
-        `(found ${basename(legacyPath)}).`,
-    );
-  }
-
-  const path = configPath ?? legacyPath;
-  if (!path) {
-    return { config: withDefaults({}), warnings };
+  if (!configPath) {
+    const legacyPath = findConfigFile(cwd, LEGACY_CONFIG_BASENAME);
+    if (legacyPath) {
+      throw new AxConfigError(
+        `${basename(legacyPath)} found, but ${LEGACY_CONFIG_BASENAME}.* is no longer supported. ` +
+          `Rename it to ${CONFIG_BASENAME}${basename(legacyPath).slice(LEGACY_CONFIG_BASENAME.length)}.`,
+      );
+    }
+    return { config: withDefaults({}) };
   }
 
   let raw: unknown;
@@ -90,33 +73,31 @@ export async function loadAxConfig(cwd: string): Promise<LoadAxConfigResult> {
       moduleCache: false,
       fsCache: false,
     });
-    raw = await jiti.import(path, { default: true });
+    raw = await jiti.import(configPath, { default: true });
   } catch (err) {
-    throw new AxConfigError(`Failed to load ${path}:\n  ${(err as Error).message}`);
+    throw new AxConfigError(`Failed to load ${configPath}:\n  ${(err as Error).message}`);
   }
 
   const result = validateAxConfig(raw);
   if (!result.valid) {
-    throw new AxConfigError(`${path} is invalid:\n${formatConfigErrors(result.errors)}`);
+    throw new AxConfigError(`${configPath} is invalid:\n${formatConfigErrors(result.errors)}`);
   }
 
-  return { config: withDefaults(raw as AxConfig), path, warnings };
+  return { config: withDefaults(raw as AxConfig), path: configPath };
 }
 
-/** @deprecated Renamed to {@link loadAxConfig} along with `ard.config.*` → `ax.config.*`. */
-export const loadArdConfig = loadAxConfig;
-
 /**
- * Path of an already-present config `loadAxConfig` would honor — an `ax.config.*` first, then a
- * legacy `ard.config.*` (which `loadAxConfig` still loads). Returns undefined when neither exists.
+ * Path of an already-present `ax.config.*`, or undefined when none exists.
  *
- * The legacy name is included deliberately: `ax init` uses this as its never-overwrite guard, and a
- * project running on an `ard.config.*` is already configured — writing a fresh `ax.config.*` would
- * silently shadow it (the `ax.config.*` wins, the legacy file is ignored). So "does a config already
- * exist" must ask the same question `loadAxConfig` does, not just look for the canonical name.
+ * Deliberately does *not* look for a legacy `ard.config.*` — `ax init`'s never-overwrite guard uses
+ * this to decide whether a project is already configured, and an `ard.config.*`-only project isn't
+ * "already configured" in that sense; it just happens to also be a project `ax init` can't actually
+ * proceed on (its detection pass calls `loadAxConfig`, which rejects that project shape). `init.ts`
+ * handles that separately, by catching the `AxConfigError` detection throws rather than by teaching
+ * this guard about the legacy name again.
  */
 export function findExistingConfig(cwd: string): string | undefined {
-  return findConfigFile(cwd, CONFIG_BASENAME) ?? findConfigFile(cwd, LEGACY_CONFIG_BASENAME);
+  return findConfigFile(cwd, CONFIG_BASENAME);
 }
 
 function withDefaults(config: AxConfig): ResolvedAxConfig {

@@ -138,15 +138,6 @@ export interface AxConfig {
 export type ResolvedAxConfig = Required<Omit<AxConfig, 'siteUrl' | 'isGated'>> &
   Pick<AxConfig, 'siteUrl' | 'isGated'>;
 
-/** @deprecated Renamed to {@link AxConfig} along with `ard.config.*` → `ax.config.*`. */
-export type ArdConfig = AxConfig;
-
-/** @deprecated Renamed to {@link AxEntryOverride} along with `ard.config.*` → `ax.config.*`. */
-export type ArdEntryOverride = AxEntryOverride;
-
-/** @deprecated Renamed to {@link ResolvedAxConfig} along with `ard.config.*` → `ax.config.*`. */
-export type ResolvedArdConfig = ResolvedAxConfig;
-
 const entryOverrideSchema = {
   type: 'object',
   required: ['identifier'],
@@ -194,6 +185,3 @@ export const axConfigSchema: Record<string, unknown> = {
   // validate-config.ts strips it before Ajv runs and validates it with a `typeof` check instead.
   additionalProperties: false,
 };
-
-/** @deprecated Renamed to {@link axConfigSchema} along with `ard.config.*` → `ax.config.*`. */
-export const ardConfigSchema: Record<string, unknown> = axConfigSchema;

@@ -252,10 +252,10 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   const firstTwinPublish =
     generated.twinPlan.writes.length > 0 && !generated.twinPlan.hasExistingGenerated;
 
-  // A first interactive run with no config at all (neither ax.config.* nor a legacy ard.config.*):
-  // suggest the wizard, which wires the build and captures the judgment (siteUrl, gating, scaffolds)
-  // a bare run can only leave to defaults. Suppressed under --yes: that run already consented to run
-  // headless, so it doesn't need onboarding advice.
+  // A first interactive run with no ax.config.* at all: suggest the wizard, which wires the build
+  // and captures the judgment (siteUrl, gating, scaffolds) a bare run can only leave to defaults.
+  // Suppressed under --yes: that run already consented to run headless, so it doesn't need
+  // onboarding advice.
   if (firstPublish && interactive && !args.yes && findExistingConfig(cwd) === undefined) {
     stdout('[ax] Tip: run `ax init` to set up ax.config and wire your postbuild in one step.');
   }

@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 
-import { findExistingConfig } from './config.js';
+import { AxConfigError, findExistingConfig } from './config.js';
 import { detectMcpMounts, type McpMount } from './detect-mcp.js';
 import { generateCatalog } from './generate.js';
 import {
@@ -721,10 +721,11 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
 
   const cwd = resolve(args.cwd ?? io.cwd ?? process.cwd());
 
-  // Never overwrite: if a config `loadAxConfig` would honor already exists — an `ax.config.*` or a
-  // still-loaded legacy `ard.config.*` — this is not a fresh setup. Point at it and stop, rather
-  // than writing a fresh `ax.config.*` that would silently shadow it (same write-once posture as the
-  // scaffolds).
+  // Never overwrite: if an `ax.config.*` already exists, this is not a fresh setup. Point at it and
+  // stop, rather than writing a fresh one that would silently shadow it (same write-once posture as
+  // the scaffolds). `findExistingConfig` deliberately does not look for a legacy `ard.config.*`
+  // here — that file is unsupported, not "already configured" — so this guard alone would let init
+  // run straight into writing a fresh `ax.config.*` over top of it.
   const existingConfig = findExistingConfig(cwd);
   if (existingConfig !== undefined) {
     stderr(
@@ -734,7 +735,23 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
     return 1;
   }
 
-  const findings = await gatherFindings(cwd);
+  // Detection below reuses `generateCatalog`, which throws `AxConfigError` when it finds only an
+  // `ard.config.*` (see config.ts) — the same loud failure a build would hit. Decision: `ax init`
+  // surfaces that error and refuses rather than proceeding to write a fresh `ax.config.*` next to
+  // the broken one. Writing a second file the developer didn't ask to fix would leave the stale
+  // `ard.config.*` behind with no signal that it's now dead weight; refusing keeps the message the
+  // developer actually needs (rename the file) in front of them, matching the build's behavior
+  // instead of only fixing half the project.
+  let findings: InitFindings;
+  try {
+    findings = await gatherFindings(cwd);
+  } catch (err) {
+    if (err instanceof AxConfigError) {
+      stderr(`[ax] ${err.message}`);
+      return 1;
+    }
+    throw err;
+  }
 
   const interactive =
     io.prompter !== undefined ||

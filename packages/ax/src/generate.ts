@@ -385,8 +385,7 @@ export async function generateCatalog(
   // model to every detector so they all see one route universe — see router-model.ts.
   const router = buildRouterModel(cwd);
 
-  const { config, warnings: configWarnings } = await loadAxConfig(cwd);
-  for (const warning of configWarnings) warn(warning);
+  const { config } = await loadAxConfig(cwd);
 
   const nextConfig = await loadNextConfig(cwd);
   for (const warning of nextConfig.warnings) warn(warning);
