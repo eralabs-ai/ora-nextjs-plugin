@@ -153,6 +153,7 @@ export {
 
 export {
   authForOpenApi,
+  credentialQueryParam,
   safeHttpUrl,
   sanitizeDeclaredAuth,
   type SanitizeDeclaredAuthResult,

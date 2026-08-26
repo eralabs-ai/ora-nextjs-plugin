@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 
-import { safeHttpUrl } from './auth.js';
+import { credentialQueryParam, safeHttpUrl } from './auth.js';
 import { AxConfigError, findExistingConfig } from './config.js';
 import type { AxEntryOverride } from './config-schema.js';
 import { detectAuthMetadata, type AuthMetadataSuggestion } from './detect-auth-metadata.js';
@@ -454,13 +454,27 @@ async function askAuthEndpoints(
   }
 
   // Up to a few tries per question, like siteUrl: an invalid value would otherwise be written into
-  // ax.config and fail its schema gate on the very next build.
+  // ax.config and fail its schema gate on the very next build. The credential check is the leak
+  // guard for the one thing URL validation alone can't catch — a real token pasted *inside* an
+  // otherwise-valid URL, which would ship verbatim in the public artifacts.
   const askUrl = async (question: string, prefill?: string): Promise<string | undefined> => {
     for (let attempt = 0; attempt < 3; attempt++) {
       const raw = (await prompter.text(question, prefill)).trim();
       if (raw === '') return undefined;
-      if (safeHttpUrl(raw) !== undefined) return raw;
-      stdout(`[ax] "${raw}" is not an absolute http(s) URL — try again, or press Enter to skip.`);
+      if (safeHttpUrl(raw) === undefined) {
+        stdout(`[ax] "${raw}" is not an absolute http(s) URL — try again, or press Enter to skip.`);
+        continue;
+      }
+      const credentialParam = credentialQueryParam(raw);
+      if (credentialParam !== undefined) {
+        stdout(
+          `[ax] That URL embeds a credential-like query parameter ("${credentialParam}=") — it ` +
+            'would be published verbatim in your public artifacts. Give a clean URL (the page ' +
+            'itself can require login), or press Enter to skip.',
+        );
+        continue;
+      }
+      return raw;
     }
     return undefined;
   };

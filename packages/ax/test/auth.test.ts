@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { authForOpenApi, safeHttpUrl, sanitizeDeclaredAuth } from '../src/auth.js';
+import {
+  authForOpenApi,
+  credentialQueryParam,
+  safeHttpUrl,
+  sanitizeDeclaredAuth,
+} from '../src/auth.js';
 
 describe('safeHttpUrl (the secret-guard for URL fields)', () => {
   it('passes http(s) URLs within the length cap', () => {
@@ -162,5 +167,27 @@ describe('sanitizeDeclaredAuth (config-declared descriptors get the detection di
       note: 'send this header',
     });
     expect(auth).toEqual({ status: 'api_key' });
+  });
+});
+
+describe('credentialQueryParam (the embedded-secret half of the guard)', () => {
+  it('flags credential-like query parameters by name', () => {
+    expect(credentialQueryParam('https://x.com/docs?api_key=sk-live-123')).toBe('api_key');
+    expect(credentialQueryParam('https://x.com/a?token=abc')).toBe('token');
+    expect(credentialQueryParam('https://x.com/a?client_secret=s')).toBe('client_secret');
+  });
+
+  it('passes clean URLs, including ones with ordinary query parameters', () => {
+    expect(credentialQueryParam('https://x.com/docs')).toBeUndefined();
+    expect(credentialQueryParam('https://x.com/docs?page=2&lang=en')).toBeUndefined();
+  });
+
+  it('sanitizeDeclaredAuth drops a URL field embedding a credential, naming the parameter', () => {
+    const { auth, dropped } = sanitizeDeclaredAuth({
+      status: 'api_key',
+      docsUrl: 'https://x.com/docs?api_key=sk-live-123',
+    });
+    expect(auth).toEqual({ status: 'api_key' });
+    expect(dropped.join('\n')).toContain('"api_key="');
   });
 });

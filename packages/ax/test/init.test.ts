@@ -1105,3 +1105,39 @@ describe('auth-scheme question (api_key and skip branches)', () => {
     expect(readFileSync(join(dir, 'ax.config.ts'), 'utf8')).not.toContain('entries:');
   });
 });
+
+describe('credential-in-URL guard (wizard answers are published verbatim)', () => {
+  it('refuses a URL embedding a credential-like query parameter and lets the user retry', async () => {
+    writeBareApp(dir);
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      `import { createMcpHandler, withMcpAuth } from 'mcp-handler';\n` +
+        `const handler = createMcpHandler((server) => {});\n` +
+        `const authed = withMcpAuth(handler, verifyToken, {});\n` +
+        `export { authed as GET };\n`,
+      'utf8',
+    );
+
+    const prompter = new ScriptedPrompter({
+      text: [
+        'https://acme.com',
+        'https://acme.com/docs?api_key=sk-live-123', // refused — embeds a credential
+        'https://acme.com/docs/api-access', // clean retry accepted
+      ],
+      multiSelect: [[], []],
+      select: ['api_key'],
+      confirm: [false],
+    });
+
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+    expect(stdout.some((l) => l.includes('credential-like query parameter'))).toBe(true);
+    const { config } = await loadAxConfig(dir);
+    expect(config.entries[0]?.auth).toEqual({
+      status: 'api_key',
+      docsUrl: 'https://acme.com/docs/api-access',
+    });
+    expect(JSON.stringify(config)).not.toContain('sk-live-123');
+  });
+});

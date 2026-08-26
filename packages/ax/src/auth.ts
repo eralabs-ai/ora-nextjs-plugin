@@ -39,6 +39,29 @@ export function safeHttpUrl(v: unknown): string | undefined {
 
 const ENTRY_AUTH_STATUSES: readonly EntryAuthStatus[] = ['oauth2', 'api_key', 'none', 'unknown'];
 
+// Query-parameter names that mark a URL as carrying a credential rather than pointing at one.
+// Declared endpoint/docs URLs are published verbatim in public artifacts, so a `?api_key=…` in one
+// is a secret leak the moment the catalog ships — and no legitimate *declared base* URL needs a
+// credential parameter (an authorization endpoint takes its parameters at request time).
+const CREDENTIAL_QUERY_PARAM_RE =
+  /^(api[_-]?key|key|token|access[_-]?token|id[_-]?token|secret|client[_-]?secret|signature|sig|password|auth|bearer|credential)$/i;
+
+/**
+ * The name of a credential-looking query parameter embedded in the URL, or undefined when clean.
+ * The second half of the secret-guard: {@link safeHttpUrl} keeps non-URLs (a pasted bare token)
+ * out of URL fields; this keeps tokens hidden *inside* an otherwise-valid URL out too.
+ */
+export function credentialQueryParam(url: string): string | undefined {
+  try {
+    for (const name of new URL(url).searchParams.keys()) {
+      if (CREDENTIAL_QUERY_PARAM_RE.test(name)) return name;
+    }
+  } catch {
+    /* not a parseable URL — safeHttpUrl already rejects these */
+  }
+  return undefined;
+}
+
 export interface SanitizeDeclaredAuthResult {
   /** The sanitized descriptor, or undefined when the whole declaration is unusable. */
   auth?: EntryAuth;
@@ -73,8 +96,18 @@ export function sanitizeDeclaredAuth(value: unknown): SanitizeDeclaredAuthResult
   const takeUrl = (raw: unknown, field: string): string | undefined => {
     if (raw === undefined) return undefined;
     const url = safeHttpUrl(raw);
-    if (url === undefined)
+    if (url === undefined) {
       dropped.push(`${field} is not an http(s) URL within ${MAX_STRING_CHARS} chars`);
+      return undefined;
+    }
+    const credentialParam = credentialQueryParam(url);
+    if (credentialParam !== undefined) {
+      dropped.push(
+        `${field} embeds a credential-like query parameter ("${credentialParam}=") — declared ` +
+          'URLs are published verbatim in public artifacts, so give a clean URL instead',
+      );
+      return undefined;
+    }
     return url;
   };
 
