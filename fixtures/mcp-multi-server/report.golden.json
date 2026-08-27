@@ -83,6 +83,17 @@
       "found": false
     }
   },
+  "auth": {
+    "gatedSurfaces": [
+      {
+        "path": "/api/mcp",
+        "status": "unknown",
+        "declared": false,
+        "oauthEndpoints": false,
+        "note": "Gated but the scheme is undeclared — declare entries[].auth in ax.config (the ax init wizard collects this) so agents know how to authenticate."
+      }
+    ]
+  },
   "scaffolds": {},
   "markdownTwins": {
     "enabled": true,
@@ -228,6 +239,12 @@
         "id": "auth-md-structure",
         "artifact": "auth.md",
         "status": "addressed"
+      },
+      {
+        "id": "mcp-auth-mechanism",
+        "artifact": "auth-declaration",
+        "status": "actionable",
+        "note": "A gated surface publishes auth.status \"unknown\" — declare entries[].auth in ax.config (the ax init wizard collects this) so agents know the scheme."
       },
       {
         "id": "markdown-negotiation",

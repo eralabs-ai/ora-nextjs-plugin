@@ -51,6 +51,17 @@
       "source": "public/openapi.json"
     }
   },
+  "auth": {
+    "gatedSurfaces": [
+      {
+        "path": "/openapi.json",
+        "status": "oauth2",
+        "declared": false,
+        "oauthEndpoints": true,
+        "note": "No docsUrl — declare where a human obtains access (entries[].auth.docsUrl) so an agent can hand the sign-up step to its human."
+      }
+    ]
+  },
   "scaffolds": {},
   "markdownTwins": {
     "enabled": true,
@@ -81,9 +92,9 @@
     {
       "artifact": "auth.md",
       "path": "public/auth.md",
-      "bytes": 962,
-      "chars": 958,
-      "tokens": 240
+      "bytes": 916,
+      "chars": 910,
+      "tokens": 228
     }
   ],
   "ora": {
@@ -164,6 +175,17 @@
         "id": "auth-md-structure",
         "artifact": "auth.md",
         "status": "addressed"
+      },
+      {
+        "id": "mcp-auth-mechanism",
+        "artifact": "auth-declaration",
+        "status": "addressed"
+      },
+      {
+        "id": "oauth-protected-resource",
+        "artifact": "oauth-metadata",
+        "status": "actionable",
+        "note": "OAuth is declared but no RFC 9728 protected-resource metadata is wired, so agents can't discover the authorization server. Add your provider's protected-resource route (see report.auth.provider) or a static /.well-known/oauth-protected-resource document."
       },
       {
         "id": "markdown-negotiation",

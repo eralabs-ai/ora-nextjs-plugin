@@ -51,6 +51,9 @@
       "found": false
     }
   },
+  "auth": {
+    "gatedSurfaces": []
+  },
   "scaffolds": {},
   "markdownTwins": {
     "enabled": true,
