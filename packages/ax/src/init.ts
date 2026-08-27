@@ -730,9 +730,8 @@ async function collectInteractive(
   // present to deselect anything they don't want. Same yes-when-asked / no-when-silent policy the
   // README documents — just collapsed from seven yes/no questions into one list, since none of these
   // choices depend on another's answer.
-  stdout('[ax]');
   const setupValues = new Set(
-    await prompter.multiSelect('What should ax set up? (All are recommended)', SETUP_OPTIONS),
+    await prompter.multiSelect('[ax] What should ax set up? (All are recommended)', SETUP_OPTIONS),
   );
   const setupSelected = (value: SetupOptionValue): boolean => setupValues.has(value);
 

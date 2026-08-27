@@ -556,7 +556,7 @@ describe('runInit interactive (scripted answers)', () => {
       // rows — the setup multi-select (asked right after) offers its own unrelated seven rows, and
       // this test is about the gating prompt's shape, not the setup one.
       multiSelect: async (question, rows) => {
-        if (!question.startsWith('What should ax set up?')) offeredRows.push(...rows);
+        if (!question.startsWith('[ax] What should ax set up?')) offeredRows.push(...rows);
         return rows
           .filter(isMultiSelectChoice)
           .filter((choice) => choice.selected)
