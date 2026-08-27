@@ -9,7 +9,7 @@ agents.
 ## One-time setup
 
 ```sh
-npm install --save-dev @ora-ai/ax
+npm install @ora-ai/ax
 ```
 
 ```sh
@@ -19,6 +19,10 @@ npx ax init
 That's it. From now on, every build generates your agent-friendly artifacts automatically.
 
 ## How it works
+
+A regular dependency, not a dev one: `@ora-ai/ax/middleware` is imported by your `middleware.ts`
+and bundled into the production build (the entry is Web-API-only with zero runtime dependencies, so
+it's edge-safe).
 
 `ax init` wires two build hooks. `prebuild: ax manifest` builds a lightweight map of your site —
 routes, gated paths, discovery artifacts — before Next.js compiles your middleware.
