@@ -3,8 +3,8 @@
 The web was built for humans. Now a new era begins: AI agents that browse, read, and act on a
 site's behalf — and most sites are invisible to them: no map, no context, no way in.
 
-`@ora-ai/ax` is a build plugin and CLI that makes a Next.js app discoverable, legible, and usable by
-agents.
+`@ora-ai/ax` is the agent-experience toolkit for Next.js: a build step that generates and
+publishes your agent-facing artifacts, and an edge middleware that serves agents at runtime.
 
 ## One-time setup
 
@@ -59,7 +59,7 @@ coding agent at it after a build and let it work through what's left.
 
 A regular dependency, not a dev one: `@ora-ai/ax/middleware` is imported by your `middleware.ts`
 and bundled into the production build (the entry is Web-API-only with zero runtime dependencies, so
-it's edge-safe).
+it's edge-safe). Skip the middleware and ax is build-time only — a devDependency works then too.
 
 `ax init` wires two build hooks. `prebuild: ax manifest` builds a lightweight map of your site —
 routes, gated paths, discovery artifacts — before Next.js compiles your middleware.
