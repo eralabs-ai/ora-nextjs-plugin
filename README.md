@@ -1,7 +1,7 @@
 # `@ora-ai/ax` — Agent Experience for Next.js
 
-The web was built for humans. Now it has a new kind of visitor — AI agents that browse, read, and
-act on a site's behalf — and most sites are invisible to them: no map, no context, no way in.
+The web was built for humans. Now a new era begins: AI agents that browse, read, and act on a
+site's behalf — and most sites are invisible to them: no map, no context, no way in.
 
 `@ora-ai/ax` is a build plugin and CLI that makes a Next.js app discoverable, legible, and usable by
 agents.
@@ -9,7 +9,7 @@ agents.
 ## One-time setup
 
 ```sh
-npm install @ora-ai/ax
+npm install @ora-ai/ax   # or: pnpm add @ora-ai/ax · yarn add @ora-ai/ax
 ```
 
 ```sh
@@ -17,20 +17,6 @@ npx ax init
 ```
 
 That's it. From now on, every build generates your agent-friendly artifacts automatically.
-
-## How it works
-
-A regular dependency, not a dev one: `@ora-ai/ax/middleware` is imported by your `middleware.ts`
-and bundled into the production build (the entry is Web-API-only with zero runtime dependencies, so
-it's edge-safe).
-
-`ax init` wires two build hooks. `prebuild: ax manifest` builds a lightweight map of your site —
-routes, gated paths, discovery artifacts — before Next.js compiles your middleware.
-`postbuild: ax` uses the finished build to generate and publish the real artifacts against that map:
-the catalog, markdown twins, scaffolds, and the report. At runtime, `@ora-ai/ax/middleware` reads
-the same map to serve agents directly. Wiring the middleware (and any JSON-LD component) into your
-app is left to you — ax prints the exact lines to add, it never edits `middleware.ts` or your layout
-itself.
 
 ## What ax does
 
@@ -69,6 +55,20 @@ machine-readable summary of what was generated, detected, and skipped (and why),
 mapped to [Ora](https://ora.ai)'s agent-readiness checks as `addressed` or `actionable`. Point your
 coding agent at it after a build and let it work through what's left.
 
+## How it works
+
+A regular dependency, not a dev one: `@ora-ai/ax/middleware` is imported by your `middleware.ts`
+and bundled into the production build (the entry is Web-API-only with zero runtime dependencies, so
+it's edge-safe).
+
+`ax init` wires two build hooks. `prebuild: ax manifest` builds a lightweight map of your site —
+routes, gated paths, discovery artifacts — before Next.js compiles your middleware.
+`postbuild: ax` uses the finished build to generate and publish the real artifacts against that map:
+the catalog, markdown twins, scaffolds, and the report. At runtime, `@ora-ai/ax/middleware` reads
+the same map to serve agents directly. Wiring the middleware (and any JSON-LD component) into your
+app is left to you — ax prints the exact lines to add, it never edits `middleware.ts` or your layout
+itself.
+
 Welcome to the agentic web.
 
 ---
@@ -77,25 +77,19 @@ Welcome to the agentic web.
 > Ora-mapped build report, review-before-publish, and the `ax init` wizard are implemented and
 > tested. Full roadmap and design rationale: [`docs-internal/PLAN.md`](./docs-internal/PLAN.md).
 
-## Design posture
-
-**Spec follower, never spec inventor** — ax translates code you already wrote into spec shape; it
-never invents an entry. **Precision over recall** — a wrong or dangerous catalog entry is worse than
-a missing one, so anything ambiguous is opt-in rather than automatic.
-
 ## Supported matrix (v1)
 
 This matrix is a public contract from day one. Anything outside it is out of scope for v1.
 
-| Dimension       | Supported                                           | Out of scope for v1              |
-| --------------- | --------------------------------------------------- | -------------------------------- |
-| Next.js router  | **App Router and Pages Router** (and both at once)  | —                                |
-| Next.js version | 14.x, 15.x (a CI canary job is planned)             | < 14                             |
-| Language        | **JavaScript and TypeScript** apps                  | —                                |
-| Config format   | `next.config.js` / `.mjs` / `.ts`                   | —                                |
-| Node.js         | 18.18+, 20 LTS, 22 LTS                              | < 18.18                          |
-| Bundler         | Webpack **and** Turbopack (CLI is bundler-agnostic) | —                                |
-| Monorepo        | Turborepo: **detect-and-warn** planned for v1       | Full nested-workspace resolution |
+| Dimension       | Supported                                           |
+| --------------- | --------------------------------------------------- |
+| Next.js router  | **App Router and Pages Router** (and both at once)  |
+| Next.js version | 14.x, 15.x (a CI canary job is planned)             |
+| Language        | **JavaScript and TypeScript** apps                  |
+| Config format   | `next.config.js` / `.mjs` / `.ts`                   |
+| Node.js         | 18.18+, 20 LTS, 22 LTS                              |
+| Bundler         | Webpack **and** Turbopack (CLI is bundler-agnostic) |
+| Monorepo        | Turborepo: **detect-and-warn** planned for v1       |
 
 ## `ax init`
 
