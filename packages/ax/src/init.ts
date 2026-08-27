@@ -2,8 +2,12 @@ import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 
+import { credentialQueryParam, safeHttpUrl } from './auth.js';
 import { AxConfigError, findExistingConfig } from './config.js';
-import { detectMcpMounts, type McpMount } from './detect-mcp.js';
+import type { AxEntryOverride } from './config-schema.js';
+import { detectAuthMetadata, type AuthMetadataSuggestion } from './detect-auth-metadata.js';
+import type { EntryAuthOAuth } from './types.js';
+import { detectMcpMounts, mcpMountIdentifier, type McpMount } from './detect-mcp.js';
 import { generateCatalog } from './generate.js';
 import {
   configFileName,
@@ -183,6 +187,8 @@ interface InitFindings {
   basePath: string;
   /** Detected mounts, kept whole: the gating card is built from these after the answers land. */
   mcpMounts: McpMount[];
+  /** Committed auth-server declarations, for the auth-endpoint questions' prefills/context. */
+  authMetadata: AuthMetadataSuggestion;
   openApiFound: boolean;
   webMcpToolNames: string[];
   /** Presence of each detect-and-recommend artifact, for the findings summary. */
@@ -225,6 +231,7 @@ async function gatherFindings(cwd: string): Promise<InitFindings> {
     apiRoutePaths,
     basePath: report.basePath,
     mcpMounts: mounts,
+    authMetadata: detectAuthMetadata({ cwd, router }),
     openApiFound: report.artifacts.openapi.found,
     webMcpToolNames: generated.webMcpToolNames,
     artifacts: {
@@ -399,6 +406,172 @@ async function askPrimary(
 }
 
 /**
+ * Runs the auth-scheme/endpoint questions — for gated MCP servers only, right after the siteUrl
+ * answer (the entry identifiers need it). Gating recorded *that* a server requires login; this
+ * collects *how* an agent authenticates — which detection can never see (a `withMcpAuth` wrapper
+ * only ever says "requires auth, scheme unknown") — as a declared `auth` entry override in the
+ * generated ax.config.
+ *
+ * The scheme select comes first because the follow-ups depend on it: OAuth 2.0 (the MCP-spec
+ * path, and the default) asks for the two endpoints; API key / bearer token has no endpoint
+ * fields in the secret-free EntryAuth shape, so it declares `status "api_key"` and asks only for
+ * the docs URL; skip asks nothing. Enter-through stays safe by construction: OAuth is the default
+ * choice, but a bare `status "oauth2"` is only declared when at least one endpoint is actually
+ * given — so a user who defaults through every question still writes nothing, while `api_key` (an
+ * active, non-default choice) is a declaration by itself.
+ *
+ * Same prefill posture as siteUrl: a value the source tree already states (a committed RFC 8414
+ * authorization-server metadata document) becomes the editable default, named with its source. A
+ * declared authorization *server* (mcp-handler's `authServerUrls`, or committed RFC 9728
+ * metadata) can't prefill an endpoint — its endpoints live behind its own /.well-known, which ax
+ * never fetches — so it prints as context above the questions instead of pretending to be one.
+ */
+async function askAuthEndpoints(
+  prompter: Prompter,
+  findings: InitFindings,
+  siteUrl: string,
+  gatedMounts: Set<string>,
+  stdout: (line: string) => void,
+): Promise<AxEntryOverride[]> {
+  const gated = findings.mcpMounts.filter((mount) => gatedMounts.has(mount.pathname));
+  if (gated.length === 0) return [];
+  const served = (pathname: string): string => servedPath(findings.basePath, pathname);
+  const suggestion = findings.authMetadata;
+
+  stdout('[ax]');
+  stdout(
+    '[ax] Your gated MCP server' +
+      (gated.length === 1 ? ' publishes' : 's publish') +
+      ' as "requires auth". Declaring where agents authenticate turns that into something an ' +
+      'agent can act on.',
+  );
+  if (suggestion.issuers.length > 0 && suggestion.issuersSource !== undefined) {
+    stdout(
+      `[ax]   Detected OAuth authorization server${suggestion.issuers.length === 1 ? '' : 's'}: ` +
+        `${suggestion.issuers.join(', ')} (from ${suggestion.issuersSource}) — agents discover ` +
+        'its endpoints from the metadata chain at runtime.',
+    );
+  }
+
+  // Up to a few tries per question, like siteUrl: an invalid value would otherwise be written into
+  // ax.config and fail its schema gate on the very next build. The credential check is the leak
+  // guard for the one thing URL validation alone can't catch — a real token pasted *inside* an
+  // otherwise-valid URL, which would ship verbatim in the public artifacts.
+  const askUrl = async (question: string, prefill?: string): Promise<string | undefined> => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const raw = (await prompter.text(question, prefill)).trim();
+      if (raw === '') return undefined;
+      if (safeHttpUrl(raw) === undefined) {
+        stdout(`[ax] "${raw}" is not an absolute http(s) URL — try again, or press Enter to skip.`);
+        continue;
+      }
+      const credentialParam = credentialQueryParam(raw);
+      if (credentialParam !== undefined) {
+        stdout(
+          `[ax] That URL embeds a credential-like query parameter ("${credentialParam}=") — it ` +
+            'would be published verbatim in your public artifacts. Give a clean URL (the page ' +
+            'itself can require login), or press Enter to skip.',
+        );
+        continue;
+      }
+      return raw;
+    }
+    return undefined;
+  };
+  // Default the scheme to OAuth when the source tree shows OAuth actually exists (committed
+  // metadata, a declared authorization server, or a wired protected-resource route); otherwise to
+  // API key — the scheme most real apps actually have. A wizard that leads with OAuth questions a
+  // basic-auth user can't answer just teaches them to skip, and defaulting to "skip" undersells
+  // the one declaration nearly every gated surface can truthfully make.
+  const oauthEvidence =
+    suggestion.oauth !== undefined ||
+    suggestion.issuers.length > 0 ||
+    suggestion.resourceMetadataRoute !== undefined;
+
+  const overrides: AxEntryOverride[] = [];
+  for (const mount of gated) {
+    const where = gated.length > 1 ? ` for ${served(mount.pathname)}` : '';
+    const scheme =
+      (await prompter.select(`How do agents authenticate to ${served(mount.pathname)}?`, [
+        {
+          value: 'oauth2',
+          label: 'OAuth 2.0 — agents discover your authorization server and sign in',
+          selected: oauthEvidence,
+        },
+        {
+          value: 'api_key',
+          label: 'API key / bearer token — a human obtains a credential and gives it to the agent',
+          selected: !oauthEvidence,
+        },
+        { value: 'skip', label: 'Skip — declare later in ax.config', selected: false },
+      ])) ?? 'skip';
+    if (scheme === 'skip') continue;
+
+    // Endpoint questions run only when the user chose OAuth and the source tree has nothing to
+    // say — the one case where a declaration is the sole way agents learn the endpoints.
+    // Committed RFC 8414 metadata already *states* them, so they're adopted, not asked; a wired
+    // protected-resource route (or a declared authorization server) means agents discover them
+    // at runtime, so there is nothing to ask at all.
+    const oauth: EntryAuthOAuth = {};
+    if (scheme === 'oauth2') {
+      if (suggestion.oauth !== undefined && suggestion.oauthSource !== undefined) {
+        Object.assign(oauth, suggestion.oauth);
+        stdout(
+          `[ax]   Using the OAuth endpoints your ${suggestion.oauthSource} already declares — ` +
+            'edit entries[].auth in ax.config to change them.',
+        );
+      } else if (!oauthEvidence) {
+        const authorizationEndpoint = await askUrl(
+          `OAuth authorization endpoint${where} (Enter to skip)`,
+        );
+        if (authorizationEndpoint !== undefined) {
+          oauth.authorizationEndpoint = authorizationEndpoint;
+        }
+        const tokenEndpoint = await askUrl(`OAuth token endpoint${where} (Enter to skip)`);
+        if (tokenEndpoint !== undefined) oauth.tokenEndpoint = tokenEndpoint;
+      }
+    }
+    // The docs question exists only for api_key — the one scheme where a human must fetch a
+    // credential from somewhere. OAuth is self-service (the agent's client runs the sign-in
+    // flow), so there is no page to ask about. Prefilled with the site origin so the user only
+    // types the path; submitting it unchanged (or clearing it) skips, and the wording says so —
+    // the prompt never pretends an unedited prefill would be saved.
+    let docsUrl: string | undefined;
+    if (scheme === 'api_key') {
+      const docsPrefill = `${siteUrl}/`;
+      const docsAnswer = await askUrl(
+        `Docs URL${where} — the page where a human gets the credential; agents send their user ` +
+          'there (complete the path; submitting it unchanged skips)',
+        docsPrefill,
+      );
+      docsUrl = docsAnswer === docsPrefill || docsAnswer === siteUrl ? undefined : docsAnswer;
+    }
+
+    const hasEndpoints = Object.keys(oauth).length > 0;
+    // "api_key" is a declaration by itself; "oauth2" becomes one once an endpoint backs it — or
+    // when the source tree itself does (a wired protected-resource route / committed metadata):
+    // agents then discover the endpoints at runtime, so a bare "oauth2" status is accurate and
+    // strictly better than "unknown". An OAuth answer with neither kind of backing declares
+    // nothing at all.
+    const oauthBacked = hasEndpoints || oauthEvidence;
+    const status = scheme === 'api_key' ? 'api_key' : 'oauth2';
+    if (scheme === 'oauth2' && !oauthBacked) continue;
+
+    overrides.push({
+      identifier: mcpMountIdentifier(siteUrl, mount.pathname, findings.mcpMounts.length > 1),
+      auth: {
+        status,
+        ...(hasEndpoints ? { oauth } : {}),
+        ...(docsUrl !== undefined ? { docsUrl } : {}),
+      },
+    });
+    // No per-mount recap line: the "✓ wrote ax.config.ts" confirmation that follows covers it,
+    // and the declaration itself is right there in the file it names.
+  }
+  return overrides;
+}
+
+/**
  * Writes the well-known MCP server cards straight from the wizard — the actionable artifact
  * `init` exists to produce for an app that already has an MCP server, and the *persistence* for
  * the answers: each card's `authentication` block is what the next build reads back for that
@@ -548,6 +721,10 @@ async function collectInteractive(
   }
   if (siteUrl === undefined) return undefined;
 
+  // Auth endpoints for the servers just gated — right here because the entry identifiers are
+  // built from the siteUrl answer, and the gating context is still on screen.
+  const authEntries = await askAuthEndpoints(prompter, findings, siteUrl, gatedMounts, stdout);
+
   // Every setup item defaults to selected in the list: config defaults are false because a *silent*
   // write into a source tree is invasive, but here the ask itself is the opt-in and the user is
   // present to deselect anything they don't want. Same yes-when-asked / no-when-silent policy the
@@ -569,6 +746,7 @@ async function collectInteractive(
       // Twin *intent* lands in config; generation happens at build (twins need the prerendered output).
       markdownTwins: setupSelected('markdownTwins'),
       report: setupSelected('report'),
+      ...(authEntries.length > 0 ? { entries: authEntries } : {}),
     },
     gatedMounts,
     primaryMount,

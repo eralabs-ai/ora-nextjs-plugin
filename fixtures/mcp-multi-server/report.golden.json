@@ -83,6 +83,17 @@
       "found": false
     }
   },
+  "auth": {
+    "gatedSurfaces": [
+      {
+        "path": "/api/mcp",
+        "status": "unknown",
+        "declared": false,
+        "oauthEndpoints": false,
+        "note": "Gated but the scheme is undeclared — declare entries[].auth in ax.config (the ax init wizard collects this) so agents know how to authenticate."
+      }
+    ]
+  },
   "scaffolds": {},
   "markdownTwins": {
     "enabled": true,
@@ -230,16 +241,22 @@
         "status": "addressed"
       },
       {
+        "id": "mcp-auth-mechanism",
+        "artifact": "auth-declaration",
+        "status": "actionable",
+        "note": "A gated surface publishes auth.status \"unknown\" — declare entries[].auth in ax.config (the ax init wizard collects this) so agents know the scheme."
+      },
+      {
         "id": "markdown-negotiation",
         "artifact": "middleware",
         "status": "actionable",
-        "note": "Serve agents the generated markdown automatically: First run `npx ax manifest` (and wire it as the \"prebuild\" script so it stays fresh — `middleware.ts` is compiled during `next build`, so the manifest must exist before the build starts). Then: add `import { withAx } from '@ora-ai/ax/middleware';` and `import { axManifest } from './ax-manifest';`, create middleware.ts with `export default withAx({ manifest: axManifest });`, and export the matcher literal `export const config = { matcher: ['/((?!_next|api|.*\\\\..*|favicon|robots|health|status).*)'] };`. The middleware rewrites a request to its markdown twin only when the manifest lists one, never touches gated paths, and answers unknown URLs from detected agents with a 200 markdown wayfinding body — it composes with (never replaces) your existing middleware."
+        "note": "Serve agents the generated markdown automatically: First run `npx ax manifest` (and wire it as the \"prebuild\" script so it stays fresh — `middleware.ts` is compiled during `next build`, so the manifest must exist before the build starts). Then: add `import { withAx } from '@ora-ai/ax/middleware';` and `import { axManifest } from './ax-manifest';`, create middleware.ts with `export default withAx({ manifest: axManifest });`, and export the matcher literal `export const config = { matcher: ['/((?!_next|api|.*\\\\..*|favicon|robots|health|status).*)'] };`. The middleware rewrites a request to its markdown twin only when the manifest lists one, never touches gated paths, and answers unknown URLs from detected agents with a 200 markdown wayfinding body — it composes with (never replaces) your existing middleware, and keeps your own gating (UA filters, bot walls) from ever blocking the published discovery artifacts."
       },
       {
         "id": "markdown-negotiation-vary",
         "artifact": "middleware",
         "status": "actionable",
-        "note": "Serve agents the generated markdown automatically: First run `npx ax manifest` (and wire it as the \"prebuild\" script so it stays fresh — `middleware.ts` is compiled during `next build`, so the manifest must exist before the build starts). Then: add `import { withAx } from '@ora-ai/ax/middleware';` and `import { axManifest } from './ax-manifest';`, create middleware.ts with `export default withAx({ manifest: axManifest });`, and export the matcher literal `export const config = { matcher: ['/((?!_next|api|.*\\\\..*|favicon|robots|health|status).*)'] };`. The middleware rewrites a request to its markdown twin only when the manifest lists one, never touches gated paths, and answers unknown URLs from detected agents with a 200 markdown wayfinding body — it composes with (never replaces) your existing middleware."
+        "note": "Serve agents the generated markdown automatically: First run `npx ax manifest` (and wire it as the \"prebuild\" script so it stays fresh — `middleware.ts` is compiled during `next build`, so the manifest must exist before the build starts). Then: add `import { withAx } from '@ora-ai/ax/middleware';` and `import { axManifest } from './ax-manifest';`, create middleware.ts with `export default withAx({ manifest: axManifest });`, and export the matcher literal `export const config = { matcher: ['/((?!_next|api|.*\\\\..*|favicon|robots|health|status).*)'] };`. The middleware rewrites a request to its markdown twin only when the manifest lists one, never touches gated paths, and answers unknown URLs from detected agents with a 200 markdown wayfinding body — it composes with (never replaces) your existing middleware, and keeps your own gating (UA filters, bot walls) from ever blocking the published discovery artifacts."
       }
     ]
   },
@@ -254,6 +271,6 @@
     "Gated routes should keep their honest 401/403 status and point agents at the auth guide: add a WWW-Authenticate header and a Link (or body) pointer to /auth.md in your gated route handlers. A 200 \"this is gated\" page is a soft auth wall agents are built to distrust; ax generates the guide but never rewrites your handlers.",
     "Markdown twins exist for your pages — link each HTML page to its twin so crawlers find the machine-readable version. Add this to the page <head> (ax prints the tag; it never edits your layout): <link rel=\"alternate\" type=\"text/markdown\" href=\"https://mcp-multi-fixture.example.com/index.md\" />",
     "No app/not-found.tsx found — agents that hit a missing URL get Next.js’s bare default 404, a dead end that makes them give up or guess. Add one that tells agents why the 404 happened and how to continue (links to llms.txt, the ai-catalog, and your real routes), or set scaffoldAgent404: true in ax.config to have an agent-aware page (plus a build-time route manifest) written for you.",
-    "Serve agents the generated markdown automatically: First run `npx ax manifest` (and wire it as the \"prebuild\" script so it stays fresh — `middleware.ts` is compiled during `next build`, so the manifest must exist before the build starts). Then: add `import { withAx } from '@ora-ai/ax/middleware';` and `import { axManifest } from './ax-manifest';`, create middleware.ts with `export default withAx({ manifest: axManifest });`, and export the matcher literal `export const config = { matcher: ['/((?!_next|api|.*\\\\..*|favicon|robots|health|status).*)'] };`. The middleware rewrites a request to its markdown twin only when the manifest lists one, never touches gated paths, and answers unknown URLs from detected agents with a 200 markdown wayfinding body — it composes with (never replaces) your existing middleware."
+    "Serve agents the generated markdown automatically: First run `npx ax manifest` (and wire it as the \"prebuild\" script so it stays fresh — `middleware.ts` is compiled during `next build`, so the manifest must exist before the build starts). Then: add `import { withAx } from '@ora-ai/ax/middleware';` and `import { axManifest } from './ax-manifest';`, create middleware.ts with `export default withAx({ manifest: axManifest });`, and export the matcher literal `export const config = { matcher: ['/((?!_next|api|.*\\\\..*|favicon|robots|health|status).*)'] };`. The middleware rewrites a request to its markdown twin only when the manifest lists one, never touches gated paths, and answers unknown URLs from detected agents with a 200 markdown wayfinding body — it composes with (never replaces) your existing middleware, and keeps your own gating (UA filters, bot walls) from ever blocking the published discovery artifacts."
   ]
 }

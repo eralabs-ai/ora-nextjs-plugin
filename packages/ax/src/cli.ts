@@ -941,7 +941,9 @@ async function defaultConfirm(question: string): Promise<boolean> {
   const { createInterface } = await import('node:readline/promises');
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
-    const answer = (await rl.question(`${question} [y/N] `)).trim().toLowerCase();
+    // The `[ax] ` prefix lands here, once, so every y/N the CLI asks matches the rest of its
+    // output (injected test confirms receive the bare question).
+    const answer = (await rl.question(`[ax] ${question} [y/N] `)).trim().toLowerCase();
     return answer === 'y' || answer === 'yes';
   } finally {
     rl.close();

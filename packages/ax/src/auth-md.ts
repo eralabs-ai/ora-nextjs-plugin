@@ -135,10 +135,15 @@ export function buildAuthMd(options: BuildAuthMdOptions): AuthMdPlan | undefined
           `[${surface.resourceMetadataPath}](${absoluteOrServedUrl(siteUrl, '', surface.resourceMetadataPath)})`,
       );
     }
+    // The docsUrl nudge only applies where a human must fetch a credential somewhere. An OAuth
+    // surface is self-service — the agent's client runs the sign-in flow — so with no docsUrl the
+    // honest line is how access actually works, not a nag for a page that has no job.
     lines.push(
       surface.auth.docsUrl !== undefined
         ? `- Get access: <${surface.auth.docsUrl}>`
-        : '- Get access: not documented yet. (Site owner: declare `auth.docsUrl` on this entry in ' +
+        : surface.auth.status === 'oauth2'
+          ? '- Get access: sign in through your MCP client via OAuth — no manually issued credentials.'
+          : '- Get access: not documented yet. (Site owner: declare `auth.docsUrl` on this entry in ' +
             'ax.config to link where credentials are obtained.)',
     );
     return lines.join('\n');

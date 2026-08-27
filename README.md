@@ -76,7 +76,12 @@ npx ax init
 
 It runs the same source-tree detection a build does (no `next build` needed), prints what it found,
 then asks **only what the code can't answer** — your production `siteUrl`, which detected surfaces
-agents can use without signing in (the rest are gated and never advertised as open), and one
+agents can use without signing in (the rest are gated and never advertised as open), how agents
+authenticate to the gated ones (API key/bearer with a docs URL — the realistic common case — or
+OAuth 2.0; written as a declared `auth` entry in `ax.config`. Endpoint questions only appear when
+the source tree has no OAuth to read: committed authorization-server metadata is adopted verbatim,
+and a wired RFC 9728 protected-resource route means agents discover the endpoints at runtime, so
+nothing is asked), and one
 pre-selected checklist of every opt-in scaffold, each line stating why agents need it — deselect
 anything you don't want, then press Enter. It writes an `ax.config.ts` (or `.js`,
 matching your project) with a one-line comment on every field, so the config it commits doubles as
@@ -235,7 +240,28 @@ const config: AxConfig = {
   // Hand-declared entries — e.g. docs/skills pointers zero-config detection can't guess at. An
   // `identifier` matching a detected entry overrides/extends it field-by-field (never replaces it
   // outright); anything else is appended as a new entry.
-  entries: [{ identifier: 'urn:example:docs', type: 'text/html', url: 'https://example.com/docs' }],
+  entries: [
+    { identifier: 'urn:example:docs', type: 'text/html', url: 'https://example.com/docs' },
+    // An entry's `auth` declares how agents authenticate when ax can't derive it — the endpoints
+    // detection can never see (a withMcpAuth-wrapped MCP mount is only ever detectable as
+    // "requires auth, scheme unknown"). Exactly the secret-free EntryAuth shape registries read:
+    // status, OAuth endpoint URLs, scope keys, and a human docs URL — never credentials. Declared
+    // once, it flows to the catalog entry, the MCP server card, and the generated /auth.md, and —
+    // like a detected scheme — marks the surface gated. URL fields must be absolute http(s); the
+    // config gate rejects anything else loudly, and a declared status that contradicts a detected
+    // one wins with a warning.
+    {
+      identifier: 'urn:air:example.com:mcp-server',
+      auth: {
+        status: 'oauth2',
+        oauth: {
+          authorizationEndpoint: 'https://auth.example.com/authorize',
+          tokenEndpoint: 'https://auth.example.com/token',
+        },
+        docsUrl: 'https://example.com/docs/auth',
+      },
+    },
+  ],
 };
 
 export default config;
@@ -415,6 +441,10 @@ declared), and where a human obtains credentials (`auth.docsUrl` when declared; 
 "not documented yet" pointer otherwise). Your gated routes should keep their honest 401/403 and
 point at it — the CLI prints that recommendation (`WWW-Authenticate` + a `Link` to `/auth.md`);
 ax never rewrites your handlers.
+
+When detection can only say "requires auth, scheme unknown" (a `withMcpAuth`-wrapped MCP mount),
+declare the real endpoints on that entry in `ax.config` `entries` (see the `auth` example above) —
+auth.md, the server card, and the catalog entry all pick the declaration up from that one place.
 
 ### The serving manifest — `ax manifest` and the `prebuild` slot
 

@@ -11,7 +11,7 @@
 //     signal (auth may live in middleware/a proxy). MCP gated-but-undescribable is `"unknown"`,
 //     never `"none"` and never `api_key`.
 
-import type { EntryAuth, EntryAuthOAuth } from './types.js';
+import type { EntryAuth, EntryAuthOAuth, EntryAuthStatus } from './types.js';
 
 /** Cap list fields so a descriptor never balloons (matches Ora's re-validation caps). */
 const MAX_SCOPES = 32;
@@ -35,6 +35,132 @@ export function safeHttpUrl(v: unknown): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+const ENTRY_AUTH_STATUSES: readonly EntryAuthStatus[] = ['oauth2', 'api_key', 'none', 'unknown'];
+
+// Query-parameter names that mark a URL as carrying a credential rather than pointing at one.
+// Declared endpoint/docs URLs are published verbatim in public artifacts, so a `?api_key=…` in one
+// is a secret leak the moment the catalog ships — and no legitimate *declared base* URL needs a
+// credential parameter (an authorization endpoint takes its parameters at request time).
+const CREDENTIAL_QUERY_PARAM_RE =
+  /^(api[_-]?key|key|token|access[_-]?token|id[_-]?token|secret|client[_-]?secret|signature|sig|password|auth|bearer|credential)$/i;
+
+/**
+ * The name of a credential-looking query parameter embedded in the URL, or undefined when clean.
+ * The second half of the secret-guard: {@link safeHttpUrl} keeps non-URLs (a pasted bare token)
+ * out of URL fields; this keeps tokens hidden *inside* an otherwise-valid URL out too.
+ */
+export function credentialQueryParam(url: string): string | undefined {
+  try {
+    for (const name of new URL(url).searchParams.keys()) {
+      if (CREDENTIAL_QUERY_PARAM_RE.test(name)) return name;
+    }
+  } catch {
+    /* not a parseable URL — safeHttpUrl already rejects these */
+  }
+  return undefined;
+}
+
+export interface SanitizeDeclaredAuthResult {
+  /** The sanitized descriptor, or undefined when the whole declaration is unusable. */
+  auth?: EntryAuth;
+  /** One human-readable line per field the sanitizer dropped — for the caller to warn with. */
+  dropped: string[];
+}
+
+/**
+ * Sanitizes a *developer-declared* auth descriptor (an entry override's `auth` in `ax.config`)
+ * through the same discipline detection-derived ones get: only the known `EntryAuth` fields cross,
+ * URL fields must pass {@link safeHttpUrl}, and lists are capped. The config schema already fails
+ * loudly on structural mistakes at load time; this is the belt-and-braces pass at the point of use,
+ * so a descriptor that reaches the catalog (and renders as links in auth.md) is secret-free
+ * whatever path it arrived by. Dropped fields are reported, never silently swallowed.
+ */
+export function sanitizeDeclaredAuth(value: unknown): SanitizeDeclaredAuthResult {
+  if (!isObject(value)) {
+    return { dropped: ['auth is not an object'] };
+  }
+  const status = value.status;
+  if (typeof status !== 'string' || !(ENTRY_AUTH_STATUSES as readonly string[]).includes(status)) {
+    return {
+      dropped: [
+        `auth.status ${JSON.stringify(status)} is not one of ${ENTRY_AUTH_STATUSES.join('/')}`,
+      ],
+    };
+  }
+
+  const dropped: string[] = [];
+  const auth: EntryAuth = { status: status as EntryAuthStatus };
+
+  const takeUrl = (raw: unknown, field: string): string | undefined => {
+    if (raw === undefined) return undefined;
+    const url = safeHttpUrl(raw);
+    if (url === undefined) {
+      dropped.push(`${field} is not an http(s) URL within ${MAX_STRING_CHARS} chars`);
+      return undefined;
+    }
+    const credentialParam = credentialQueryParam(url);
+    if (credentialParam !== undefined) {
+      dropped.push(
+        `${field} embeds a credential-like query parameter ("${credentialParam}=") — declared ` +
+          'URLs are published verbatim in public artifacts, so give a clean URL instead',
+      );
+      return undefined;
+    }
+    return url;
+  };
+
+  const docsUrl = takeUrl(value.docsUrl, 'auth.docsUrl');
+  if (docsUrl !== undefined) auth.docsUrl = docsUrl;
+
+  if (value.oauth !== undefined) {
+    if (!isObject(value.oauth)) {
+      dropped.push('auth.oauth is not an object');
+    } else {
+      const raw = value.oauth;
+      const oauth: EntryAuthOAuth = {};
+      const authorizationEndpoint = takeUrl(
+        raw.authorizationEndpoint,
+        'auth.oauth.authorizationEndpoint',
+      );
+      if (authorizationEndpoint !== undefined) oauth.authorizationEndpoint = authorizationEndpoint;
+      const tokenEndpoint = takeUrl(raw.tokenEndpoint, 'auth.oauth.tokenEndpoint');
+      if (tokenEndpoint !== undefined) oauth.tokenEndpoint = tokenEndpoint;
+      const registrationEndpoint = takeUrl(
+        raw.registrationEndpoint,
+        'auth.oauth.registrationEndpoint',
+      );
+      if (registrationEndpoint !== undefined) oauth.registrationEndpoint = registrationEndpoint;
+      const takeList = (rawList: unknown, field: string): string[] | undefined => {
+        if (rawList === undefined) return undefined;
+        if (!Array.isArray(rawList)) {
+          dropped.push(`${field} is not an array of strings`);
+          return undefined;
+        }
+        const list = rawList
+          .filter(
+            (s): s is string =>
+              typeof s === 'string' && s.length > 0 && s.length <= MAX_STRING_CHARS,
+          )
+          .slice(0, MAX_SCOPES);
+        if (list.length < rawList.length) dropped.push(`${field} entries beyond the caps`);
+        return list.length > 0 ? list : undefined;
+      };
+      const scopesSupported = takeList(raw.scopesSupported, 'auth.oauth.scopesSupported');
+      if (scopesSupported !== undefined) oauth.scopesSupported = scopesSupported;
+      const grantTypesSupported = takeList(
+        raw.grantTypesSupported,
+        'auth.oauth.grantTypesSupported',
+      );
+      if (grantTypesSupported !== undefined) oauth.grantTypesSupported = grantTypesSupported;
+      if (typeof raw.dcr === 'boolean') oauth.dcr = raw.dcr;
+      else if (raw.dcr !== undefined) dropped.push('auth.oauth.dcr is not a boolean');
+      if (Object.keys(oauth).length > 0) auth.oauth = oauth;
+    }
+  }
+
+  return { auth, dropped };
 }
 
 /** Minimal shape of the parts of an OpenAPI doc this reads. Everything is `unknown` until checked. */

@@ -7,13 +7,21 @@ import { loadAxConfig } from './config.js';
 import { detectAgentsMd } from './detect-agents-md.js';
 import { detectJsonLd } from './detect-json-ld.js';
 import { detectLlmsTxt } from './detect-llms-txt.js';
-import { buildMcpEntries, detectMcpMounts, type McpMount } from './detect-mcp.js';
+import { detectAuthMetadata } from './detect-auth-metadata.js';
+import { detectAuthProvider } from './detect-auth-provider.js';
+import {
+  applyDeclaredMountAuth,
+  buildMcpEntries,
+  detectMcpMounts,
+  mcpMountIdentifier,
+  type McpMount,
+} from './detect-mcp.js';
 import { detectOpenApi } from './detect-openapi.js';
 import { detectRobots } from './detect-robots.js';
 import { detectSitemap } from './detect-sitemap.js';
 import { detectWebMcp } from './detect-webmcp.js';
 import { buildDiscoveryRecommendations } from './discovery.js';
-import { applyEntryOverrides, entryUrlPath } from './entries.js';
+import { applyEntryOverrides, entryUrlPath, sanitizeOverrideAuth } from './entries.js';
 import { defaultIsGated, resolveGating, type GateTarget, type IsGated } from './gating.js';
 import { loadProjectEnv } from './load-project-env.js';
 import { buildMarkdownAlternateRecommendation } from './markdown-alternate.js';
@@ -21,7 +29,7 @@ import { planMarkdownTwins, type MarkdownTwinPlan } from './markdown-twins.js';
 import { buildMiddlewareWiringInstruction, detectMiddleware } from './middleware-wiring.js';
 import { loadNextConfig } from './next-config.js';
 import { buildOraChecks, type OraArtifact } from './ora-checks.js';
-import type { BuildReport, ReportArtifact, ReportScaffolds } from './report.js';
+import type { BuildReport, ReportArtifact, ReportAuth, ReportScaffolds } from './report.js';
 import { buildRouterModel } from './router-model.js';
 import type { JsonLdScaffoldResult } from './scaffold-json-ld.js';
 import { SPEC_VERSION } from './schema.js';
@@ -277,6 +285,74 @@ function applyGating(
 }
 
 /**
+ * Builds the report's structured auth section from the final published surface — the same
+ * post-gating mounts and entries auth.md reads, so the report and the guide can never disagree.
+ * Each gated surface carries its published scheme, whether it was config-declared, and (when
+ * there is one) the actionable gap as a `note` an agent can work directly.
+ */
+function buildReportAuth(options: {
+  cwd: string;
+  mounts: McpMount[];
+  entries: readonly CatalogEntry[];
+  basePath: string;
+  siteUrl: string | undefined;
+  /** Identifiers whose auth came from an ax.config declaration. */
+  declaredIds: ReadonlySet<string>;
+}): ReportAuth {
+  const { cwd, mounts, entries, basePath, siteUrl, declaredIds } = options;
+  const surfaces: ReportAuth['gatedSurfaces'] = [];
+
+  const surfaceNote = (auth: EntryAuth): string | undefined => {
+    if (auth.status === 'unknown') {
+      return (
+        'Gated but the scheme is undeclared — declare entries[].auth in ax.config (the ax init ' +
+        'wizard collects this) so agents know how to authenticate.'
+      );
+    }
+    if (auth.docsUrl === undefined) {
+      return (
+        'No docsUrl — declare where a human obtains access (entries[].auth.docsUrl) so an agent ' +
+        'can hand the sign-up step to its human.'
+      );
+    }
+    return undefined;
+  };
+
+  const push = (path: string, auth: EntryAuth, declared: boolean): void => {
+    const note = surfaceNote(auth);
+    surfaces.push({
+      path,
+      status: auth.status,
+      declared,
+      oauthEndpoints:
+        auth.oauth?.authorizationEndpoint !== undefined || auth.oauth?.tokenEndpoint !== undefined,
+      ...(auth.docsUrl !== undefined ? { docsUrl: auth.docsUrl } : {}),
+      ...(note !== undefined ? { note } : {}),
+    });
+  };
+
+  const multiple = mounts.length > 1;
+  for (const mount of mounts) {
+    if (mount.auth === undefined) continue;
+    const declared =
+      siteUrl !== undefined &&
+      declaredIds.has(mcpMountIdentifier(siteUrl, mount.pathname, multiple));
+    push(servedPath(basePath, mount.pathname), mount.auth, declared);
+  }
+  for (const entry of entries) {
+    if (entry.type === 'application/mcp-server-card+json') continue; // covered by its mount above
+    if (entry.auth === undefined || entry.auth.status === 'none') continue;
+    const path = entryUrlPath(entry);
+    if (path === undefined) continue;
+    push(path, entry.auth, declaredIds.has(entry.identifier));
+  }
+  surfaces.sort((a, b) => a.path.localeCompare(b.path));
+
+  const provider = detectAuthProvider(cwd);
+  return { gatedSurfaces: surfaces, ...(provider !== undefined ? { provider } : {}) };
+}
+
+/**
  * Next steps for checks a scaffold has *started* but can't finish. Both cases are still `actionable`
  * — a starter nobody has filled in and a component nobody imports publish nothing — but "the file
  * is there, do this one thing" is a very different instruction from "this is missing", and an agent
@@ -416,7 +492,23 @@ export async function generateCatalog(
   // dropped: the committed cards are the persistence layer for the gating decisions, so they must
   // exist to record them.
   const gating = resolveGating(config.isGated);
-  const detectedMounts = detectMcpMounts({ cwd, warn, router });
+
+  // Sanitize any config-declared entry `auth` once, up front — both consumers below (the MCP
+  // mount routing and the entry-override merge) then see the same clean, secret-free descriptors
+  // and dropped fields are warned exactly once.
+  const entryOverrides = sanitizeOverrideAuth(config.entries, warn);
+
+  // A declared auth on an MCP server's entry override refines the mount itself (not just the
+  // catalog entry): the mount is what the server card and the generated /auth.md read, and a
+  // declaration is how the developer supplies the endpoints detection can never derive
+  // (withMcpAuth only ever yields status "unknown"). Applied before gating resolves, so a
+  // declaration — like a detected wrapper — marks its mount gated and reviewed.
+  const detectedMounts = applyDeclaredMountAuth({
+    mounts: detectMcpMounts({ cwd, warn, router }),
+    overrides: entryOverrides,
+    siteUrl,
+    warn,
+  });
   const {
     mounts: mcpMounts,
     unreviewed: unreviewedMcpMounts,
@@ -504,7 +596,7 @@ export async function generateCatalog(
   // (`applyEntryOverrides().notes`) are meant for a build summary rather than surfaced as warnings
   // here. A gating decision, below, is worth warning about: a gated surface either carries an auth
   // descriptor or is dropped, and both are worth recording in the build output/report.
-  const { entries: overridden } = applyEntryOverrides(inferredEntries, config.entries);
+  const { entries: overridden } = applyEntryOverrides(inferredEntries, entryOverrides, warn);
   const entries = applyGating(overridden, gating, warn);
 
   // Reference the server cards from the catalog: an mcp entry's type promises card JSON, and the
@@ -570,6 +662,22 @@ export async function generateCatalog(
     siteDisplayName: site.displayName,
   });
   const authMdPlan = config.markdownTwins ? authMdCandidate : undefined;
+
+  // The report's structured auth section — same inputs as auth.md, plus which descriptors were
+  // config-declared and which known auth-provider dependency the app carries.
+  const authMetadata = detectAuthMetadata({ cwd, router });
+  const reportAuth = buildReportAuth({
+    cwd,
+    mounts: mcpMounts,
+    entries,
+    basePath,
+    siteUrl,
+    declaredIds: new Set(
+      entryOverrides
+        .filter((override) => override.auth !== undefined)
+        .map((override) => override.identifier),
+    ),
+  });
   if (authMdPlan !== undefined) {
     recommend(
       'Gated routes should keep their honest 401/403 status and point agents at the auth guide: ' +
@@ -682,6 +790,7 @@ export async function generateCatalog(
       },
       openapi: openApi,
     },
+    auth: reportAuth,
     scaffolds,
     // Planned values; the CLI reconciles `written`/`deleted`/`authMd` after it applies the plan
     // (post-review-gate), the same way it patches in the catalog path.
@@ -733,19 +842,42 @@ export async function generateCatalog(
           // With nothing gated there is nothing an auth guide could say — the checks are omitted,
           // never claimed addressed or held actionable.
           'auth.md': authMdCandidate === undefined ? 'not-applicable' : authMdPlan !== undefined,
+          // Addressed once no gated surface ships the undeclared "unknown" scheme.
+          'auth-declaration':
+            reportAuth.gatedSurfaces.length === 0
+              ? 'not-applicable'
+              : reportAuth.gatedSurfaces.every((surface) => surface.status !== 'unknown'),
+          // Only speaks when a gated surface declares OAuth: addressed once the RFC 9728
+          // metadata exists somewhere ax can see it (a wired route, a committed document, or a
+          // mount's declared resourceMetadataPath).
+          'oauth-metadata': !reportAuth.gatedSurfaces.some((s) => s.status === 'oauth2')
+            ? 'not-applicable'
+            : authMetadata.resourceMetadataRoute !== undefined ||
+              mcpMounts.some((mount) => mount.resourceMetadataPath !== undefined) ||
+              authMetadata.issuersSource?.includes('oauth-protected-resource') === true,
           // Negotiation is runtime behavior on page URLs: N/A with no page routes, addressed once
           // a middleware file wires the ax runtime entry.
           middleware:
             router.listPageRoutes().length === 0 ? 'not-applicable' : middlewareStatus.wiredToAx,
         },
-        oraCheckNotes({
-          llmsTxtScaffolded: llmsTxtResult.scaffoldedPath,
-          jsonLd: jsonLd.scaffold,
-          twinPlan,
-          authMdMissing: authMdCandidate !== undefined && authMdPlan === undefined,
-          mcpCardMissing: mcpMounts.length > 0 && serverCardPlan === undefined,
-          ...(middlewareWiring !== undefined ? { middlewareWiring } : {}),
-        }),
+        {
+          ...oraCheckNotes({
+            llmsTxtScaffolded: llmsTxtResult.scaffoldedPath,
+            jsonLd: jsonLd.scaffold,
+            twinPlan,
+            authMdMissing: authMdCandidate !== undefined && authMdPlan === undefined,
+            mcpCardMissing: mcpMounts.length > 0 && serverCardPlan === undefined,
+            ...(middlewareWiring !== undefined ? { middlewareWiring } : {}),
+          }),
+          'auth-declaration':
+            'A gated surface publishes auth.status "unknown" — declare entries[].auth in ' +
+            'ax.config (the ax init wizard collects this) so agents know the scheme.',
+          'oauth-metadata':
+            'OAuth is declared but no RFC 9728 protected-resource metadata is wired, so agents ' +
+            "can't discover the authorization server. Add your provider's protected-resource " +
+            'route (see report.auth.provider) or a static /.well-known/oauth-protected-resource ' +
+            'document.',
+        },
       ),
     },
     warnings,

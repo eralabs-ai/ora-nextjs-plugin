@@ -200,3 +200,56 @@ describe('loadAxConfig', () => {
     expect(config.siteUrl).toBe('https://from-env.example.com');
   });
 });
+
+describe('entry override auth (declared auth endpoint)', () => {
+  it('loads a config declaring an entry auth descriptor', async () => {
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      [
+        'export default {',
+        "  siteUrl: 'https://example.com',",
+        '  entries: [{',
+        "    identifier: 'urn:air:example.com:mcp-server',",
+        '    auth: {',
+        "      status: 'oauth2',",
+        "      oauth: { authorizationEndpoint: 'https://auth.example.com/authorize', tokenEndpoint: 'https://auth.example.com/token', scopesSupported: ['read:data'] },",
+        "      docsUrl: 'https://example.com/docs/auth',",
+        '    },',
+        '  }],',
+        '};',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const { config } = await loadAxConfig(dir);
+    expect(config.entries[0]?.auth?.status).toBe('oauth2');
+    expect(config.entries[0]?.auth?.oauth?.tokenEndpoint).toBe('https://auth.example.com/token');
+  });
+
+  it('rejects an unknown auth.status loudly', async () => {
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { entries: [{ identifier: 'urn:x:y:z', auth: { status: 'basic' } }] };\n",
+      'utf8',
+    );
+    await expect(loadAxConfig(dir)).rejects.toThrow(AxConfigError);
+  });
+
+  it('rejects a non-http(s) URL field loudly (the config-gate half of the secret-guard)', async () => {
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      'export default { entries: [{ identifier: "urn:x:y:z", auth: { status: "api_key", docsUrl: "javascript:alert(1)" } }] };\n',
+      'utf8',
+    );
+    await expect(loadAxConfig(dir)).rejects.toThrow(AxConfigError);
+  });
+
+  it('rejects an unrecognized key inside auth — typos fail loudly, unlike the open entry', async () => {
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      'export default { entries: [{ identifier: "urn:x:y:z", auth: { status: "api_key", apiKey: "sk-oops" } }] };\n',
+      'utf8',
+    );
+    await expect(loadAxConfig(dir)).rejects.toThrow(AxConfigError);
+  });
+});
