@@ -310,7 +310,7 @@ describe('runCli', () => {
     expect(existsSync(join(dir, REPORT_OUTPUT_PATH))).toBe(false);
   });
 
-  it('--report writes the machine-readable build report to .ora/report.json', async () => {
+  it('--report writes the machine-readable build report to .ax/report.json', async () => {
     writeMcpFixture(dir);
 
     const code = await runCli(['--report'], { ...io, cwd: dir });
@@ -545,7 +545,7 @@ describe('runCli review-before-publish gate', () => {
     expect(
       stdout.some((l) => l.includes('no gating decision on record') && l.includes('/mcp')),
     ).toBe(true);
-    const report = JSON.parse(readFileSync(join(dir, '.ora', 'report.json'), 'utf8'));
+    const report = JSON.parse(readFileSync(join(dir, '.ax', 'report.json'), 'utf8'));
     expect(report.mcp.unreviewedMounts).toEqual(['/mcp']);
   });
 

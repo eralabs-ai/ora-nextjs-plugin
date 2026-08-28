@@ -36,7 +36,7 @@ try {
   cpSync(template, app, {
     recursive: true,
     filter: (src) =>
-      !/node_modules|\.next|\.ora|report\.golden\.json|twins\.golden|\.well-known/.test(src),
+      !/node_modules|\.next|\.ax|report\.golden\.json|twins\.golden|\.well-known/.test(src),
   });
 
   // The fixture's tsconfig extends the shared fixtures preset one level up;
@@ -71,8 +71,8 @@ try {
     check(typeof catalog === 'object' && catalog !== null, 'catalog parses as JSON');
   }
 
-  const reportPath = join(app, '.ora', 'report.json');
-  check(existsSync(reportPath), 'report written to .ora/report.json');
+  const reportPath = join(app, '.ax', 'report.json');
+  check(existsSync(reportPath), 'report written to .ax/report.json');
   if (existsSync(reportPath)) {
     const report = JSON.parse(readFileSync(reportPath, 'utf8'));
     check(typeof report.generatedAt === 'string', 'report has a generatedAt timestamp');

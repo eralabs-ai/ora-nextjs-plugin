@@ -67,11 +67,11 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # Every fixture must `next build` — that build also runs each fixture's `ax --report`
-      # postbuild, writing a machine-readable report to its `.ora/report.json`.
+      # postbuild, writing a machine-readable report to its `.ax/report.json`.
       - name: Build fixtures
         run: pnpm fixtures:build
 
-      # Report-snapshot layer: diff each freshly-built `.ora/report.json` against its committed,
+      # Report-snapshot layer: diff each freshly-built `.ax/report.json` against its committed,
       # normalized golden (`fixtures/*/report.golden.json`). Proves the plugin's detections and
       # recommendations are exactly what we expect for a real build of each fixture.
       - name: Verify report snapshots

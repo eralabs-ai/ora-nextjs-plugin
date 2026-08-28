@@ -54,7 +54,7 @@ function writeAppWithPrerender(): void {
 }
 
 function readReport(): BuildReport {
-  return JSON.parse(readFileSync(join(dir, '.ora', 'report.json'), 'utf8')) as BuildReport;
+  return JSON.parse(readFileSync(join(dir, '.ax', 'report.json'), 'utf8')) as BuildReport;
 }
 
 describe('runCli markdown twins', () => {

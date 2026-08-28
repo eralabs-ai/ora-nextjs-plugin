@@ -1,6 +1,6 @@
 // Ora (ora.ai) scores a site's agent-readiness against a registry of named checks. This module is
 // the plugin's translation layer between "what this build found on disk" and "what Ora calls it",
-// so `.ora/report.json` speaks Ora's check language and a coding agent can close the loop: read the
+// so `.ax/report.json` speaks Ora's check language and a coding agent can close the loop: read the
 // report, act on what's still actionable, re-scan the deployed site.
 //
 // The mapping mirrors Ora's public check registry as of 2026-07-27 and is intentionally

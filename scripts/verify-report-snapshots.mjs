@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // Report-snapshot end-to-end layer. Every fixture whose `postbuild` runs `ax --report` emits a
-// machine-readable build report to `.ora/report.json` during a REAL `next build` (that build is
+// machine-readable build report to `.ax/report.json` during a REAL `next build` (that build is
 // itself the proof the fixture is a legitimate, buildable Next.js app). This script captures each
 // of those reports and diffs it against a committed golden — `fixtures/<name>/report.golden.json` —
 // so the plugin's detections and recommendations are pinned to exactly what we expect.
 //
-// The reports live in gitignored `.ora/` (build output); only the normalized goldens are tracked.
+// The reports live in gitignored `.ax/` (build output); only the normalized goldens are tracked.
 //
 // Usage (run AFTER `pnpm fixtures:build`, which produces the reports):
 //   node scripts/verify-report-snapshots.mjs            # verify against goldens (CI)
@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url';
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const fixturesDir = join(repoRoot, 'fixtures');
 
-const REPORT_PATH = join('.ora', 'report.json');
+const REPORT_PATH = join('.ax', 'report.json');
 const GOLDEN_FILE = 'report.golden.json';
 const TWINS_GOLDEN_DIR = 'twins.golden';
 const CARDS_GOLDEN_DIR = 'cards.golden';

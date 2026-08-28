@@ -50,7 +50,7 @@ tree is opt-in, listed in `ax.config`, and never overwrites a file you already h
 
 ## The report
 
-With `report: true` (the wizard's default), every build writes `.ora/report.json` — a
+With `report: true` (the wizard's default), every build writes `.ax/report.json` — a
 machine-readable summary of what was generated, detected, and skipped (and why), with every finding
 mapped to [Ora](https://ora.ai)'s agent-readiness checks as `addressed` or `actionable`. Point your
 coding agent at it after a build and let it work through what's left.
@@ -144,7 +144,7 @@ const config: AxConfig = {
   scaffoldJsonLd: true,
   // Generate markdown twins of your pages, plus /auth.md when surfaces are gated. Default on.
   markdownTwins: true,
-  // Write .ora/report.json, the machine-readable build report. Opt-in.
+  // Write .ax/report.json, the machine-readable build report. Opt-in.
   report: true,
   // Mark an artifact as gated behind auth so it's never advertised as open. Compose
   // defaultIsGated to extend the built-in floor (which gates /api/auth/** and /api/webhooks/**)

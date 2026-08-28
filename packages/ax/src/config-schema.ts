@@ -135,7 +135,7 @@ export interface AxConfig {
   /**
    * Write a machine-readable build report — everything the run detected, referenced, warned about,
    * and recommended — so a coding agent or CI step can read one JSON file instead of parsing log
-   * lines. `true` writes `.ora/report.json` (project-root-relative, not `public/` — it's build
+   * lines. `true` writes `.ax/report.json` (project-root-relative, not `public/` — it's build
    * output, never a published artifact); a string writes to that path instead. **Opt-in — defaults
    * to `false`.** The CLI's `--report[=path]` flag overrides this per run.
    */

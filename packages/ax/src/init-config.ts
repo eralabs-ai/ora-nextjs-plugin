@@ -121,7 +121,7 @@ export function renderAxConfig(answers: InitAnswers, target: ConfigFileTarget): 
       String(answers.markdownTwins),
     ),
     field(
-      'Write .ora/report.json — the machine-readable build report your coding agent reads to work ' +
+      'Write .ax/report.json — the machine-readable build report your coding agent reads to work ' +
         'through the remaining agent-readiness recommendations.',
       'report',
       String(answers.report),

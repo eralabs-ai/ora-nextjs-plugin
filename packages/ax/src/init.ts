@@ -668,7 +668,7 @@ const SETUP_OPTIONS: Array<{ value: SetupOptionValue; label: string; selected: t
   },
   {
     value: 'report',
-    label: 'Write .ora/report.json',
+    label: 'Write .ax/report.json',
     selected: true,
   },
   {
@@ -1070,7 +1070,7 @@ async function createServingManifest(cwd: string, stdout: (line: string) => void
 }
 
 function printNextSteps(ranBuild: boolean, stdout: (line: string) => void): void {
-  // Keep this short: the build's own output (and .ora/report.json) is where the per-artifact
+  // Keep this short: the build's own output (and .ax/report.json) is where the per-artifact
   // detail lives — no need to restate it here.
   stdout('[ax] ✓ All set — your site is ready to meet agents.');
   if (!ranBuild) {
