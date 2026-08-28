@@ -115,7 +115,7 @@ export function renderAxConfig(answers: InitAnswers, target: ConfigFileTarget): 
       String(answers.markdownTwins),
     ),
     field(
-      'Write .ora/report.json — the machine-readable build report your coding agent reads to work ' +
+      'Write .ax/report.json — the machine-readable build report your coding agent reads to work ' +
         'through the remaining agent-readiness recommendations.',
       'report',
       String(answers.report),
@@ -135,11 +135,11 @@ export function renderAxConfig(answers: InitAnswers, target: ConfigFileTarget): 
   const body = fields.join('\n');
 
   if (target.language === 'ts') {
-    return `import type { AxConfig } from '@ora-ai/ax';\n\nconst config: AxConfig = {\n${body}\n};\n\nexport default config;\n`;
+    return `import type { AxConfig } from '@ora-ai/ax-nextjs';\n\nconst config: AxConfig = {\n${body}\n};\n\nexport default config;\n`;
   }
 
   // JavaScript: no type annotation, but keep the AxConfig JSDoc so editors still complete the shape.
-  const jsdoc = "/** @type {import('@ora-ai/ax').AxConfig} */";
+  const jsdoc = "/** @type {import('@ora-ai/ax-nextjs').AxConfig} */";
   if (target.moduleSystem === 'cjs') {
     return `${jsdoc}\nconst config = {\n${body}\n};\n\nmodule.exports = config;\n`;
   }

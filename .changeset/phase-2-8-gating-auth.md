@@ -1,5 +1,5 @@
 ---
-'@ora-ai/ax': minor
+'@ora-ai/ax-nextjs': minor
 ---
 
 Add Phase 2.8: gating & auth. ax now reads each artifact's own auth declaration and emits a

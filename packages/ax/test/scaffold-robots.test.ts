@@ -146,7 +146,7 @@ describe('scaffoldRobots — appending to an existing robots.txt', () => {
     ]);
     const contents = readFileSync(robotsPath(), 'utf8');
     expect(contents).toContain('User-agent: *\nDisallow: /admin\n');
-    expect(contents).toContain('# Added by @ora-ai/ax');
+    expect(contents).toContain('# Added by @ora-ai/ax-nextjs');
   });
 
   it('is idempotent — running twice appends nothing the second time', () => {
@@ -180,7 +180,7 @@ describe('scaffoldRobots — appending to an existing robots.txt', () => {
     scaffoldRobots(options({ existingSource: robotsPath() }));
 
     const contents = readFileSync(robotsPath(), 'utf8');
-    expect(contents).toContain('Allow: /\n\n# Added by @ora-ai/ax');
+    expect(contents).toContain('Allow: /\n\n# Added by @ora-ai/ax-nextjs');
   });
 
   it('adds nothing when no site URL resolved, and says why', () => {

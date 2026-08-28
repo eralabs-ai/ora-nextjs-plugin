@@ -3,7 +3,7 @@ title: "Destinations & route network — Ora Air"
 description: "All 12 Ora Air destinations — airports, cities, and countries we fly to."
 canonical_url: https://flagship-pages-fixture.example.com/destinations
 last_updated: <last_updated>
-generated-by: "@ora-ai/ax"
+generated-by: "@ora-ai/ax-nextjs"
 ---
 
 # Where we fly

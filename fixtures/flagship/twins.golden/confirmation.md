@@ -3,7 +3,7 @@ title: "Booking confirmed — Ora Air"
 description: "Your Ora Air booking reference (PNR), itinerary summary, and receipt."
 canonical_url: https://flagship-fixture.example.com/confirmation
 last_updated: <last_updated>
-generated-by: "@ora-ai/ax"
+generated-by: "@ora-ai/ax-nextjs"
 ---
 
 # Booking confirmed — Ora Air

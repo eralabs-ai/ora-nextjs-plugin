@@ -3,7 +3,7 @@ title: "Setup guide"
 description: "How to set up the markdown-twins fixture."
 canonical_url: https://markdown-twins-fixture.example.com/guides/setup
 last_updated: <last_updated>
-generated-by: "@ora-ai/ax"
+generated-by: "@ora-ai/ax-nextjs"
 ---
 
 # Setup guide

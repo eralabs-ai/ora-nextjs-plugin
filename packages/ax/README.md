@@ -18,23 +18,6 @@ npx ax init
 
 That's it. From now on, every build generates your agent-friendly artifacts automatically.
 
-## Try it before release
-
-Before `@ora-ai/ax-nextjs` is published, try it from a tarball instead of an npm install:
-
-```sh
-pnpm build                                                # builds packages/ax (tsup → dist/); only dist ships
-cd packages/ax && pnpm pack                               # writes ora-ai-ax-nextjs-0.0.0.tgz
-cd /path/to/your-next-app
-npm install /absolute/path/to/ora-ai-ax-nextjs-0.0.0.tgz  # or a "file:" dependency in package.json
-npx ax init                                               # see "ax init" below
-next build
-```
-
-Confirm it worked the way you would after a real release — check `/.well-known/ai-catalog.json`,
-the `.md` twins, and `/404.md` (see "What ax does" below). Once `@ora-ai/ax-nextjs` is published,
-drop the tarball step and install normally, as shown above in "One-time setup".
-
 ## What ax does
 
 **Teach agents how to use your website — `agents.md`**
@@ -54,11 +37,9 @@ ax detects gated MCP and OpenAPI surfaces, lets you declare the real auth flow w
 see one, and publishes both in a generated `auth.md`. Your 401/403 responses stay honest — ax never
 touches your route handlers.
 
-**Steer lost agents back — `/404.md` wayfinding guide + middleware**
-Every build generates `/404.md` — your real routes and discovery artifacts, for agents that hit a
-dead end. Your 404 page stays yours: ax only asks it to carry one invisible
-`<link rel="alternate" type="text/markdown" href="/404.md">` tag. The runtime middleware serves the
-same wayfinding response directly for any URL that matches nothing.
+**Steer lost agents back — agent-aware 404 + wayfinding middleware**
+An opt-in `not-found.tsx` lists your real routes and discovery artifacts for agents that hit a dead
+end; the runtime middleware gives the same wayfinding response to any URL that matches nothing.
 
 **Tell agents who you are and gain their trust — JSON-LD scaffolding**
 An opt-in `Organization` JSON-LD component is scaffolded from your `package.json`. ax prints the
@@ -155,12 +136,13 @@ const config: AxConfig = {
   emit: 'static',
   // Scaffold a starter llms.txt filled with your real routes and artifacts. Opt-in.
   scaffoldLlmsTxt: true,
+  // Scaffold an agent-aware app/not-found.tsx plus a regenerated route-manifest module. Opt-in.
+  scaffoldAgent404: true,
   // Add Sitemap:/Agentmap: discovery lines to robots.txt (or write one if you have none). Opt-in.
   scaffoldRobots: true,
   // Scaffold an Organization JSON-LD component. Opt-in; ax never wires it into your layout.
   scaffoldJsonLd: true,
-  // Generate markdown twins of your pages, /auth.md when surfaces are gated, and the /404.md
-  // wayfinding guide lost agents continue from. Default on.
+  // Generate markdown twins of your pages, plus /auth.md when surfaces are gated. Default on.
   markdownTwins: true,
   // Write .ax/report.json, the machine-readable build report. Opt-in.
   report: true,
@@ -198,5 +180,5 @@ actionable message.
 ```
 packages/ax            the plugin / CLI (`@ora-ai/ax-nextjs`) — the npm package (3 runtime deps: ajv, ajv-formats, jiti)
 spec/                  vendored AI Catalog spec + hand-written JSON Schema + validator oracle
-fixtures/*             real Next.js apps — the flagship (a full demo-app fork) + single-axis fixtures; the test suite, docs examples, and eval corpus
+fixtures/*             minimal-but-real Next.js apps — the test suite, docs examples, and eval corpus
 ```

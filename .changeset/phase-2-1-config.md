@@ -1,5 +1,5 @@
 ---
-'@ora-ai/ax': minor
+'@ora-ai/ax-nextjs': minor
 ---
 
 Add Phase 2.1: `ax.config.*` (denylist/allowlist with a default-on

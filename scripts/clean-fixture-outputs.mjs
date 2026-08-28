@@ -7,7 +7,7 @@
 // goldens once (PR #20's fixture goldens); this script makes the regen hermetic instead of relying
 // on everyone's working tree being clean.
 //
-// Deliberately surgical, never `git clean`: only the exact well-known JSON artifacts, the `.ora/`
+// Deliberately surgical, never `git clean`: only the exact well-known JSON artifacts, the `.ax/`
 // report dir, and markdown files carrying ax's generated-by marker are removed. Hand-authored
 // fixture sources (e.g. markdown-twins/public/hand.md, discovery/public/agents.md) have no marker
 // and are never touched.
@@ -33,7 +33,7 @@ const GENERATED_JSON = [
 ];
 
 /** Matches the frontmatter marker every ax-generated markdown file carries. */
-const GENERATED_BY_RE = /^generated-by:\s*"@ora-ai\/ax"$/m;
+const GENERATED_BY_RE = /^generated-by:\s*"@ora-ai\/ax-nextjs"$/m;
 
 let removed = 0;
 
@@ -51,8 +51,8 @@ for (const name of readdirSync(fixturesDir)) {
     if (existsSync(path)) remove(path);
   }
 
-  const oraDir = join(fixtureRoot, '.ora');
-  if (existsSync(oraDir)) remove(oraDir);
+  const axDir = join(fixtureRoot, '.ax');
+  if (existsSync(axDir)) remove(axDir);
 
   // Generated markdown (twins + auth.md): identified by the marker, never by name, so
   // hand-authored .md fixture sources survive.

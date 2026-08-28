@@ -723,7 +723,7 @@ describe('runInit round-trip', () => {
     const catalog = JSON.parse(readFileSync(join(dir, CATALOG_OUTPUT_PATH), 'utf8'));
     expect(catalog.host.identifier).toBe('did:web:example.com');
     // The wizard opted into the report, so the build wrote one without a CLI flag.
-    expect(existsSync(join(dir, '.ora', 'report.json'))).toBe(true);
+    expect(existsSync(join(dir, '.ax', 'report.json'))).toBe(true);
   });
 
   // The regression CI missed: a normal run that gates *nothing* must leave the MCP mount published.

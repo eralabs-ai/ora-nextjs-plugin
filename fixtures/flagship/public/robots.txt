@@ -14,6 +14,6 @@ User-agent: BytedanceSpy
 Disallow: /
 
 
-# Added by @ora-ai/ax — machine-readable discovery pointers for agents.
+# Added by @ora-ai/ax-nextjs — machine-readable discovery pointers for agents.
 Sitemap: https://flagship-fixture.example.com/sitemap.xml
 Agentmap: https://flagship-fixture.example.com/.well-known/ai-catalog.json

@@ -43,7 +43,7 @@ fixtures/**/ax-manifest.js
 # output — the tracked artifact is the normalized golden (fixtures/*/report.golden.json), which the
 # report-snapshot layer diffs each freshly-built report against. The report itself embeds absolute
 # checkout paths and a wall-clock timestamp, so it is never committed.
-fixtures/**/.ora/
+fixtures/**/.ax/
 
 # npm pack build artifact (not committed in this repo; the demo repo commits its own copy)
 *.tgz

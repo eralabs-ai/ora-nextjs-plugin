@@ -1,0 +1,30 @@
+{
+  "mode": "pre",
+  "tag": "canary",
+  "initialVersions": {
+    "@ax-fixtures/bare": "0.0.0",
+    "@ax-fixtures/bare-js": "0.0.0",
+    "@ax-fixtures/config-overrides": "0.0.0",
+    "@ax-fixtures/deploy-variants": "0.0.0",
+    "@ax-fixtures/discovery": "0.0.0",
+    "@ax-fixtures/edge-cases": "0.0.0",
+    "@ax-fixtures/hybrid": "0.0.0",
+    "@ax-fixtures/llms-txt": "0.0.0",
+    "@ax-fixtures/markdown-twins": "0.0.0",
+    "@ax-fixtures/mcp-adapter": "0.0.0",
+    "@ax-fixtures/mcp-adapter-gated": "0.0.0",
+    "@ax-fixtures/mcp-multi-server": "0.0.0",
+    "@ax-fixtures/mdx-content": "0.0.0",
+    "@ax-fixtures/middleware": "0.0.0",
+    "@ax-fixtures/monorepo-root": "0.0.0",
+    "@ax-fixtures/monorepo-web": "0.0.0",
+    "@ax-fixtures/openapi": "0.0.0",
+    "@ax-fixtures/pages-bare": "0.0.0",
+    "@ax-fixtures/pages-mcp": "0.0.0",
+    "@ax-fixtures/pages-webmcp-declarative": "0.0.0",
+    "@ax-fixtures/webmcp-declarative": "0.0.0",
+    "@ax-fixtures/webmcp-imperative": "0.0.0",
+    "@ora-ai/ax-nextjs": "0.0.0"
+  },
+  "changesets": []
+}

@@ -22,7 +22,7 @@ export function namedServerCardUrlPath(serverName: string): string {
 }
 
 /** Default path for the opt-in machine-readable build report — build output, never `public/`. */
-export const REPORT_OUTPUT_PATH = join('.ora', 'report.json');
+export const REPORT_OUTPUT_PATH = join('.ax', 'report.json');
 
 /** App Router route segments that serve the catalog for the `'route'` emission target. */
 const CATALOG_ROUTE_SEGMENTS = ['.well-known', 'ai-catalog.json'];
@@ -217,7 +217,7 @@ function writeStaticFile(cwd: string, catalog: AiCatalog): string {
 
 /**
  * Atomically writes the machine-readable build report. `target` is `ax.config`'s `report` (or the
- * CLI flag) already resolved to truthy: `true` means the default `.ora/report.json`, a string is a
+ * CLI flag) already resolved to truthy: `true` means the default `.ax/report.json`, a string is a
  * project-root-relative (or absolute) path. There is no schema gate — the report *is* the
  * diagnostic channel, so it must always be writable, even for a run whose catalog failed.
  */

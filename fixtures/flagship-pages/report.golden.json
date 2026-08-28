@@ -192,30 +192,30 @@
     {
       "artifact": "markdown-twin",
       "path": "public/index.md",
-      "bytes": 539,
-      "chars": 537,
-      "tokens": 134
+      "bytes": 546,
+      "chars": 544,
+      "tokens": 136
     },
     {
       "artifact": "markdown-twin",
       "path": "public/destinations.md",
-      "bytes": 1327,
-      "chars": 1299,
-      "tokens": 325
+      "bytes": 1334,
+      "chars": 1306,
+      "tokens": 327
     },
     {
       "artifact": "auth.md",
       "path": "public/auth.md",
-      "bytes": 660,
-      "chars": 656,
-      "tokens": 164
+      "bytes": 667,
+      "chars": 663,
+      "tokens": 166
     },
     {
       "artifact": "404.md",
       "path": "public/404.md",
-      "bytes": 1111,
-      "chars": 1097,
-      "tokens": 274
+      "bytes": 1118,
+      "chars": 1104,
+      "tokens": 276
     }
   ],
   "ora": {

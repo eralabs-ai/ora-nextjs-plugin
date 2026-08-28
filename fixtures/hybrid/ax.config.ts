@@ -1,4 +1,4 @@
-import type { AxConfig } from '@ora-ai/ax';
+import type { AxConfig } from '@ora-ai/ax-nextjs';
 
 // `siteUrl` makes the fixture deterministic (see the mcp-adapter fixture for the full rationale).
 // This app has BOTH an `app/` and a `pages/` directory (a common incremental-migration state). The

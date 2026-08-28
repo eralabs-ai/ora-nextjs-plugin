@@ -19,7 +19,7 @@ import { buildArtifactUrl } from './site-url.js';
 // the scaffold shows how, commented out, and leaves the decision with them.
 
 /** Marks the block ax appends, so a reader (and the next run) can tell what came from here. */
-const APPEND_MARKER = '# Added by @ora-ai/ax';
+const APPEND_MARKER = '# Added by @ora-ai/ax-nextjs';
 
 export type RobotsScaffoldAction = 'created' | 'appended' | 'unchanged' | 'skipped';
 
@@ -186,7 +186,7 @@ function robotsSource(pointers: string[]): string {
         '# build time, and these pointers have to be absolute URLs. Set siteUrl in ax.config (or a\n' +
         '# SITE_URL env var) and re-run — ax appends the missing lines to this file.\n';
 
-  return `# robots.txt — scaffolded by @ora-ai/ax. This file is yours: edit it freely. ax never
+  return `# robots.txt — scaffolded by @ora-ai/ax-nextjs. This file is yours: edit it freely. ax never
 # overwrites it; on later builds it only appends a missing "Sitemap:" or "Agentmap:" line, in a
 # block marked "${APPEND_MARKER}".
 

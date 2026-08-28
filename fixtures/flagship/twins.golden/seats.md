@@ -3,7 +3,7 @@ title: "Choose your seat — Ora Air"
 description: "Pick your seat from the live cabin map — Economy, Premium, and Business with per-seat fees shown upfront."
 canonical_url: https://flagship-fixture.example.com/seats
 last_updated: <last_updated>
-generated-by: "@ora-ai/ax"
+generated-by: "@ora-ai/ax-nextjs"
 ---
 
 # Choose your seat — Ora Air

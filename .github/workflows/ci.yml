@@ -56,10 +56,10 @@ jobs:
       # lockfile is unchanged and short-circuits as "already up to date" without
       # re-linking anything).
       - name: Install ax's dependencies
-        run: pnpm install --filter ax --frozen-lockfile
+        run: pnpm install --filter @ora-ai/ax-nextjs --frozen-lockfile
 
       - name: Build ax
-        run: pnpm --filter ax run build
+        run: pnpm --filter @ora-ai/ax-nextjs run build
 
       # Now install everything else. dist/bin.js exists, so the fixtures' `ax`
       # bin shims (needed for their `postbuild` step) link correctly this time.
@@ -67,11 +67,11 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # Every fixture must `next build` — that build also runs each fixture's `ax --report`
-      # postbuild, writing a machine-readable report to its `.ora/report.json`.
+      # postbuild, writing a machine-readable report to its `.ax/report.json`.
       - name: Build fixtures
         run: pnpm fixtures:build
 
-      # Report-snapshot layer: diff each freshly-built `.ora/report.json` against its committed,
+      # Report-snapshot layer: diff each freshly-built `.ax/report.json` against its committed,
       # normalized golden (`fixtures/*/report.golden.json`). Proves the plugin's detections and
       # recommendations are exactly what we expect for a real build of each fixture.
       - name: Verify report snapshots
@@ -98,3 +98,65 @@ jobs:
 
       - name: ARD conformance (official tool)
         run: pnpm conformance
+
+  package:
+    name: pack + publint + attw
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --filter @ora-ai/ax-nextjs --frozen-lockfile
+
+      - name: Build
+        run: pnpm --filter @ora-ai/ax-nextjs run build
+
+      # Lints the publishable shape: exports map, files allowlist, main/types agreement.
+      - name: publint
+        run: pnpm dlx publint packages/ax
+
+      # Verifies TypeScript consumers actually resolve the declared types.
+      # esm-only profile: the package intentionally ships no CJS build.
+      - name: Are the types wrong
+        run: pnpm dlx @arethetypeswrong/cli --pack packages/ax --profile esm-only
+
+      - name: Pack tarball
+        run: pnpm --filter @ora-ai/ax-nextjs pack --pack-destination "$RUNNER_TEMP"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tarball
+          path: ${{ runner.temp }}/*.tgz
+          retention-days: 7
+
+  tarball-e2e:
+    name: tarball e2e (node ${{ matrix.node }})
+    needs: package
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 18.18 is the floor `engines` claims; test exactly what we promise.
+        node: ['18.18', '20', '22']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: tarball
+          path: ${{ runner.temp }}/tarball
+
+      # Plain node + npm on purpose: a consumer's environment, not the workspace's.
+      - name: Install packed tarball into a scratch app and build it
+        run: node scripts/tarball-e2e.mjs "$RUNNER_TEMP"/tarball/*.tgz

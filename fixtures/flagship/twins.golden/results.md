@@ -3,7 +3,7 @@ title: "Flight results — Ora Air"
 description: "Compare one-way Ora Air fares and cabins for your route and date."
 canonical_url: https://flagship-fixture.example.com/results
 last_updated: <last_updated>
-generated-by: "@ora-ai/ax"
+generated-by: "@ora-ai/ax-nextjs"
 ---
 
 # Flight results — Ora Air

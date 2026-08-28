@@ -3,7 +3,7 @@ title: "Ora Air — one-way fares across four continents"
 description: "Book one-way flights across 12 destinations on four continents. Flexible fares, award-winning cabins, and Ora Miles rewards — search, pick a seat, and pay in minutes."
 canonical_url: https://flagship-fixture.example.com/
 last_updated: <last_updated>
-generated-by: "@ora-ai/ax"
+generated-by: "@ora-ai/ax-nextjs"
 ---
 
 Fly beyond expectations

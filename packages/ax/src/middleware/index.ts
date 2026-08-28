@@ -1,4 +1,4 @@
-// The `@ora-ai/ax/middleware` runtime entry: content negotiation for AI agents, driven entirely by
+// The `@ora-ai/ax-nextjs/middleware` runtime entry: content negotiation for AI agents, driven entirely by
 // the build-generated serving manifest. Detected agents (and any client sending
 // `Accept: text/markdown`) receive the markdown ax generated — the twin of the page they asked
 // for, or a wayfinding body when the URL matches no route — with the response headers a negotiated

@@ -1,4 +1,4 @@
-import type { AxConfig } from '@ora-ai/ax';
+import type { AxConfig } from '@ora-ai/ax-nextjs';
 
 // A literal `siteUrl` keeps this fixture's emitted output identical everywhere it's built. The
 // `isGated` matcher restates the built-in floor (inlined — see the runtime default's rationale)

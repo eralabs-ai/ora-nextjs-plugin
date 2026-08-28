@@ -50,7 +50,7 @@ Options:
                     Run this from your Next.js app's root, typically as a "postbuild" script.
   --report,
   --report=<path>   Also write a machine-readable build report (entries, detected artifacts,
-                    WebMCP tools, warnings, recommendations) to .ora/report.json, or to <path>.
+                    WebMCP tools, warnings, recommendations) to .ax/report.json, or to <path>.
                     Can also be set persistently via ax.config's "report".
   --yes, -y         Skip the confirmation prompt before publishing a new catalog. Required to
                     write in CI / non-interactive shells (see the exposure summary below).

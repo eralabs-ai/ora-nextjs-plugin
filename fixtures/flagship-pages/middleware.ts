@@ -1,4 +1,4 @@
-import { withAx } from '@ora-ai/ax/middleware';
+import { withAx } from '@ora-ai/ax-nextjs/middleware';
 
 import { axManifest } from './ax-manifest';
 

@@ -3,7 +3,7 @@ title: "Checkout — Ora Air"
 description: "Passenger details and payment for your Ora Air booking. Demo payments only — use test card 4242 4242 4242 4242."
 canonical_url: https://flagship-fixture.example.com/checkout
 last_updated: <last_updated>
-generated-by: "@ora-ai/ax"
+generated-by: "@ora-ai/ax-nextjs"
 ---
 
 # Checkout — Ora Air

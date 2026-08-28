@@ -16,5 +16,5 @@ An App Router app exercising every rung of the markdown-twin ladder in one build
 - `/blog/[slug]` — a dynamic route (**Tier 3 refusal**: no statically knowable URL, counted and
   recommended, never guessed).
 
-**Exercises:** twin generation + skip reasons in `.ora/report.json`, the twin snapshots under
+**Exercises:** twin generation + skip reasons in `.ax/report.json`, the twin snapshots under
 `twins.golden/` (normalized `last_updated`), and the born-passing frontmatter assertions.

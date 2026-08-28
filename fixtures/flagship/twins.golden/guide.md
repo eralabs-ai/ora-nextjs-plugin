@@ -2,7 +2,7 @@
 title: "Booking guide"
 canonical_url: https://flagship-fixture.example.com/guide
 last_updated: <last_updated>
-generated-by: "@ora-ai/ax"
+generated-by: "@ora-ai/ax-nextjs"
 ---
 
 # Booking guide

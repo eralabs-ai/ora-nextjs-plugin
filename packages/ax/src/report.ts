@@ -11,7 +11,7 @@ import type { EmissionTarget } from './write.js';
 // The machine-readable twin of the CLI's stdout: everything the build detected, referenced,
 // warned about, and recommended, in one JSON file a coding agent (or CI step) can read directly
 // instead of parsing log lines. The report is *output about the build*, not a published artifact —
-// it lands in `.ora/` in the project root, never in `public/`, and is opt-in (`report` in
+// it lands in `.ax/` in the project root, never in `public/`, and is opt-in (`report` in
 // ax.config, or the CLI's `--report`).
 
 /** Presence of one detected discovery/access artifact (robots.txt, sitemap, ...). */
@@ -172,7 +172,7 @@ export interface BuildReport {
   };
   /**
    * The negotiation middleware: whether a `middleware.{ts,js}` exists and whether it wires the
-   * `@ora-ai/ax/middleware` runtime entry. When it doesn't, the wiring instructions live in the
+   * `@ora-ai/ax-nextjs/middleware` runtime entry. When it doesn't, the wiring instructions live in the
    * `markdown-negotiation` ora-check note and in `recommendations` — ax never writes or edits the
    * user's middleware singleton.
    */

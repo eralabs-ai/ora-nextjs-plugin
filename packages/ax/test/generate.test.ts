@@ -154,7 +154,7 @@ describe('generateCatalog notFoundMdPlan', () => {
     expect(notFoundMdPlan?.content).toContain('[/docs](/docs)');
     // The catalog is written alongside this run, so the guide may link it before it's on disk.
     expect(notFoundMdPlan?.content).toContain('/.well-known/ai-catalog.json');
-    expect(notFoundMdPlan?.content).toContain('generated-by: "@ora-ai/ax"');
+    expect(notFoundMdPlan?.content).toContain('generated-by: "@ora-ai/ax-nextjs"');
   });
 
   it('plans no /404.md when markdownTwins is off or no router exists', async () => {

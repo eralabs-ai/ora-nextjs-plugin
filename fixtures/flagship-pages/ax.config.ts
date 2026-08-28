@@ -1,4 +1,4 @@
-import type { AxConfig } from '@ora-ai/ax';
+import type { AxConfig } from '@ora-ai/ax-nextjs';
 
 // The flagship app's information architecture ported to the Pages Router — same siteUrl
 // convention, same gated page, same declared auth for the gated MCP mount. What differs is

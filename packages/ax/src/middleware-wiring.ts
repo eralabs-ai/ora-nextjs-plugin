@@ -14,7 +14,7 @@ import type { RouterModel } from './router-model.js';
 // the JSON-LD wiring pattern, phrased so a coding agent can apply them verbatim.
 
 /** The import specifier consumers wire — its presence in a middleware file means "already wired". */
-export const MIDDLEWARE_ENTRY_SPECIFIER = '@ora-ai/ax/middleware';
+export const MIDDLEWARE_ENTRY_SPECIFIER = '@ora-ai/ax-nextjs/middleware';
 
 /**
  * The recommended `config.matcher` literal, duplicated here from the runtime entry's `axMatcher`

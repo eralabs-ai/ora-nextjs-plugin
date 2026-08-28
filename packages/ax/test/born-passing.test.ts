@@ -221,7 +221,7 @@ function expectValidGeneratedMarkdown(body: string): void {
   expect(frontmatter).toMatch(/^title: /m);
   expect(frontmatter).toMatch(/^canonical_url: /m);
   expect(frontmatter).toMatch(/^last_updated: /m);
-  expect(frontmatter).toMatch(/^generated-by: "@ora-ai\/ax"$/m);
+  expect(frontmatter).toMatch(/^generated-by: "@ora-ai\/ax-nextjs"$/m);
   expect(body.length).toBeLessThanOrEqual(100_000);
   expect(fenceMarkerCount(body) % 2).toBe(0);
 }

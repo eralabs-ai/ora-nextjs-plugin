@@ -12,7 +12,7 @@
 // symlink to the fixture's own node_modules. pnpm lays fixture deps out as relative symlinks into
 // the workspace store (a plain `cp -R` dangles; `cp -RL` breaks the .bin shims' relative imports),
 // but Node's resolver walks through a symlinked node_modules transparently — and the linked
-// @ora-ai/ax is the workspace package, so the harness always exercises the current dist.
+// @ora-ai/ax-nextjs is the workspace package, so the harness always exercises the current dist.
 //
 // Run after `pnpm fixtures:build` (the fixture's node_modules must be linked and ax's dist built).
 
@@ -99,7 +99,7 @@ async function build(dir) {
 // The same normalization verify-report-snapshots.mjs applies: strip the copy's absolute root from
 // every path, redact the wall-clock timestamp. What's left must be byte-stable across rebuilds.
 function normalizedReport(dir) {
-  let raw = readFileSync(join(dir, '.ora', 'report.json'), 'utf8');
+  let raw = readFileSync(join(dir, '.ax', 'report.json'), 'utf8');
   // macOS tmpdirs surface under both /var/... and the /private/var/... realpath.
   for (const root of [dir, join('/private', dir)]) raw = raw.split(`${root}/`).join('');
   const obj = JSON.parse(raw);
@@ -120,7 +120,7 @@ function normalizedTwins(dir) {
       if (statSync(abs).isDirectory()) stack.push(abs);
       else if (name.endsWith('.md')) {
         const content = readFileSync(abs, 'utf8');
-        if (/^generated-by:\s*"@ora-ai\/ax"$/m.test(content)) {
+        if (/^generated-by:\s*"@ora-ai\/ax-nextjs"$/m.test(content)) {
           files.set(
             relative(publicDir, abs),
             content.replace(/^last_updated: .*$/m, 'last_updated: <last_updated>'),
@@ -156,7 +156,10 @@ await scenario(
     // Strip the committed robots block so build 1 exercises the real append path (in the committed
     // fixture the block is pre-applied precisely so in-tree builds are no-ops).
     edit(dir, join('public', 'robots.txt'), (content) =>
-      content.replace(/\n# Added by @ora-ai\/ax[^\n]*\n(?:(?:Agentmap|Sitemap):[^\n]*\n?)*/g, '\n'),
+      content.replace(
+        /\n# Added by @ora-ai\/ax-nextjs[^\n]*\n(?:(?:Agentmap|Sitemap):[^\n]*\n?)*/g,
+        '\n',
+      ),
     );
 
     // Build 1 bootstraps; build 2 is the steady state. The two are NOT byte-identical by design:
@@ -189,7 +192,7 @@ await scenario(
     );
     // Regression guard: the stale-twin sweep once misclassified ax's own 404.md as an orphaned
     // twin on every build after the first (deleted + rewritten in the same run, phantom entry).
-    const report = JSON.parse(readFileSync(join(dir, '.ora', 'report.json'), 'utf8'));
+    const report = JSON.parse(readFileSync(join(dir, '.ax', 'report.json'), 'utf8'));
     check(
       'a rebuild deletes nothing when nothing changed',
       report.markdownTwins.deleted.length === 0,
@@ -206,7 +209,7 @@ await scenario(
     // no remnant of the previous method behind. Build 1 declares api_key, build 2 flips back to
     // oauth2, covering both directions of the change.
     const readAuthState = () => {
-      const report = JSON.parse(readFileSync(join(dir, '.ora', 'report.json'), 'utf8'));
+      const report = JSON.parse(readFileSync(join(dir, '.ax', 'report.json'), 'utf8'));
       const catalog = JSON.parse(
         readFileSync(join(dir, 'public', '.well-known', 'ai-catalog.json'), 'utf8'),
       );
@@ -369,7 +372,7 @@ export default function PressPage() {
       tools.includes('get_baggage_policy'),
       tools.join(','),
     );
-    const report = JSON.parse(readFileSync(join(dir, '.ora', 'report.json'), 'utf8'));
+    const report = JSON.parse(readFileSync(join(dir, '.ax', 'report.json'), 'utf8'));
     const publicMount = report.mcp.mounts.find((m) => m.pathname === '/api/public/mcp');
     check(
       'the new tool lands in report.mcp.mounts',
