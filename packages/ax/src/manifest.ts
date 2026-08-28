@@ -54,6 +54,8 @@ export interface ServingManifestData {
     mcpServerCards?: string[];
     llmsTxt?: string;
     authMd?: string;
+    /** The generated 404 wayfinding guide (`/404.md`), when present. */
+    notFoundMd?: string;
     openapi?: string;
   };
 }
@@ -92,6 +94,7 @@ export function buildServingManifest(options: BuildServingManifestOptions): Serv
       const segments = pathSegments(file.relativeDir);
       const name = base.slice(0, -'.md'.length);
       if (segments.length === 0 && name === 'auth') continue; // the auth guide, not a route twin
+      if (segments.length === 0 && name === '404') continue; // the 404 wayfinding guide, not a route twin
       const route =
         name === 'index' && segments.length === 0
           ? '/'
@@ -165,6 +168,9 @@ export function buildServingManifest(options: BuildServingManifestOptions): Serv
   }
   if (existsSync(join(cwd, 'public', 'auth.md'))) {
     artifacts.authMd = servedPath(basePath, '/auth.md');
+  }
+  if (existsSync(join(cwd, 'public', '404.md'))) {
+    artifacts.notFoundMd = servedPath(basePath, '/404.md');
   }
   if (existsSync(join(cwd, 'public', 'openapi.json'))) {
     artifacts.openapi = servedPath(basePath, '/openapi.json');

@@ -271,7 +271,18 @@ export {
   type WebMcpToolSite,
 } from './detect-webmcp.js';
 
-export { manageAgent404, type Agent404Options, type Agent404Result } from './agent-404.js';
+export {
+  applyNotFoundMdPlan,
+  buildNotFoundMd,
+  detectAgent404,
+  NOT_FOUND_MD_PATHNAME,
+  type Agent404Options,
+  type Agent404Result,
+  type ApplyNotFoundMdResult,
+  type BuildNotFoundMdOptions,
+  type Detected404Page,
+  type NotFoundMdPlan,
+} from './agent-404.js';
 
 export {
   applyMarkdownHeaders,

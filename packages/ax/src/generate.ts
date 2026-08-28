@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 
-import { manageAgent404 } from './agent-404.js';
+import { buildNotFoundMd, detectAgent404, type NotFoundMdPlan } from './agent-404.js';
 import { buildAuthMd, type AuthMdPlan } from './auth-md.js';
 import { loadAxConfig } from './config.js';
 import { detectAgentsMd } from './detect-agents-md.js';
@@ -24,6 +24,7 @@ import { buildDiscoveryRecommendations } from './discovery.js';
 import { applyEntryOverrides, entryUrlPath, sanitizeOverrideAuth } from './entries.js';
 import { defaultIsGated, resolveGating, type GateTarget, type IsGated } from './gating.js';
 import { loadProjectEnv } from './load-project-env.js';
+import { buildServingManifest } from './manifest.js';
 import { buildMarkdownAlternateRecommendation } from './markdown-alternate.js';
 import { planMarkdownTwins, type MarkdownTwinPlan } from './markdown-twins.js';
 import { buildMiddlewareWiringInstruction, detectMiddleware } from './middleware-wiring.js';
@@ -96,6 +97,12 @@ export interface GenerateCatalogResult {
   twinPlan: MarkdownTwinPlan;
   /** The generated `/auth.md`, when gated surfaces exist. Written by the CLI with the twins. */
   authMdPlan?: AuthMdPlan;
+  /**
+   * The generated `/404.md` wayfinding guide (same body the negotiation middleware serves for
+   * unknown URLs). Written by the CLI with the twins; absent when `markdownTwins` is off or the
+   * project has no router.
+   */
+  notFoundMdPlan?: NotFoundMdPlan;
 }
 
 /** Presence-shape shared by the detect-and-recommend detectors (`{found, source?}`). */
@@ -697,16 +704,46 @@ export async function generateCatalog(
     recommend(message);
   }
 
-  // Agent-aware 404: detect-and-recommend, or (opted in) scaffold a not-found page whose
-  // route-manifest data module is regenerated every build. Runs after the artifact detectors so
-  // its discovery links only reference what actually exists.
-  const agent404 = manageAgent404({
+  // The generated /404.md wayfinding guide: the same body the negotiation middleware serves for
+  // unknown URLs, as a fixed-path artifact the site's own 404 page links via
+  // <link rel="alternate" type="text/markdown">. Rendered from serving-manifest data with this
+  // run's own outputs overlaid (planned twins, the auth guide, the catalog and cards written
+  // alongside), so the guide describes the build it ships with, not the previous one. Gated on
+  // markdownTwins like auth.md — the same class of regenerated public markdown artifact — and
+  // skipped for a project with no router (nothing is a page miss there).
+  let notFoundMdPlan: NotFoundMdPlan | undefined;
+  if (config.markdownTwins && router.routers.length > 0) {
+    const notFoundManifest = buildServingManifest({ cwd, router, isGated: gating, basePath });
+    notFoundManifest.artifacts.aiCatalog ??= servedPath(basePath, '/.well-known/ai-catalog.json');
+    if (llmsTxtResult.found) {
+      notFoundManifest.artifacts.llmsTxt ??= servedPath(basePath, '/llms.txt');
+    }
+    if (authMdPlan !== undefined) notFoundManifest.artifacts.authMd ??= authMdPlan.servedPath;
+    if (serverCardPlan !== undefined) {
+      notFoundManifest.artifacts.mcpServerCard ??= servedPath(
+        basePath,
+        '/.well-known/mcp/server-card.json',
+      );
+    }
+    for (const twin of twinPlan.writes) {
+      notFoundManifest.markdownTwins[servedPath(basePath, twin.route)] = twin.servedPath;
+    }
+    notFoundMdPlan = buildNotFoundMd({
+      manifest: notFoundManifest,
+      siteUrl,
+      basePath,
+      siteDisplayName: site.displayName,
+    });
+  }
+
+  // Agent-aware 404: detect-and-recommend only. The human-visible 404 page (root and per-segment
+  // not-found files alike) is the user's design domain — ax asks each detected page to carry the
+  // one alternate-link tag pointing at the /404.md guide, and asks for a standard 404 page when
+  // none exists at all.
+  const agent404 = detectAgent404({
     cwd,
-    scaffold: config.scaffoldAgent404,
     basePath,
-    llmsTxtFound: llmsTxtResult.found,
-    sitemapFound: sitemap.found,
-    warn,
+    notFoundMdPlanned: notFoundMdPlan !== undefined,
     recommend,
     router,
   });
@@ -772,7 +809,8 @@ export async function generateCatalog(
     agent404: {
       notFoundPresent: agent404.notFoundPresent,
       agentAware: agent404.agentAware,
-      ...(agent404.source !== undefined ? { source: agent404.source } : {}),
+      pages: agent404.pages,
+      // `markdownGuide` is reconciled by the CLI once /404.md is on disk, like markdownTwins.
     },
     middleware: {
       present: middlewareStatus.present,
@@ -892,6 +930,7 @@ export async function generateCatalog(
     reportTarget: config.report,
     twinPlan,
     ...(authMdPlan !== undefined ? { authMdPlan } : {}),
+    ...(notFoundMdPlan !== undefined ? { notFoundMdPlan } : {}),
     ...(serverCardPlan ? { serverCardPlan } : {}),
     ...(llmsTxtResult.scaffoldedBody !== undefined
       ? { scaffoldedLlmsTxtBody: llmsTxtResult.scaffoldedBody }

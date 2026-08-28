@@ -192,6 +192,24 @@ describe('withAx — wayfinding for unknown URLs', () => {
     expect(body.length).toBeLessThan(100_000);
   });
 
+  it('renders a URL-neutral body without a pathname — the static /404.md variant', () => {
+    const body = renderWayfinding(manifest);
+    expect(body).toMatch(/^# Page not found/);
+    expect(body).toContain('The URL you requested does not exist');
+    expect(body).toContain('[/docs](/docs) — markdown: [/docs.md](/docs.md)');
+  });
+
+  it('never lists gated routes — a login-walled page is no place to send a lost agent', () => {
+    const gated: AxServingManifest = {
+      ...manifest,
+      routes: ['/docs', '/members'],
+      gatedPaths: ['/members'],
+    };
+    const body = renderWayfinding(gated, '/missing');
+    expect(body).toContain('[/docs](/docs)');
+    expect(body).not.toContain('/members');
+  });
+
   it('caps the route list and says so', () => {
     const big: AxServingManifest = {
       ...manifest,
