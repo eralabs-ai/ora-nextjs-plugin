@@ -268,14 +268,15 @@ describe('generateCatalog against the Pages Router fixtures', () => {
     expect(validateCatalogArd(catalog).valid).toBe(true);
     expect(report.routers).toEqual(['pages']);
 
-    // pages-bare ships a plain pages/404.tsx: detected, but not agent-aware — so a "signpost it"
-    // recommendation, proving the Pages Router 404 convention is recognized (not just app/not-found).
+    // pages-bare ships a plain pages/404.tsx: detected, but not agent-aware — so a "link the
+    // wayfinding guide" recommendation, proving the Pages Router 404 convention is recognized
+    // (not just app/not-found).
     expect(report.agent404).toMatchObject({
       notFoundPresent: true,
       agentAware: false,
-      source: join('pages', '404.tsx'),
+      pages: [{ source: join('pages', '404.tsx'), agentAware: false }],
     });
-    expect(recommendations.some((r) => r.includes("doesn't point agents anywhere"))).toBe(true);
+    expect(recommendations.some((r) => r.includes('doesn’t point agents anywhere'))).toBe(true);
   });
 
   it('lists Pages Router content routes, excluding special/dynamic/error files', () => {

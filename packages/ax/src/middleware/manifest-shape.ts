@@ -30,6 +30,7 @@ export interface AxServingManifest {
     readonly mcpServerCards?: readonly string[];
     readonly llmsTxt?: string;
     readonly authMd?: string;
+    readonly notFoundMd?: string;
     readonly openapi?: string;
   };
 }

@@ -37,9 +37,11 @@ ax detects gated MCP and OpenAPI surfaces, lets you declare the real auth flow w
 see one, and publishes both in a generated `auth.md`. Your 401/403 responses stay honest — ax never
 touches your route handlers.
 
-**Steer lost agents back — agent-aware 404 + wayfinding middleware**
-An opt-in `not-found.tsx` lists your real routes and discovery artifacts for agents that hit a dead
-end; the runtime middleware gives the same wayfinding response to any URL that matches nothing.
+**Steer lost agents back — `/404.md` wayfinding guide + middleware**
+Every build generates `/404.md` — your real routes and discovery artifacts, for agents that hit a
+dead end. Your 404 page stays yours: ax only asks it to carry one invisible
+`<link rel="alternate" type="text/markdown" href="/404.md">` tag. The runtime middleware serves the
+same wayfinding response directly for any URL that matches nothing.
 
 **Tell agents who you are and gain their trust — JSON-LD scaffolding**
 An opt-in `Organization` JSON-LD component is scaffolded from your `package.json`. ax prints the
@@ -136,13 +138,12 @@ const config: AxConfig = {
   emit: 'static',
   // Scaffold a starter llms.txt filled with your real routes and artifacts. Opt-in.
   scaffoldLlmsTxt: true,
-  // Scaffold an agent-aware app/not-found.tsx plus a regenerated route-manifest module. Opt-in.
-  scaffoldAgent404: true,
   // Add Sitemap:/Agentmap: discovery lines to robots.txt (or write one if you have none). Opt-in.
   scaffoldRobots: true,
   // Scaffold an Organization JSON-LD component. Opt-in; ax never wires it into your layout.
   scaffoldJsonLd: true,
-  // Generate markdown twins of your pages, plus /auth.md when surfaces are gated. Default on.
+  // Generate markdown twins of your pages, /auth.md when surfaces are gated, and the /404.md
+  // wayfinding guide lost agents continue from. Default on.
   markdownTwins: true,
   // Write .ora/report.json, the machine-readable build report. Opt-in.
   report: true,

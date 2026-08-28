@@ -16,7 +16,6 @@ function answers(overrides: Partial<InitAnswers> = {}): InitAnswers {
     scaffoldLlmsTxt: true,
     scaffoldJsonLd: true,
     scaffoldRobots: true,
-    scaffoldAgent404: true,
     markdownTwins: true,
     report: true,
     ...overrides,
@@ -44,7 +43,6 @@ describe('renderAxConfig', () => {
       'scaffoldLlmsTxt',
       'scaffoldJsonLd',
       'scaffoldRobots',
-      'scaffoldAgent404',
       'markdownTwins',
       'report',
     ]) {
@@ -81,7 +79,6 @@ describe('renderAxConfig', () => {
       scaffoldLlmsTxt: true,
       scaffoldJsonLd: true,
       scaffoldRobots: false,
-      scaffoldAgent404: true,
       markdownTwins: true,
       report: true,
     };

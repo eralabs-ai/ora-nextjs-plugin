@@ -9,6 +9,7 @@ import {
   measureArtifact,
   measureContent,
 } from './artifact-size.js';
+import { applyNotFoundMdPlan, type ApplyNotFoundMdResult } from './agent-404.js';
 import { applyAuthMdPlan, type ApplyAuthMdResult } from './auth-md.js';
 import { AxConfigError, findExistingConfig } from './config.js';
 import { entryUrlPath } from './entries.js';
@@ -372,7 +373,18 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   const authMdResult = generated.twinPlan.enabled
     ? applyAuthMdPlan(cwd, generated.authMdPlan, twinWarn)
     : {};
-  reportMarkdownTwinOutcome(cwd, generated, twinResult, authMdResult, reportTarget, stdout);
+  const notFoundMdResult = generated.twinPlan.enabled
+    ? applyNotFoundMdPlan(cwd, generated.notFoundMdPlan, twinWarn)
+    : {};
+  reportMarkdownTwinOutcome(
+    cwd,
+    generated,
+    twinResult,
+    authMdResult,
+    notFoundMdResult,
+    reportTarget,
+    stdout,
+  );
 
   // Token-aware sizes: report each artifact this build wrote in bytes *and* estimated tokens
   // (chars ÷ 4), since tokens — not disk size — are what constrain the agent that later reads it.
@@ -392,6 +404,11 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   }
   if (authMdResult.written !== undefined && generated.authMdPlan !== undefined) {
     sizes.push(measureContent(generated.authMdPlan.content, 'auth.md', authMdResult.written));
+  }
+  if (notFoundMdResult.written !== undefined && generated.notFoundMdPlan !== undefined) {
+    sizes.push(
+      measureContent(generated.notFoundMdPlan.content, '404.md', notFoundMdResult.written),
+    );
   }
   generated.report.sizes = sizes;
 
@@ -812,6 +829,12 @@ function printExposureSummary(
         `surface${surfaceCount === 1 ? '' : 's'})`,
     );
   }
+  if (generated.notFoundMdPlan !== undefined) {
+    stdout(
+      `[ax]   • 404 wayfinding guide → ${generated.notFoundMdPlan.servedPath} (where agents ` +
+        'continue from a dead-end URL)',
+    );
+  }
 }
 
 /**
@@ -825,6 +848,7 @@ function reportMarkdownTwinOutcome(
   generated: GenerateCatalogResult,
   twinResult: ApplyTwinPlanResult,
   authMdResult: ApplyAuthMdResult,
+  notFoundMdResult: ApplyNotFoundMdResult,
   reportTarget: true | string | undefined,
   stdout: (line: string) => void,
 ): void {
@@ -837,12 +861,18 @@ function reportMarkdownTwinOutcome(
   }));
   twins.deleted = twinResult.deleted;
   if (authMdResult.written === undefined) delete twins.authMd;
+  if (notFoundMdResult.written !== undefined) {
+    generated.report.agent404.markdownGuide = notFoundMdResult.written;
+  }
 
-  // The twins and auth guide written this run are shown (with their sizes) in the consolidated file
+  // The twins and guides written this run are shown (with their sizes) in the consolidated file
   // tree the caller prints, so no "✓ wrote" summary line here. Removals and the skipped-route
   // warning stay: they aren't files that landed on disk, so the tree has no row for them.
   if (authMdResult.deleted !== undefined) {
     stdout(`[ax] ✓ removed ${authMdResult.deleted} (no gated surfaces remain)`);
+  }
+  if (notFoundMdResult.deleted !== undefined) {
+    stdout(`[ax] ✓ removed ${notFoundMdResult.deleted} (no router to describe misses for)`);
   }
   if (twinResult.deleted.length > 0) {
     stdout(

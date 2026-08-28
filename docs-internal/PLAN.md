@@ -859,6 +859,16 @@ Two additions shipped alongside Phase 4, both following existing conventions:
       sync, the agreed pattern is a composing higher-order middleware that wraps the user's
       existing middleware instead of owning the file, which removes the invasiveness objection.
       See the Vercel strategy sync section.
+      **Update (2026-08-28): redesigned — the scaffold, data module, and `scaffoldAgent404` option
+      are gone.** A scaffolded human-visible page was intrusive (users design their own 404s; the
+      unstyled scaffold got rewritten anyway), and root-only detection was false comfort: App
+      Router `not-found.*` is per-segment, and dynamic-route misses render the *nearest* one,
+      bypassing both the root page and the middleware's wayfinding branch (the URL matches a route
+      pattern). Now: ax generates only `public/404.md` (the wayfinding-guide artifact, same
+      `renderWayfinding` body as the middleware, gated on `markdownTwins` like `auth.md`);
+      detection scans every `app/**/not-found.*` plus `pages/404.*` and recommends one
+      `<link rel="alternate" type="text/markdown" href="/404.md">` tag per unlinked page — the
+      human 404 surface belongs to the user, ax only owns machine artifacts.
 - [x] **Machine-readable build report** (`src/report.ts`; `--report[=path]` / `ax.config`
       `report`, default off; default path `.ora/report.json`). The structured twin of the CLI
       output: entries + written paths, MCP mounts + server card, WebMCP sites, per-artifact
@@ -922,8 +932,10 @@ consumer's source tree unasked), **write-once or append-only** (never overwrite,
     deliberately does **not** wire the component into `app/layout.tsx` (editing the file every page
     renders through, behind the owner's back, is not a postbuild step's call) — it prints the exact
     import + element instead.
-  - **`scaffoldAgent404`** (Phase 4.5) — the same pattern: a user-owned `not-found.tsx` written once,
-    backed by a data module regenerated every build from the real route tree.
+  - **`scaffoldAgent404`** (Phase 4.5) — was the same pattern (a user-owned `not-found.tsx` written
+    once, backed by a regenerated data module) until the 2026-08-28 redesign removed it; see the
+    Phase 4.5 update above. The 404 story is now the generated `public/404.md` + a link-tag
+    recommendation, with no scaffold and no config option.
 
 **3. The report became a handoff, not a log (`src/report.ts` v2 + `src/ora-checks.ts`).** The plugin's
 half of the loop is deterministic detection/emission/scaffolding; the other half — authoring content,
@@ -1147,8 +1159,9 @@ ceremony.
      entries, with the default floor (`/api/auth/**`, `/api/webhooks/**`) pre-noted. Answers
      become an `isGated` matcher (compose `defaultIsGated` unless the user deselects the floor).
      A reviewed detection beats free-text glob authoring.
-   - **Scaffold opt-ins** (`scaffoldLlmsTxt`, `scaffoldJsonLd`, `scaffoldRobots`,
-     `scaffoldAgent404`) — **default yes in the wizard.** This is not a contradiction of the
+   - **Scaffold opt-ins** (`scaffoldLlmsTxt`, `scaffoldJsonLd`, `scaffoldRobots`; historically
+     also `scaffoldAgent404`, removed 2026-08-28) — **default yes in the wizard.** This is not a
+     contradiction of the
      config's `false` defaults: config defaults are `false` because *silent* writes into a source
      tree are invasive; in a wizard the user is present and the ask itself is the opt-in.
      Default-yes-when-asked / default-no-when-silent is one coherent policy — state it in the docs.

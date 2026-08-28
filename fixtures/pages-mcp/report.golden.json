@@ -34,7 +34,9 @@
   },
   "agent404": {
     "notFoundPresent": false,
-    "agentAware": false
+    "agentAware": false,
+    "pages": [],
+    "markdownGuide": "public/404.md"
   },
   "middleware": {
     "present": false,
@@ -92,6 +94,13 @@
       "bytes": 594,
       "chars": 594,
       "tokens": 149
+    },
+    {
+      "artifact": "404.md",
+      "path": "public/404.md",
+      "bytes": 810,
+      "chars": 802,
+      "tokens": 201
     }
   ],
   "ora": {
@@ -190,7 +199,7 @@
     "No robots.txt found — add one (app/robots.ts or public/robots.txt) that explicitly Allows the reputable AI agents you want to reach, scoped to specific User-agent groups (never \"User-agent: *\"), plus a \"Sitemap:\" line. Note: Next's MetadataRoute.Robots (app/robots.ts) has no field for the \"Agentmap:\" catalog pointer — put that line in a static public/robots.txt. Set scaffoldRobots: true in ax.config to have one written for you.",
     "No agents.md found — consider adding one (public/agents.md) with when-to-use / when-NOT-to-use guidance for agents. ax won't write its content for you; the companion skill can help author it from your repo.",
     "No JSON-LD structured data found in your layouts/pages — structured data is how registries and agents disambiguate and rank your site. Add an Organization block in your root layout <head> (<script type=\"application/ld+json\">) with a \"sameAs\" array linking your LinkedIn/GitHub/npm/social profiles (the entity-disambiguation signal registries value), and at least one more schema.org @type beyond Organization — SoftwareApplication or Product for an app/API, or a FAQPage — since covering more types helps registries understand your site more fully. JSON-LD pairs with an llms.txt: llms.txt tells agents what your site is for, JSON-LD identifies it as an entity registries can rank — add both, not one alone. ax won’t author the block (the fields are judgment content); the companion skill can help draft it from your repo.",
-    "No pages/404.tsx found — agents that hit a missing URL get Next.js’s bare default 404, a dead end that makes them give up or guess. Add one that tells agents why the 404 happened and how to continue (links to llms.txt, the ai-catalog, and your real routes), or set scaffoldAgent404: true in ax.config to have an agent-aware page (plus a build-time route manifest) written for you.",
+    "No pages/404.tsx found — agents that hit a missing URL get Next.js’s bare default 404, a dead end that makes them give up or guess. Add a standard 404 page in your own design system (a clear “page not found” and a way back home), and include `<link rel=\"alternate\" type=\"text/markdown\" href=\"/404.md\" />` so agents can hop from it to /404.md — the generated wayfinding guide (real routes + discovery links) this build writes. Rendered in the page’s JSX, React hoists the tag into <head> (App Router); use next/head in the Pages Router.",
     "Serve agents the generated markdown automatically: First run `npx ax manifest` (and wire it as the \"prebuild\" script so it stays fresh — `middleware.ts` is compiled during `next build`, so the manifest must exist before the build starts). Then: add `import { withAx } from '@ora-ai/ax/middleware';` and `import { axManifest } from './ax-manifest';`, create middleware.ts with `export default withAx({ manifest: axManifest });`, and export the matcher literal `export const config = { matcher: ['/((?!_next|api|.*\\\\..*|favicon|robots|health|status).*)'] };`. The middleware rewrites a request to its markdown twin only when the manifest lists one, never touches gated paths, and answers unknown URLs from detected agents with a 200 markdown wayfinding body — it composes with (never replaces) your existing middleware, and keeps your own gating (UA filters, bot walls) from ever blocking the published discovery artifacts."
   ]
 }
