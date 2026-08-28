@@ -15,7 +15,7 @@ const fixturesDir = fileURLToPath(new URL('../../../fixtures/', import.meta.url)
 // corpus (not just synthetic tmp dirs) must stay spec-valid. Doesn't write files — that's covered
 // by write.test.ts — just exercises generateCatalog against real package.json shapes.
 describe('generateCatalog against the fixture corpus', () => {
-  it.each(['bare', 'bare-js', 'deploy-variants'])(
+  it.each(['bare', 'bare-js', 'deploy-variants', 'next-auth'])(
     'produces a spec-valid catalog for %s',
     async (name) => {
       const { catalog } = await generateCatalog({ cwd: `${fixturesDir}${name}` });
@@ -33,145 +33,98 @@ describe('generateCatalog against the fixture corpus', () => {
     });
     expect(warnings.some((w) => w.includes('basePath'))).toBe(true);
   });
-});
 
-// End-to-end: the config-overrides fixture ships a real `ax.config.ts`, so this
-// exercises the whole config path (jiti load -> validate -> entry overrides -> isGated) against a
-// committed fixture rather than a synthetic tmp dir.
-describe('generateCatalog with the config-overrides fixture', () => {
-  it('emits config-declared entries and applies the isGated policy', async () => {
-    const { catalog } = await generateCatalog({ cwd: `${fixturesDir}config-overrides` });
-    expect(validateCatalog(catalog).valid).toBe(true);
-    expect(validateCatalogArd(catalog).valid).toBe(true);
-
-    const ids = catalog.entries.map((entry) => entry.identifier);
-    expect(ids).toContain('urn:air:example.com:docs');
-    expect(ids).toContain('urn:air:example.com:skills');
-    // Gated by the default floor (/api/auth/**) but re-included via the config's isGated matcher.
-    expect(ids).toContain('urn:air:example.com:auth-status');
-    // Gated and NOT re-included — ax can't describe its auth, so it's dropped though it's declared.
-    expect(ids).not.toContain('urn:air:example.com:auth-internal');
+  it('detects next-auth in the next-auth fixture and steers toward the api_key lane', async () => {
+    const { report } = await generateCatalog({ cwd: `${fixturesDir}next-auth` });
+    expect(report.auth.provider).toMatchObject({ name: 'next-auth', package: 'next-auth' });
+    // The [...nextauth] mount sits under the default /api/auth/** gating floor: never an entry.
+    expect(report.auth.provider?.note).toContain('api_key');
   });
 });
 
-// End-to-end: each fixture ships a real artifact (an mcp-handler mount, a static
-// public/openapi.json, an app/llms.txt/route.ts) plus an ax.config.ts declaring a fixture-specific
-// `siteUrl` so the resulting catalog is deterministic in CI. `scaffoldLlmsTxt` stays at its default
-// (`false`) here — these fixtures must never gain files as a side effect of running this suite.
-describe('generateCatalog zero-config detection against the fixture corpus', () => {
-  it('detects the mcp-handler mount in the mcp-adapter fixture', async () => {
-    const { catalog } = await generateCatalog({ cwd: `${fixturesDir}mcp-adapter` });
+// End-to-end against the flagship fixture — the demo-app fork that composes most detectors in one
+// project: two mcp-handler mounts (one withMcpAuth-gated), a hand-owned llms.txt route, a static
+// public/openapi.json, a JSON-LD component rendered from the layout, and a real jiti-loaded
+// ax.config.ts declaring the gated entry's auth. `scaffoldLlmsTxt` stays at its default (`false`)
+// in generateCatalog runs — fixtures must never gain files as a side effect of this suite.
+describe('generateCatalog against the flagship fixture', () => {
+  it('detects both mcp-handler mounts with their tools', async () => {
+    const { catalog, report } = await generateCatalog({ cwd: `${fixturesDir}flagship` });
     expect(validateCatalogArd(catalog).valid).toBe(true);
 
-    const entry = catalog.entries.find(
-      (e) => e.identifier === 'urn:air:mcp-adapter-fixture.example.com:mcp-server',
+    const publicEntry = catalog.entries.find(
+      (e) => e.identifier === 'urn:air:flagship-fixture.example.com:mcp-server:api-public-mcp',
     );
-    expect(entry).toMatchObject({
+    expect(publicEntry).toMatchObject({
       type: 'application/mcp-server-card+json',
-      url: 'https://mcp-adapter-fixture.example.com/.well-known/mcp/server-card.json',
-      capabilities: ['roll_dice'],
+      url: 'https://flagship-fixture.example.com/.well-known/mcp/server-card.json',
+      capabilities: ['search_flights'],
     });
+
+    const mounts = [...report.mcp.mounts].sort((a, b) => a.pathname.localeCompare(b.pathname));
+    expect(mounts).toEqual([
+      { pathname: '/api/mcp', tools: ['get_seat_map', 'book_flight', 'pay_booking'] },
+      { pathname: '/api/public/mcp', tools: ['search_flights'] },
+    ]);
   });
 
-  it('builds a well-known MCP server card from the mcp-adapter fixture mount', async () => {
-    const { serverCardPlan } = await generateCatalog({ cwd: `${fixturesDir}mcp-adapter` });
-    expect(serverCardPlan?.multi).toBe(false);
-    expect(serverCardPlan?.cards[0]?.card).toMatchObject({
-      name: 'com.example.mcp-adapter-fixture/mcp-adapter',
-      serverUrl: 'https://mcp-adapter-fixture.example.com/mcp',
-      remotes: [{ type: 'streamable-http', url: 'https://mcp-adapter-fixture.example.com/mcp' }],
-      tools: [{ name: 'roll_dice' }],
-    });
-  });
+  it('builds a multi-server card plan (public primary, gated named card)', async () => {
+    const { serverCardPlan } = await generateCatalog({ cwd: `${fixturesDir}flagship` });
+    expect(serverCardPlan?.multi).toBe(true);
 
-  it('marks the gated mcp-adapter-gated mount with auth and a server-card authentication block', async () => {
-    const { catalog, serverCardPlan } = await generateCatalog({
-      cwd: `${fixturesDir}mcp-adapter-gated`,
+    const cards = serverCardPlan?.cards.map((c) => c.card) ?? [];
+    const publicCard = cards.find((c) => c.serverUrl?.endsWith('/api/public/mcp'));
+    expect(publicCard).toMatchObject({
+      name: 'com.example.flagship-fixture/api-public-mcp',
+      serverUrl: 'https://flagship-fixture.example.com/api/public/mcp',
+      tools: [{ name: 'search_flights' }],
     });
-    expect(validateCatalogArd(catalog).valid).toBe(true);
+    expect(publicCard?.authentication).toBeUndefined();
 
-    const entry = catalog.entries.find(
-      (e) => e.identifier === 'urn:air:mcp-gated-fixture.example.com:mcp-server',
-    );
-    expect(entry).toMatchObject({
-      type: 'application/mcp-server-card+json',
-      url: 'https://mcp-gated-fixture.example.com/.well-known/mcp/server-card.json',
-      auth: { status: 'unknown' },
-    });
-    expect(serverCardPlan?.cards[0]?.card.authentication).toEqual({
+    const gatedCard = cards.find((c) => c.serverUrl?.endsWith('/api/mcp'));
+    expect(gatedCard?.authentication).toEqual({
       required: true,
-      resourceMetadata:
-        'https://mcp-gated-fixture.example.com/.well-known/oauth-protected-resource',
+      resourceMetadata: 'https://flagship-fixture.example.com/.well-known/oauth-protected-resource',
     });
   });
 
-  it('detects public/openapi.json in the openapi fixture', async () => {
-    const { catalog } = await generateCatalog({ cwd: `${fixturesDir}openapi` });
-    expect(validateCatalogArd(catalog).valid).toBe(true);
-
+  it('publishes the config-declared oauth2 descriptor on the gated entry (declared-override path)', async () => {
+    // The raw withMcpAuth-without-declaration default (`auth: { status: 'unknown' }`) is proven
+    // synthetically in generate.test.ts; the flagship declares the answer in its real ax.config.ts,
+    // so this proves the jiti load -> validate -> entry-override pipeline end-to-end.
+    const { catalog } = await generateCatalog({ cwd: `${fixturesDir}flagship` });
     const entry = catalog.entries.find(
-      (e) => e.identifier === 'urn:air:openapi-fixture.example.com:openapi',
+      (e) => e.identifier === 'urn:air:flagship-fixture.example.com:mcp-server:api-mcp',
     );
     expect(entry).toMatchObject({
-      type: 'application/vnd.oai.openapi+json;version=3.1',
-      url: 'https://openapi-fixture.example.com/openapi.json',
+      type: 'application/mcp-server-card+json',
+      url: 'https://flagship-fixture.example.com/.well-known/mcp/server-card/api-mcp.json',
+      capabilities: ['get_seat_map', 'book_flight', 'pay_booking'],
+      auth: { status: 'oauth2', docsUrl: 'https://flagship-fixture.example.com/agents.md' },
     });
   });
 
-  it('detects app/llms.txt/route.ts in the llms-txt fixture', async () => {
-    const { catalog } = await generateCatalog({ cwd: `${fixturesDir}llms-txt` });
-    expect(validateCatalogArd(catalog).valid).toBe(true);
+  it('detects the hand-owned llms.txt route and public/openapi.json', async () => {
+    const { catalog } = await generateCatalog({ cwd: `${fixturesDir}flagship` });
 
-    const entry = catalog.entries.find(
-      (e) => e.identifier === 'urn:air:llms-txt-fixture.example.com:llms-txt',
-    );
-    expect(entry).toMatchObject({
+    expect(
+      catalog.entries.find((e) => e.identifier === 'urn:air:flagship-fixture.example.com:llms-txt'),
+    ).toMatchObject({
       type: 'text/markdown',
-      url: 'https://llms-txt-fixture.example.com/llms.txt',
+      url: 'https://flagship-fixture.example.com/llms.txt',
+    });
+    expect(
+      catalog.entries.find((e) => e.identifier === 'urn:air:flagship-fixture.example.com:openapi'),
+    ).toMatchObject({
+      type: 'application/vnd.oai.openapi+json;version=3.1',
+      url: 'https://flagship-fixture.example.com/openapi.json',
     });
   });
 
-  it('never writes into the fixture corpus as a side effect (every scaffold flag defaults to false)', async () => {
-    const fixtures = [
-      'bare',
-      'bare-js',
-      'mcp-adapter',
-      'openapi',
-      'pages-bare',
-      'pages-mcp',
-      'pages-webmcp-declarative',
-      'hybrid',
-    ];
-    for (const name of fixtures) {
-      await generateCatalog({ cwd: `${fixturesDir}${name}` });
-    }
-    // One entry per opt-in scaffold: each writes into the consumer's source tree, so a fixture
-    // gaining any of these files means a default flipped to on. Covers both router shapes: the App
-    // Router route-handler / component targets and the Pages Router static / `_app` targets.
-    const neverWritten = [
-      'app/llms.txt',
-      'public/llms.txt',
-      'public/robots.txt',
-      'app/organization-json-ld.tsx',
-      'app/organization-json-ld.jsx',
-      'pages/organization-json-ld.tsx',
-      'pages/organization-json-ld.jsx',
-    ];
-    for (const name of fixtures) {
-      for (const path of neverWritten) {
-        expect(existsSync(`${fixturesDir}${name}/${path}`)).toBe(false);
-      }
-    }
-  });
-});
-
-// Detect-and-recommend: the discovery fixture ships a JSON-LD Organization block in its
-// root layout, so generation must surface the "detected" recommendation (never a catalog entry).
-describe('generateCatalog JSON-LD detection against the fixture corpus', () => {
-  it('detects the JSON-LD block in the discovery fixture layout', async () => {
+  it('detects the JSON-LD component rendered from the flagship layout (recommendation, never an entry)', async () => {
     const recommendations: string[] = [];
     const { catalog } = await generateCatalog({
-      cwd: `${fixturesDir}discovery`,
+      cwd: `${fixturesDir}flagship`,
       onRecommendation: (m) => recommendations.push(m),
     });
     expect(catalog.entries.every((e) => e.type !== 'application/ld+json')).toBe(true);
@@ -186,6 +139,45 @@ describe('generateCatalog JSON-LD detection against the fixture corpus', () => {
     });
     expect(recommendations.some((r) => r.includes('No JSON-LD structured data found'))).toBe(true);
   });
+
+  it('never writes into the fixture corpus as a side effect (every scaffold flag defaults to false)', async () => {
+    const fixtures = [
+      'bare',
+      'bare-js',
+      'hybrid',
+      'flagship',
+      'flagship-pages',
+      'next-auth',
+      'webmcp',
+    ];
+    for (const name of fixtures) {
+      await generateCatalog({ cwd: `${fixturesDir}${name}` });
+    }
+    // One entry per opt-in scaffold: each writes into the consumer's source tree, so a fixture
+    // gaining any of these files means a default flipped to on. Covers both router shapes: the App
+    // Router route-handler / component targets and the Pages Router static / `_app` targets.
+    // (flagship legitimately owns app/llms.txt and app/organization-json-ld.tsx as committed
+    // sources, so for it only the never-scaffolded-elsewhere paths apply.)
+    const neverWritten = [
+      'public/llms.txt',
+      'pages/organization-json-ld.tsx',
+      'pages/organization-json-ld.jsx',
+    ];
+    const neverWrittenUnlessCommitted = [
+      'app/llms.txt',
+      'app/organization-json-ld.tsx',
+      'app/organization-json-ld.jsx',
+    ];
+    for (const name of fixtures) {
+      for (const path of neverWritten) {
+        expect(existsSync(`${fixturesDir}${name}/${path}`)).toBe(false);
+      }
+      if (name === 'flagship') continue;
+      for (const path of neverWrittenUnlessCommitted) {
+        expect(existsSync(`${fixturesDir}${name}/${path}`)).toBe(false);
+      }
+    }
+  });
 });
 
 // Phase 4: WebMCP detection against the real fixture corpus — declarative tools become a
@@ -193,31 +185,24 @@ describe('generateCatalog JSON-LD detection against the fixture corpus', () => {
 // the edge-cases fixture must warn (server component, deprecated navigator alias) and must not
 // detect the user-defined `registerTool` decoy.
 describe('generateCatalog WebMCP detection against the fixture corpus', () => {
-  it('emits a page entry with tool capabilities for the webmcp-declarative fixture', async () => {
-    const { catalog, webMcpToolNames } = await generateCatalog({
-      cwd: `${fixturesDir}webmcp-declarative`,
-    });
-    expect(validateCatalogArd(catalog).valid).toBe(true);
-    expect(webMcpToolNames).toEqual(['subscribe_newsletter']);
-
-    const entry = catalog.entries.find(
-      (e) => e.identifier === 'urn:air:webmcp-declarative-fixture.example.com:webmcp',
-    );
-    expect(entry).toMatchObject({
-      type: 'text/html',
-      url: 'https://webmcp-declarative-fixture.example.com/',
-      capabilities: ['subscribe_newsletter'],
-    });
-  });
-
-  it('detects imperative tools in the webmcp-imperative fixture without inventing entries', async () => {
+  it('detects both shapes on one page in the webmcp fixture: declarative entry, imperative recommendation', async () => {
     const recommendations: string[] = [];
     const { catalog, webMcpToolNames } = await generateCatalog({
-      cwd: `${fixturesDir}webmcp-imperative`,
+      cwd: `${fixturesDir}webmcp`,
       onRecommendation: (m) => recommendations.push(m),
     });
-    expect(webMcpToolNames).toEqual(['add_to_cart']);
-    expect(catalog.entries).toEqual([]);
+    expect(validateCatalogArd(catalog).valid).toBe(true);
+    expect([...webMcpToolNames].sort()).toEqual(['add_to_cart', 'subscribe_newsletter']);
+
+    // Exactly one entry: the declarative form's page URL. The imperative registerTool() runs only
+    // in the browser, so it is never invented into an entry — only recommended into markup.
+    expect(catalog.entries).toHaveLength(1);
+    expect(catalog.entries[0]).toMatchObject({
+      identifier: 'urn:air:webmcp-fixture.example.com:webmcp',
+      type: 'text/html',
+      url: 'https://webmcp-fixture.example.com/',
+      capabilities: ['subscribe_newsletter'],
+    });
     expect(recommendations.some((r) => r.includes('invisible in server-rendered HTML'))).toBe(true);
   });
 
@@ -257,18 +242,20 @@ describe('loadNextConfig against the fixture corpus', () => {
 
 // Pages Router (and hybrid) support: the same detectors run against `pages/` route topology, and a
 // project with both routers scans both. Output is still the router-agnostic `public/` catalog.
-describe('generateCatalog against the Pages Router fixtures', () => {
-  it('produces a spec-valid catalog for pages-bare, reports the pages router, and detects the existing 404', async () => {
+// flagship-pages is the flagship's information architecture ported wholesale to the Pages Router,
+// so these assertions re-prove the flagship composition against a Pages-only route model.
+describe('generateCatalog against the flagship-pages fixture', () => {
+  it('produces a spec-valid catalog, reports the pages router, and detects the existing 404', async () => {
     const recommendations: string[] = [];
     const { catalog, report } = await generateCatalog({
-      cwd: `${fixturesDir}pages-bare`,
+      cwd: `${fixturesDir}flagship-pages`,
       onRecommendation: (m) => recommendations.push(m),
     });
     expect(validateCatalog(catalog).valid).toBe(true);
     expect(validateCatalogArd(catalog).valid).toBe(true);
     expect(report.routers).toEqual(['pages']);
 
-    // pages-bare ships a plain pages/404.tsx: detected, but not agent-aware — so a "link the
+    // flagship-pages ships a plain pages/404.tsx: detected, but not agent-aware — so a "link the
     // wayfinding guide" recommendation, proving the Pages Router 404 convention is recognized
     // (not just app/not-found).
     expect(report.agent404).toMatchObject({
@@ -280,55 +267,65 @@ describe('generateCatalog against the Pages Router fixtures', () => {
   });
 
   it('lists Pages Router content routes, excluding special/dynamic/error files', () => {
-    // Asserted through the model directly (no scaffold opt-in needed) against the real fixture:
-    // `/` and `/about` are content; `_app`/`_document`/`404`/`[slug]` are not.
-    const routes = buildRouterModel(`${fixturesDir}pages-bare`).listPageRoutes();
-    expect(routes).toEqual(['/', '/about']);
+    // `_app`/`_document`/`404` are special files, `destinations/[slug]` is dynamic — none listed.
+    const routes = buildRouterModel(`${fixturesDir}flagship-pages`).listPageRoutes();
+    expect(routes).toEqual([
+      '/',
+      '/account',
+      '/checkout',
+      '/confirmation',
+      '/destinations',
+      '/results',
+      '/seats',
+    ]);
   });
 
-  it('detects the pages/api/[transport].ts MCP mount at /api/mcp (entry, server card, and report)', async () => {
-    const recommendations: string[] = [];
+  it('detects both pages/api [transport] MCP mounts (gated + public) with entries and cards', async () => {
     const { catalog, serverCardPlan, report } = await generateCatalog({
-      cwd: `${fixturesDir}pages-mcp`,
-      onRecommendation: (m) => recommendations.push(m),
+      cwd: `${fixturesDir}flagship-pages`,
     });
     expect(validateCatalogArd(catalog).valid).toBe(true);
-    expect(report.routers).toEqual(['pages']);
 
-    const entry = catalog.entries.find(
-      (e) => e.identifier === 'urn:air:pages-mcp-fixture.example.com:mcp-server',
+    const mounts = [...report.mcp.mounts].sort((a, b) => a.pathname.localeCompare(b.pathname));
+    expect(mounts).toEqual([
+      { pathname: '/api/mcp', tools: ['get_seat_map', 'book_flight', 'pay_booking'] },
+      { pathname: '/api/public/mcp', tools: ['search_flights'] },
+    ]);
+
+    const gatedEntry = catalog.entries.find(
+      (e) => e.identifier === 'urn:air:flagship-pages-fixture.example.com:mcp-server:api-mcp',
     );
-    expect(entry).toMatchObject({
+    expect(gatedEntry).toMatchObject({
       type: 'application/mcp-server-card+json',
-      url: 'https://pages-mcp-fixture.example.com/.well-known/mcp/server-card.json',
-      capabilities: ['roll_dice'],
+      auth: {
+        status: 'oauth2',
+        docsUrl: 'https://flagship-pages-fixture.example.com/agents.md',
+      },
     });
-    expect(serverCardPlan?.cards[0]?.card).toMatchObject({
-      serverUrl: 'https://pages-mcp-fixture.example.com/api/mcp',
-      tools: [{ name: 'roll_dice' }],
-    });
-    // The report mirrors the detection: the mount is surfaced at /api/mcp with its tools.
-    expect(report.mcp.mounts).toEqual([{ pathname: '/api/mcp', tools: ['roll_dice'] }]);
-    // No pages/404.tsx here — the "add one" recommendation names the Pages Router convention.
-    expect(recommendations.some((r) => r.includes('No pages/404.tsx found'))).toBe(true);
+
+    expect(serverCardPlan?.multi).toBe(true);
+    const cards = serverCardPlan?.cards.map((c) => c.card) ?? [];
+    expect(
+      cards.find((c) => c.serverUrl === 'https://flagship-pages-fixture.example.com/api/public/mcp')
+        ?.tools,
+    ).toEqual([{ name: 'search_flights' }]);
   });
 
-  it('attributes a declarative WebMCP form to its Pages Router page URL (catalog entry)', async () => {
+  it('attributes the declarative WebMCP form to its Pages Router page URL (catalog entry)', async () => {
     const { catalog, webMcpToolNames, report } = await generateCatalog({
-      cwd: `${fixturesDir}pages-webmcp-declarative`,
+      cwd: `${fixturesDir}flagship-pages`,
     });
-    expect(validateCatalogArd(catalog).valid).toBe(true);
-    expect(webMcpToolNames).toEqual(['subscribe_newsletter']);
+    expect(webMcpToolNames).toEqual(['watch_route']);
 
-    // The entry URL is the Pages Router page URL `/` — proving resolveUrlForFile handles the
-    // file-is-the-route rule, not just the App Router `page.*` shape.
+    // The entry URL is the Pages Router page URL `/destinations` — proving resolveUrlForFile
+    // handles the file-is-the-route rule, not just the App Router `page.*` shape.
     const entry = catalog.entries.find(
-      (e) => e.identifier === 'urn:air:pages-webmcp-fixture.example.com:webmcp',
+      (e) => e.identifier === 'urn:air:flagship-pages-fixture.example.com:webmcp:destinations',
     );
     expect(entry).toMatchObject({
       type: 'text/html',
-      url: 'https://pages-webmcp-fixture.example.com/',
-      capabilities: ['subscribe_newsletter'],
+      url: 'https://flagship-pages-fixture.example.com/destinations',
+      capabilities: ['watch_route'],
     });
     // The report carries no webmcp section: the spec is still a draft, so the report doesn't
     // steer agents toward it (see report.ts).
@@ -348,33 +345,49 @@ describe('generateCatalog against the Pages Router fixtures', () => {
   });
 });
 
-// The middleware fixture: the serving manifest its prebuild generates is the middleware's rewrite
-// contract, so the pieces the dogfood relies on must hold from the source tree alone. Assertions
-// stay independent of build state — only committed sources are asserted on (the generated homepage
-// twin and the catalog artifact appear only after a build, so they are deliberately not expected).
-describe('the middleware fixture serving manifest', () => {
-  it('lists the hand-authored twin, the gated path, and the dynamic prefix', async () => {
-    const cwd = join(fixturesDir, 'middleware');
+// The flagship's serving manifest is the middleware's rewrite contract, so the pieces the dogfood
+// relies on must hold from the source tree alone. Assertions stay independent of build state —
+// only committed sources are asserted on (generated twins and the catalog artifact appear only
+// after a build, so they are deliberately not expected).
+describe('the flagship fixture serving manifest', () => {
+  it('lists the hand-authored twin, the gated path, the dynamic prefix, and the MDX route', async () => {
+    const cwd = join(fixturesDir, 'flagship');
     const { buildServingManifest } = await import('../src/manifest.js');
     const { resolveGating } = await import('../src/gating.js');
     const { loadAxConfig } = await import('../src/config.js');
 
     const { config } = await loadAxConfig(cwd);
+    const nextConfig = await loadNextConfig(cwd);
     const manifest = buildServingManifest({
       cwd,
-      router: buildRouterModel(cwd),
+      router: buildRouterModel(cwd, {
+        ...(nextConfig.config.pageExtensions !== undefined
+          ? { pageExtensions: nextConfig.config.pageExtensions }
+          : {}),
+      }),
       isGated: resolveGating(config.isGated),
       basePath: '',
     });
 
-    expect(manifest.routes).toEqual(['/', '/docs', '/private', '/shell']);
-    expect(manifest.markdownTwins['/docs']).toBe('/docs.md');
-    expect(manifest.gatedPaths).toContain('/private');
-    expect(manifest.dynamicRoutePrefixes).toEqual(['/blog']);
+    // /guide is a page.mdx route: it is in the route table exactly because the fixture's
+    // next.config pageExtensions serves mdx — the middleware must never treat it as a miss.
+    expect(manifest.routes).toEqual([
+      '/',
+      '/account',
+      '/checkout',
+      '/confirmation',
+      '/destinations',
+      '/guide',
+      '/results',
+      '/seats',
+    ]);
+    expect(manifest.markdownTwins['/destinations']).toBe('/destinations.md');
+    expect(manifest.gatedPaths).toContain('/account');
+    expect(manifest.dynamicRoutePrefixes).toEqual(['/destinations']);
   });
 
   it('wires the middleware, so its negotiation checks read addressed', async () => {
-    const { report } = await generateCatalog({ cwd: join(fixturesDir, 'middleware') });
+    const { report } = await generateCatalog({ cwd: join(fixturesDir, 'flagship') });
     expect(report.middleware).toMatchObject({ present: true, wiredToAx: true });
     const negotiation = report.ora.checks.filter((check) => check.artifact === 'middleware');
     expect(negotiation.map((check) => check.id).sort()).toEqual([

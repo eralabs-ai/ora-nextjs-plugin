@@ -17,6 +17,7 @@
     "fixtures:build": "pnpm --filter \"@ax-fixtures/*\" run build",
     "reports:verify": "node scripts/verify-report-snapshots.mjs",
     "dogfood:middleware": "node scripts/dogfood-middleware.mjs",
+    "mutation:test": "node scripts/mutation-tests.mjs",
     "reports:regen": "pnpm fixtures:clean && pnpm fixtures:build && node scripts/verify-report-snapshots.mjs --update",
     "conformance": "bash scripts/conformance.sh",
     "changeset": "changeset",

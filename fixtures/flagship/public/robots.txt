@@ -1,0 +1,19 @@
+
+User-agent: *
+Allow: /
+
+User-agent: AhrefsBot
+User-agent: MJ12bot
+User-agent: Rogerbot
+User-agent: SemrushBot
+User-agent: DotBot
+User-agent: MegaIndex.ru
+User-agent: BlexBot
+User-agent: ZoominfoBot
+User-agent: BytedanceSpy
+Disallow: /
+
+
+# Added by @ora-ai/ax — machine-readable discovery pointers for agents.
+Sitemap: https://flagship-fixture.example.com/sitemap.xml
+Agentmap: https://flagship-fixture.example.com/.well-known/ai-catalog.json

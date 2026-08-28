@@ -65,6 +65,15 @@ export interface RouterModel {
   listApiEndpoints(): ApiEndpoint[];
 }
 
+export interface RouterModelOptions {
+  /**
+   * `next.config` `pageExtensions`, when the caller has loaded it. Only `md`/`mdx` widen the
+   * model: whether an MDX page routes at all is a config decision, so without this the model stays
+   * conservative — a `page.mdx` is not counted as a route Next.js may never serve.
+   */
+  pageExtensions?: readonly string[];
+}
+
 /**
  * Builds the project's `RouterModel` once, composing the App and/or Pages adapters based on which
  * router directories exist. `listPageRoutes` unions both routers' routes and lists each URL once —
@@ -74,9 +83,12 @@ export interface RouterModel {
  * every method — the same silent, never-throwing degradation the individual `findAppDir`-based
  * detectors had.
  */
-export function buildRouterModel(cwd: string): RouterModel {
+export function buildRouterModel(cwd: string, options: RouterModelOptions = {}): RouterModel {
   const appDir = findAppDir(cwd);
   const pagesDir = findPagesDir(cwd);
+  const mdxExtensions = ['md', 'mdx'].filter(
+    (ext) => options.pageExtensions?.includes(ext) ?? false,
+  );
 
   const routers: RouterKind[] = [];
   if (appDir) routers.push('app');
@@ -92,27 +104,34 @@ export function buildRouterModel(cwd: string): RouterModel {
 
     listPageRoutes() {
       const routes = new Set<string>();
-      if (appDir) for (const route of listStaticPageRoutes(appDir)) routes.add(route);
-      if (pagesDir) for (const route of listStaticPagesRoutes(pagesDir)) routes.add(route);
+      if (appDir)
+        for (const route of listStaticPageRoutes(appDir, mdxExtensions)) routes.add(route);
+      if (pagesDir) {
+        for (const route of listStaticPagesRoutes(pagesDir, mdxExtensions)) routes.add(route);
+      }
       return [...routes].sort();
     },
 
     listDynamicRoutePrefixes() {
       const prefixes = new Set<string>();
-      if (appDir) for (const prefix of listDynamicRoutePrefixes(appDir)) prefixes.add(prefix);
+      if (appDir) {
+        for (const prefix of listDynamicRoutePrefixes(appDir, mdxExtensions)) prefixes.add(prefix);
+      }
       if (pagesDir) {
-        for (const prefix of listDynamicPagesRoutePrefixes(pagesDir)) prefixes.add(prefix);
+        for (const prefix of listDynamicPagesRoutePrefixes(pagesDir, mdxExtensions)) {
+          prefixes.add(prefix);
+        }
       }
       return [...prefixes].sort();
     },
 
     resolveUrlForFile(absolutePath) {
       if (appDir) {
-        const url = resolvePagePathname(absolutePath, appDir);
+        const url = resolvePagePathname(absolutePath, appDir, mdxExtensions);
         if (url !== undefined) return url;
       }
       if (pagesDir) {
-        const url = resolvePagesPathname(absolutePath, pagesDir);
+        const url = resolvePagesPathname(absolutePath, pagesDir, mdxExtensions);
         if (url !== undefined) return url;
       }
       return undefined;

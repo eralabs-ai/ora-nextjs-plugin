@@ -77,11 +77,18 @@ jobs:
       - name: Verify report snapshots
         run: pnpm reports:verify
 
-      # Dogfood the negotiation middleware over HTTP: `next start` on the built middleware fixture,
+      # Dogfood the negotiation middleware over HTTP: `next start` on the built flagship fixture,
       # then the dual-fetch probes (Ora's markdown-negotiation-vary semantics), the cloaking
       # guards, and the gated/dynamic/unknown-path branches — the Edge bundle serving for real.
       - name: Middleware dual-fetch dogfood
         run: pnpm dogfood:middleware
+
+      # Multi-build mutation tests over the flagship fixture: idempotence, user-edit preservation,
+      # orphaned-twin cleanup, additive change, and manifest drift — each is a copy → build →
+      # mutate → rebuild sequence with targeted delta assertions (the build-N+1 bugs the one-shot
+      # golden layer can't see).
+      - name: Flagship mutation tests
+        run: pnpm mutation:test
 
       # Official ARD conformance tool (vendored from ards-project/ard-spec — spec/ard/README.md)
       # over every catalog the fixture builds just generated. jsonschema enables the tool's strict

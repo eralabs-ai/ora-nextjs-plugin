@@ -1,0 +1,37 @@
+{
+  "name": "com.example.flagship-pages-fixture/api-mcp",
+  "description": "flagship-pages MCP server at /api/mcp",
+  "version": "0.0.0",
+  "serverUrl": "https://flagship-pages-fixture.example.com/api/mcp",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://flagship-pages-fixture.example.com/api/mcp"
+    }
+  ],
+  "tools": [
+    {
+      "name": "get_seat_map"
+    },
+    {
+      "name": "book_flight"
+    },
+    {
+      "name": "pay_booking"
+    }
+  ],
+  "serverInfo": {
+    "name": "flagship-pages",
+    "version": "0.0.0"
+  },
+  "transport": {
+    "type": "streamable-http",
+    "endpoint": "https://flagship-pages-fixture.example.com/api/mcp"
+  },
+  "capabilities": {
+    "tools": {}
+  },
+  "authentication": {
+    "required": true
+  }
+}

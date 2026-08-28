@@ -1,0 +1,388 @@
+{
+  "generatedAt": "<generatedAt>",
+  "siteUrl": "https://flagship-fixture.example.com",
+  "basePath": "",
+  "routers": [
+    "app"
+  ],
+  "catalog": {
+    "entryCount": 4,
+    "entries": [
+      {
+        "identifier": "urn:air:flagship-fixture.example.com:mcp-server:api-public-mcp",
+        "type": "application/mcp-server-card+json",
+        "url": "https://flagship-fixture.example.com/.well-known/mcp/server-card.json",
+        "displayName": "MCP server"
+      },
+      {
+        "identifier": "urn:air:flagship-fixture.example.com:mcp-server:api-mcp",
+        "type": "application/mcp-server-card+json",
+        "url": "https://flagship-fixture.example.com/.well-known/mcp/server-card/api-mcp.json",
+        "displayName": "MCP server"
+      },
+      {
+        "identifier": "urn:air:flagship-fixture.example.com:openapi",
+        "type": "application/vnd.oai.openapi+json;version=3.1",
+        "url": "https://flagship-fixture.example.com/openapi.json",
+        "displayName": "ora-air API"
+      },
+      {
+        "identifier": "urn:air:flagship-fixture.example.com:llms-txt",
+        "type": "text/markdown",
+        "url": "https://flagship-fixture.example.com/llms.txt",
+        "displayName": "llms.txt"
+      }
+    ],
+    "path": "public/.well-known/ai-catalog.json",
+    "target": "static"
+  },
+  "mcp": {
+    "mounts": [
+      {
+        "pathname": "/api/public/mcp",
+        "tools": [
+          "search_flights"
+        ]
+      },
+      {
+        "pathname": "/api/mcp",
+        "tools": [
+          "get_seat_map",
+          "book_flight",
+          "pay_booking"
+        ]
+      }
+    ],
+    "unreviewedMounts": [],
+    "primaryMount": "/api/public/mcp",
+    "serverCardPath": "public/.well-known/mcp/server-card.json",
+    "serverCards": [
+      {
+        "mount": "/api/public/mcp",
+        "path": "public/.well-known/mcp/server-card/api-public-mcp.json"
+      },
+      {
+        "mount": "/api/mcp",
+        "path": "public/.well-known/mcp/server-card/api-mcp.json"
+      }
+    ]
+  },
+  "agent404": {
+    "notFoundPresent": false,
+    "agentAware": false,
+    "pages": [],
+    "markdownGuide": "public/404.md"
+  },
+  "middleware": {
+    "present": true,
+    "wiredToAx": true,
+    "source": "middleware.ts"
+  },
+  "artifacts": {
+    "robotsTxt": {
+      "found": true,
+      "source": "public/robots.txt"
+    },
+    "sitemap": {
+      "found": true,
+      "source": "app/sitemap.ts"
+    },
+    "agentsMd": {
+      "found": true,
+      "source": "public/agents.md"
+    },
+    "jsonLd": {
+      "found": true,
+      "source": "app/layout.tsx"
+    },
+    "llmsTxt": {
+      "found": true,
+      "source": "app/llms.txt/route.ts"
+    },
+    "openapi": {
+      "found": true,
+      "source": "public/openapi.json"
+    }
+  },
+  "auth": {
+    "gatedSurfaces": [
+      {
+        "path": "/api/mcp",
+        "status": "oauth2",
+        "declared": true,
+        "oauthEndpoints": false,
+        "docsUrl": "https://flagship-fixture.example.com/agents.md"
+      }
+    ]
+  },
+  "scaffolds": {
+    "robotsTxt": {
+      "action": "unchanged",
+      "path": "public/robots.txt",
+      "reason": "it already declares every discovery pointer ax would add"
+    }
+  },
+  "markdownTwins": {
+    "enabled": true,
+    "written": [
+      {
+        "route": "/guide",
+        "path": "public/guide.md",
+        "tier": 1,
+        "source": "mdx"
+      },
+      {
+        "route": "/",
+        "path": "public/index.md",
+        "tier": 2,
+        "source": "prerender"
+      },
+      {
+        "route": "/checkout",
+        "path": "public/checkout.md",
+        "tier": 2,
+        "source": "metadata"
+      },
+      {
+        "route": "/confirmation",
+        "path": "public/confirmation.md",
+        "tier": 2,
+        "source": "metadata"
+      },
+      {
+        "route": "/results",
+        "path": "public/results.md",
+        "tier": 2,
+        "source": "metadata"
+      },
+      {
+        "route": "/seats",
+        "path": "public/seats.md",
+        "tier": 2,
+        "source": "metadata"
+      }
+    ],
+    "userOwned": [
+      {
+        "route": "/destinations",
+        "source": "public/destinations.md"
+      }
+    ],
+    "skipped": [
+      {
+        "route": "/account",
+        "reason": "gated",
+        "detail": "The route is gated (isGated), and a gated page’s prerender is typically a login shell — deriving a twin from it would publish a converted login page as the page’s content."
+      }
+    ],
+    "dynamicRouteCount": 1,
+    "deleted": [],
+    "authMd": {
+      "path": "public/auth.md",
+      "surfaceCount": 1
+    }
+  },
+  "sizes": [
+    {
+      "artifact": "ai-catalog.json",
+      "path": "public/.well-known/ai-catalog.json",
+      "bytes": 1857,
+      "chars": 1857,
+      "tokens": 464
+    },
+    {
+      "artifact": "mcp-server-card",
+      "path": "public/.well-known/mcp/server-card.json",
+      "bytes": 638,
+      "chars": 638,
+      "tokens": 160
+    },
+    {
+      "artifact": "mcp-server-card",
+      "path": "public/.well-known/mcp/server-card/api-public-mcp.json",
+      "bytes": 638,
+      "chars": 638,
+      "tokens": 160
+    },
+    {
+      "artifact": "mcp-server-card",
+      "path": "public/.well-known/mcp/server-card/api-mcp.json",
+      "bytes": 832,
+      "chars": 832,
+      "tokens": 208
+    },
+    {
+      "artifact": "markdown-twin",
+      "path": "public/guide.md",
+      "bytes": 1246,
+      "chars": 1242,
+      "tokens": 311
+    },
+    {
+      "artifact": "markdown-twin",
+      "path": "public/index.md",
+      "bytes": 1232,
+      "chars": 1224,
+      "tokens": 306
+    },
+    {
+      "artifact": "markdown-twin",
+      "path": "public/checkout.md",
+      "bytes": 675,
+      "chars": 665,
+      "tokens": 166
+    },
+    {
+      "artifact": "markdown-twin",
+      "path": "public/confirmation.md",
+      "bytes": 609,
+      "chars": 603,
+      "tokens": 151
+    },
+    {
+      "artifact": "markdown-twin",
+      "path": "public/results.md",
+      "bytes": 590,
+      "chars": 584,
+      "tokens": 146
+    },
+    {
+      "artifact": "markdown-twin",
+      "path": "public/seats.md",
+      "bytes": 676,
+      "chars": 666,
+      "tokens": 167
+    },
+    {
+      "artifact": "auth.md",
+      "path": "public/auth.md",
+      "bytes": 811,
+      "chars": 807,
+      "tokens": 202
+    },
+    {
+      "artifact": "404.md",
+      "path": "public/404.md",
+      "bytes": 1489,
+      "chars": 1461,
+      "tokens": 365
+    }
+  ],
+  "ora": {
+    "checks": [
+      {
+        "id": "ard-catalog",
+        "artifact": "ai-catalog.json",
+        "status": "addressed"
+      },
+      {
+        "id": "agent-discovery-file",
+        "artifact": "ai-catalog.json",
+        "status": "addressed"
+      },
+      {
+        "id": "llms-txt-exists",
+        "artifact": "llms.txt",
+        "status": "addressed"
+      },
+      {
+        "id": "llms-txt-formatting",
+        "artifact": "llms.txt",
+        "status": "addressed"
+      },
+      {
+        "id": "markdown-url-fallback",
+        "artifact": "markdown-twins",
+        "status": "addressed"
+      },
+      {
+        "id": "markdown-frontmatter",
+        "artifact": "markdown-twins",
+        "status": "addressed"
+      },
+      {
+        "id": "robots-ai-policy-quality",
+        "artifact": "robots.txt",
+        "status": "addressed"
+      },
+      {
+        "id": "sitemap",
+        "artifact": "sitemap",
+        "status": "addressed"
+      },
+      {
+        "id": "agent-instruction",
+        "artifact": "agents.md",
+        "status": "addressed"
+      },
+      {
+        "id": "json-ld",
+        "artifact": "json-ld",
+        "status": "addressed"
+      },
+      {
+        "id": "org-schema-completeness",
+        "artifact": "json-ld",
+        "status": "addressed"
+      },
+      {
+        "id": "openapi-spec",
+        "artifact": "openapi.json",
+        "status": "addressed"
+      },
+      {
+        "id": "mcp-server",
+        "artifact": "mcp-server",
+        "status": "addressed"
+      },
+      {
+        "id": "mcp-server-card",
+        "artifact": "mcp-server-card",
+        "status": "addressed"
+      },
+      {
+        "id": "auth-md-exists",
+        "artifact": "auth.md",
+        "status": "addressed"
+      },
+      {
+        "id": "auth-md-structure",
+        "artifact": "auth.md",
+        "status": "addressed"
+      },
+      {
+        "id": "mcp-auth-mechanism",
+        "artifact": "auth-declaration",
+        "status": "addressed"
+      },
+      {
+        "id": "oauth-protected-resource",
+        "artifact": "oauth-metadata",
+        "status": "addressed"
+      },
+      {
+        "id": "markdown-negotiation",
+        "artifact": "middleware",
+        "status": "addressed"
+      },
+      {
+        "id": "markdown-negotiation-vary",
+        "artifact": "middleware",
+        "status": "addressed"
+      }
+    ]
+  },
+  "warnings": [],
+  "recommendations": [
+    "public/openapi.json declares no components.securitySchemes — if your API requires auth, add the scheme(s) there so agents know how to authenticate. Omit it only if the API is genuinely open.",
+    "4 pages' twins are derived from page metadata only (the content renders in the browser). The twins say so honestly; for full-fidelity twins, give those pages server-rendered content.",
+    "1 page file has dynamic URL segments, so no markdown twins exist for them (no build-time HTML, and ax never guesses URLs). To give those pages a markdown representation, add a markdown source per page or prerender representative routes.",
+    "sitemap detected (app/sitemap.ts) — make sure robots.txt references it with a \"Sitemap:\" line, that it lists all public routes, and that each entry carries a <lastmod> date so agents can judge how fresh a page is before fetching it.",
+    "robots.txt detected (public/robots.txt) — confirm it explicitly Allows the AI agents you want to reach (scoped to specific User-agent groups, never \"User-agent: *\").",
+    "agents.md detected (public/agents.md) — confirm it has clear when-to-use / when-NOT-to-use guidance for agents.",
+    "JSON-LD structured data detected (app/layout.tsx) — confirm it includes an Organization block with a \"sameAs\" array (LinkedIn/GitHub/npm/socials), a logo, and an address, and at least one more @type beyond Organization (SoftwareApplication/Product, or a FAQPage), so registries can disambiguate and rank your site — covering more schema.org types helps them understand it more fully. Make sure you also have an llms.txt: it and JSON-LD reinforce each other (what your site is for vs. what entity it is).",
+    "Gated routes should keep their honest 401/403 status and point agents at the auth guide: add a WWW-Authenticate header and a Link (or body) pointer to /auth.md in your gated route handlers. A 200 \"this is gated\" page is a soft auth wall agents are built to distrust; ax generates the guide but never rewrites your handlers.",
+    "Markdown twins exist for your pages — link each HTML page to its twin so crawlers find the machine-readable version. Add this to the page <head> (ax prints the tag; it never edits your layout): <link rel=\"alternate\" type=\"text/markdown\" href=\"https://flagship-fixture.example.com/checkout.md\" />",
+    "No app/not-found.tsx found — agents that hit a missing URL get Next.js’s bare default 404, a dead end that makes them give up or guess. Add a standard 404 page in your own design system (a clear “page not found” and a way back home), and include `<link rel=\"alternate\" type=\"text/markdown\" href=\"/404.md\" />` so agents can hop from it to /404.md — the generated wayfinding guide (real routes + discovery links) this build writes. Rendered in the page’s JSX, React hoists the tag into <head> (App Router); use next/head in the Pages Router."
+  ]
+}

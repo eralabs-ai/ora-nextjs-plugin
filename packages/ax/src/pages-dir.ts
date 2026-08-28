@@ -16,8 +16,20 @@ export function findPagesDir(cwd: string): string | undefined {
   return undefined;
 }
 
-/** Extensions the Pages Router treats as a routable module. */
-const PAGE_EXT_RE = /\.(?:tsx|jsx|ts|js|mjs|cjs)$/;
+/** Extensions the Pages Router always treats as a routable module. */
+const BASE_PAGE_EXTENSIONS = ['tsx', 'jsx', 'ts', 'js', 'mjs', 'cjs'] as const;
+
+/** Extensions the Pages Router treats as a routable module (base set — API-endpoint listing). */
+const PAGE_EXT_RE = pageExtRe([]);
+
+/**
+ * Extensions the Pages Router treats as a routable module, widened by the extra extensions the
+ * caller knows `next.config` `pageExtensions` actually serves (`.mdx`/`.md` pages) — the same
+ * conservative default as the App Router's `pageFileRe`: never over-claim a route.
+ */
+function pageExtRe(extraExtensions: readonly string[]): RegExp {
+  return new RegExp(`\\.(?:${[...BASE_PAGE_EXTENSIONS, ...extraExtensions].join('|')})$`);
+}
 
 /** Root-level pages that render error responses, not addressable content — excluded from routes. */
 const ERROR_PAGE_NAMES: ReadonlySet<string> = new Set(['404', '500']);
@@ -28,10 +40,10 @@ const ERROR_PAGE_NAMES: ReadonlySet<string> = new Set(['404', '500']);
  * maps to its directory's URL). `pages/blog/index.tsx` → `['blog']`; `pages/about.tsx` → `['about']`;
  * `pages/api/[transport].ts` → `['api', '[transport]']`.
  */
-function routeSegments(relPath: string): string[] {
+function routeSegments(relPath: string, extRe: RegExp = PAGE_EXT_RE): string[] {
   const parts = pathSegments(relPath);
   const last = parts.pop() ?? '';
-  const name = last.replace(PAGE_EXT_RE, '');
+  const name = last.replace(extRe, '');
   if (name !== 'index') parts.push(name);
   return parts;
 }
@@ -47,13 +59,15 @@ function routeSegments(relPath: string): string[] {
 export function resolvePagesPathname(
   absolutePath: string,
   pagesDir: string | undefined,
+  extraExtensions: readonly string[] = [],
 ): string | undefined {
   if (!pagesDir || !absolutePath.startsWith(pagesDir)) return undefined;
+  const extRe = pageExtRe(extraExtensions);
   const rel = relative(pagesDir, absolutePath);
   const base = rel.split(/[/\\]/).pop() ?? '';
-  if (!PAGE_EXT_RE.test(base)) return undefined;
+  if (!extRe.test(base)) return undefined;
 
-  const segments = routeSegments(rel);
+  const segments = routeSegments(rel, extRe);
   if (segments[0] === 'api') return undefined; // API routes aren't pages
   if (segments.length === 1 && ERROR_PAGE_NAMES.has(segments[0] ?? '')) return undefined;
 
@@ -70,10 +84,14 @@ export function resolvePagesPathname(
  * of `listStaticPageRoutes`. Dynamic/private/API/error files are deliberately absent (their concrete
  * URLs aren't statically knowable, or they aren't content pages).
  */
-export function listStaticPagesRoutes(pagesDir: string): string[] {
+export function listStaticPagesRoutes(
+  pagesDir: string,
+  extraExtensions: readonly string[] = [],
+): string[] {
+  const extRe = pageExtRe(extraExtensions);
   const routes = new Set<string>();
-  for (const file of walkFiles(pagesDir, (name) => PAGE_EXT_RE.test(name))) {
-    const pathname = resolvePagesPathname(file.absolutePath, pagesDir);
+  for (const file of walkFiles(pagesDir, (name) => extRe.test(name))) {
+    const pathname = resolvePagesPathname(file.absolutePath, pagesDir, extraExtensions);
     if (pathname !== undefined) routes.add(pathname);
   }
   return [...routes].sort();
@@ -85,11 +103,15 @@ export function listStaticPagesRoutes(pagesDir: string): string[] {
  * Router's `listDynamicRoutePrefixes` — see that doc for why consumers that answer *misses* need
  * it: under one of these prefixes a URL may be a real page, so "not found" must never be claimed.
  */
-export function listDynamicPagesRoutePrefixes(pagesDir: string): string[] {
+export function listDynamicPagesRoutePrefixes(
+  pagesDir: string,
+  extraExtensions: readonly string[] = [],
+): string[] {
+  const extRe = pageExtRe(extraExtensions);
   const prefixes = new Set<string>();
-  for (const file of walkFiles(pagesDir, (name) => PAGE_EXT_RE.test(name))) {
+  for (const file of walkFiles(pagesDir, (name) => extRe.test(name))) {
     const rel = relative(pagesDir, file.absolutePath);
-    const segments = routeSegments(rel);
+    const segments = routeSegments(rel, extRe);
     if (segments[0] === 'api') continue; // API routes aren't pages
     if (segments.length === 1 && ERROR_PAGE_NAMES.has(segments[0] ?? '')) continue;
 
