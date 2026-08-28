@@ -153,11 +153,31 @@ export async function createReadlinePrompter(): Promise<Prompter & { close(): vo
 /**
  * The terminal width to wrap the redraw region against, re-read on every draw (not cached) so a
  * resize mid-prompt is honored on the very next keystroke instead of corrupting the layout.
- * `output.columns` is `undefined` on a stream that isn't actually a TTY column-aware pipe; 80 is
- * the same conservative fallback `process.stdout.columns` callers elsewhere assume.
+ * `output.columns` is `undefined` on a stream that isn't actually a TTY column-aware pipe — and
+ * `0` on a PTY that never had its size initialized (observed under `script(1)`), which would
+ * truncate every row to the empty string; both fall back to the conservative 80.
  */
 function terminalColumns(output: NodeJS.WriteStream): number {
-  return output.columns ?? 80;
+  const columns = output.columns;
+  return columns !== undefined && columns > 0 ? columns : 80;
+}
+
+/**
+ * Detaches the shared readline interface's key handling for the duration of a raw-mode selector,
+ * returning the restore function. `rl.pause()` alone is NOT enough: pausing stops the input
+ * stream, but the selector immediately resumes it to read its own raw bytes — and readline's
+ * `keypress` listener is still attached, so it processes the same keys in parallel. An arrow-up
+ * then recalls the *previous question's answer* from history and rewrites it over the redraw
+ * region, and every printable key (space, j/k) is echoed at the cursor — the garbled rows this
+ * guards against. Node's `emitKeypressEvents` machinery re-attaches its internal data decoder via
+ * a `newListener` hook when the listeners come back, so remove-and-restore is safe.
+ */
+function suspendKeypressListeners(input: NodeJS.ReadStream): () => void {
+  const listeners = input.rawListeners('keypress') as Array<(...args: unknown[]) => void>;
+  input.removeAllListeners('keypress');
+  return () => {
+    for (const listener of listeners) input.on('keypress', listener);
+  };
 }
 
 /**
@@ -237,6 +257,7 @@ function interactiveMultiSelect(
   };
 
   rl.pause();
+  const restoreKeypress = suspendKeypressListeners(input);
   const wasRaw = input.isRaw === true;
   input.setRawMode(true);
   input.resume();
@@ -248,6 +269,7 @@ function interactiveMultiSelect(
       input.removeListener('data', onData);
       input.setRawMode(wasRaw);
       output.write('\x1b[?25h');
+      restoreKeypress();
       rl.resume();
       resolve(choices.filter((_, i) => selected[i]).map((choice) => choice.value));
     };
@@ -328,6 +350,7 @@ function interactiveSelect(
   };
 
   rl.pause();
+  const restoreKeypress = suspendKeypressListeners(input);
   const wasRaw = input.isRaw === true;
   input.setRawMode(true);
   input.resume();
@@ -339,6 +362,7 @@ function interactiveSelect(
       input.removeListener('data', onData);
       input.setRawMode(wasRaw);
       output.write('\x1b[?25h');
+      restoreKeypress();
       rl.resume();
       resolve(choices[focus]?.value);
     };

@@ -68,6 +68,30 @@ describe('buildRouterModel — listPageRoutes', () => {
 
     expect(buildRouterModel(dir).listPageRoutes()).toEqual(['/', '/about', '/dashboard']);
   });
+
+  it('counts MDX pages as routes exactly when pageExtensions serves them', () => {
+    write('app/page.tsx');
+    write('app/guide/page.mdx', '# Guide\n');
+    write('pages/faq.mdx', '# FAQ\n');
+
+    // Without pageExtensions the model stays conservative: Next.js may not serve MDX at all, so
+    // claiming /guide or /faq as a route would over-claim.
+    expect(buildRouterModel(dir).listPageRoutes()).toEqual(['/']);
+
+    const configured = buildRouterModel(dir, {
+      pageExtensions: ['js', 'jsx', 'md', 'mdx', 'ts', 'tsx'],
+    });
+    expect(configured.listPageRoutes()).toEqual(['/', '/faq', '/guide']);
+    expect(configured.resolveUrlForFile(join(dir, 'app', 'guide', 'page.mdx'))).toBe('/guide');
+  });
+
+  it('records the dynamic prefix of an MDX page under a dynamic segment when configured', () => {
+    write('app/docs/[slug]/page.mdx', '# Doc\n');
+    expect(buildRouterModel(dir).listDynamicRoutePrefixes()).toEqual([]);
+    expect(
+      buildRouterModel(dir, { pageExtensions: ['mdx', 'tsx'] }).listDynamicRoutePrefixes(),
+    ).toEqual(['/docs']);
+  });
 });
 
 describe('buildRouterModel — resolveUrlForFile', () => {

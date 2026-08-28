@@ -476,13 +476,22 @@ function metadataTwinBody(
   return `${lines.join('\n')}\n`;
 }
 
+/** Root-level generated markdown that is NOT a route twin — each has its own lifecycle owner. */
+const NON_TWIN_GENERATED_FILES: ReadonlySet<string> = new Set([
+  'auth.md', // managed by auth-md.ts
+  '404.md', // managed by agent-404.ts
+]);
+
 /** Every `.md` under `public/` carrying the generated-by marker — ax's own previous output. */
 function listGeneratedTwinFiles(publicDir: string): string[] {
   if (!existsSync(publicDir)) return [];
   const files: string[] = [];
   for (const file of walkFiles(publicDir, (name) => name.endsWith('.md'))) {
-    // auth.md is generated too but is not a route twin; its lifecycle is managed by auth-md.ts.
-    if (file.relativeDir === '' && file.absolutePath.endsWith(`${sep}auth.md`)) continue;
+    // Generated-but-not-a-twin files must never enter the stale sweep: no run plans them as
+    // twins, so the sweep would delete them every build right before their owner rewrites them —
+    // churn that surfaces as a phantom `deleted` entry in the report.
+    const name = file.absolutePath.split(sep).pop() ?? '';
+    if (file.relativeDir === '' && NON_TWIN_GENERATED_FILES.has(name)) continue;
     try {
       if (isGeneratedMarkdown(readFileSync(file.absolutePath, 'utf8'))) {
         files.push(file.absolutePath);

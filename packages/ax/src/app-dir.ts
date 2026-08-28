@@ -16,8 +16,20 @@ export function findAppDir(cwd: string): string | undefined {
   return undefined;
 }
 
+/** Extensions the App Router always recognizes as a page. */
+const BASE_PAGE_EXTENSIONS = ['tsx', 'jsx', 'js'] as const;
+
+/**
+ * Extra page extensions the caller *knows* Next.js serves — whether `page.mdx` / `page.md` routes
+ * at all depends on `next.config` `pageExtensions`, so the router model threads the configured
+ * ones here and the default stays conservative (never over-claim a route Next may not serve).
+ */
+export type ExtraPageExtensions = readonly string[];
+
 /** File names the App Router recognizes as a page, across the extensions that can render one. */
-const PAGE_FILE_RE = /^page\.(?:tsx|jsx|js)$/;
+function pageFileRe(extraExtensions: ExtraPageExtensions): RegExp {
+  return new RegExp(`^page\\.(?:${[...BASE_PAGE_EXTENSIONS, ...extraExtensions].join('|')})$`);
+}
 
 /**
  * The URL path an App Router page file is served at, or undefined when it isn't a statically
@@ -28,11 +40,12 @@ const PAGE_FILE_RE = /^page\.(?:tsx|jsx|js)$/;
 export function resolvePagePathname(
   absolutePath: string,
   appDir: string | undefined,
+  extraExtensions: ExtraPageExtensions = [],
 ): string | undefined {
   if (!appDir || !absolutePath.startsWith(appDir)) return undefined;
   const rel = relative(appDir, absolutePath);
   const base = rel.split(/[/\\]/).pop() ?? '';
-  if (!PAGE_FILE_RE.test(base)) return undefined;
+  if (!pageFileRe(extraExtensions).test(base)) return undefined;
   return resolveStaticSegments(rel);
 }
 
@@ -62,10 +75,9 @@ export interface MdxPageFile {
 
 /**
  * Every `page.mdx` / `page.md` under the app dir whose route is statically addressable, sorted by
- * route. Deliberately separate from {@link listStaticPageRoutes}: whether an MDX page actually
- * routes depends on `next.config` `pageExtensions` (which the synchronous router model never
- * loads), so callers that know the configured extensions — markdown-twin derivation — filter on
- * them, and the general route list never over-claims a route that Next.js may not serve.
+ * route. Deliberately separate from {@link listStaticPageRoutes}: markdown-twin derivation wants
+ * the *files* (their markdown is the twin source) regardless of what the route list reports, and
+ * it applies its own `pageExtensions` filter before trusting that a file routes.
  */
 export function listMdxPageFiles(appDir: string): MdxPageFile[] {
   const pages: MdxPageFile[] = [];
@@ -83,10 +95,14 @@ export function listMdxPageFiles(appDir: string): MdxPageFile[] {
  * route table at runtime, but the source tree does. Dynamic/parallel/intercepted routes are
  * deliberately absent (their concrete URLs aren't statically knowable).
  */
-export function listStaticPageRoutes(appDir: string): string[] {
+export function listStaticPageRoutes(
+  appDir: string,
+  extraExtensions: ExtraPageExtensions = [],
+): string[] {
+  const matcher = pageFileRe(extraExtensions);
   const routes = new Set<string>();
-  for (const file of walkFiles(appDir, (name) => PAGE_FILE_RE.test(name))) {
-    const pathname = resolvePagePathname(file.absolutePath, appDir);
+  for (const file of walkFiles(appDir, (name) => matcher.test(name))) {
+    const pathname = resolvePagePathname(file.absolutePath, appDir, extraExtensions);
     if (pathname !== undefined) routes.add(pathname);
   }
   return [...routes].sort();
@@ -100,9 +116,13 @@ export function listStaticPageRoutes(appDir: string): string[] {
  * be a real page, so "not found" must never be claimed there. Parallel/intercepting/private
  * segments still contribute nothing — they aren't URL-addressable at a knowable prefix.
  */
-export function listDynamicRoutePrefixes(appDir: string): string[] {
+export function listDynamicRoutePrefixes(
+  appDir: string,
+  extraExtensions: ExtraPageExtensions = [],
+): string[] {
+  const matcher = pageFileRe(extraExtensions);
   const prefixes = new Set<string>();
-  for (const file of walkFiles(appDir, (name) => PAGE_FILE_RE.test(name))) {
+  for (const file of walkFiles(appDir, (name) => matcher.test(name))) {
     const rel = relative(appDir, file.absolutePath);
     const prefix = dynamicRoutePrefix(pathSegments(join(rel, '..')));
     if (prefix !== undefined) prefixes.add(prefix);

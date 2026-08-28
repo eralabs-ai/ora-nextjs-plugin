@@ -47,7 +47,7 @@ upstream moves, bump the pinned commit above, re-vendor all three files, and rec
 
 ```sh
 # One fixture's generated catalog (pip install jsonschema first for the strict schema check):
-./spec/ard/conformance/bin/conformance-test manifest fixtures/openapi/public/.well-known/ai-catalog.json
+./spec/ard/conformance/bin/conformance-test manifest fixtures/flagship/public/.well-known/ai-catalog.json
 
 # All fixture catalogs (what CI runs):
 pnpm conformance

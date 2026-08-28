@@ -1,0 +1,28 @@
+{
+  "name": "com.example.flagship-fixture/api-public-mcp",
+  "description": "flagship MCP server at /api/public/mcp",
+  "version": "0.0.0",
+  "serverUrl": "https://flagship-fixture.example.com/api/public/mcp",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://flagship-fixture.example.com/api/public/mcp"
+    }
+  ],
+  "tools": [
+    {
+      "name": "search_flights"
+    }
+  ],
+  "serverInfo": {
+    "name": "flagship",
+    "version": "0.0.0"
+  },
+  "transport": {
+    "type": "streamable-http",
+    "endpoint": "https://flagship-fixture.example.com/api/public/mcp"
+  },
+  "capabilities": {
+    "tools": {}
+  }
+}

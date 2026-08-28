@@ -464,14 +464,20 @@ export async function generateCatalog(
 
   const site = readSiteMetadata(cwd);
 
-  // Decide the file-lookup strategy once (App Router, Pages Router, or both), then hand the same
-  // model to every detector so they all see one route universe — see router-model.ts.
-  const router = buildRouterModel(cwd);
-
   const { config } = await loadAxConfig(cwd);
 
   const nextConfig = await loadNextConfig(cwd);
   for (const warning of nextConfig.warnings) warn(warning);
+
+  // Decide the file-lookup strategy once (App Router, Pages Router, or both), then hand the same
+  // model to every detector so they all see one route universe — see router-model.ts. Built after
+  // next.config so the model knows whether `pageExtensions` makes MDX pages route.
+  const router = buildRouterModel(cwd, {
+    ...(nextConfig.config.pageExtensions !== undefined
+      ? { pageExtensions: nextConfig.config.pageExtensions }
+      : {}),
+  });
+
   const basePath = nextConfig.config.basePath ?? '';
   if (basePath) {
     warn(

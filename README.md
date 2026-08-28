@@ -198,5 +198,5 @@ actionable message.
 ```
 packages/ax            the plugin / CLI (`@ora-ai/ax-nextjs`) — the npm package (3 runtime deps: ajv, ajv-formats, jiti)
 spec/                  vendored AI Catalog spec + hand-written JSON Schema + validator oracle
-fixtures/*             minimal-but-real Next.js apps — the test suite, docs examples, and eval corpus
+fixtures/*             real Next.js apps — the flagship (a full demo-app fork) + single-axis fixtures; the test suite, docs examples, and eval corpus
 ```

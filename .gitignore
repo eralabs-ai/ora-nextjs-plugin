@@ -26,16 +26,11 @@ fixtures/**/public/.well-known/mcp/server-card/
 # Markdown twins + the auth guide ax's postbuild step generates in fixtures — build output. The
 # tracked artifacts are the normalized snapshots under fixtures/*/twins.golden/. Scoped to the
 # exact generated paths so hand-authored fixture markdown (markdown-twins/public/hand.md,
-# discovery/public/agents.md) stays committed; a newly generated file that isn't listed here shows
-# up as untracked, which is the prompt to snapshot and list it.
+# flagship/public/destinations.md) stays committed; a newly generated file that isn't listed here
+# shows up as untracked, which is the prompt to snapshot and list it.
 fixtures/markdown-twins/public/index.md
 fixtures/markdown-twins/public/guides/
 fixtures/markdown-twins/public/live.md
-fixtures/mdx-content/public/index.md
-fixtures/mdx-content/public/guide.md
-fixtures/mcp-multi-server/public/index.md
-fixtures/discovery/public/index.md
-fixtures/middleware/public/index.md
 fixtures/*/public/auth.md
 fixtures/*/public/404.md
 
@@ -52,3 +47,18 @@ fixtures/**/.ax/
 
 # npm pack build artifact (not committed in this repo; the demo repo commits its own copy)
 *.tgz
+
+# Flagship fixture generated twins (its hand-authored twin, public/destinations.md, stays
+# committed; generated per-slug twins under public/destinations/ are covered by the dir entry).
+fixtures/flagship/public/index.md
+fixtures/flagship/public/results.md
+fixtures/flagship/public/checkout.md
+fixtures/flagship/public/seats.md
+fixtures/flagship/public/confirmation.md
+fixtures/flagship/public/guide.md
+fixtures/flagship/public/account.md
+fixtures/flagship/public/destinations/
+
+# flagship-pages fixture generated twins — build output.
+fixtures/flagship-pages/public/index.md
+fixtures/flagship-pages/public/destinations.md
