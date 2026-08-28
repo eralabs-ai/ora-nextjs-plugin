@@ -24,7 +24,15 @@
     "@ax-fixtures/pages-webmcp-declarative": "0.0.0",
     "@ax-fixtures/webmcp-declarative": "0.0.0",
     "@ax-fixtures/webmcp-imperative": "0.0.0",
-    "@ora-ai/ax-nextjs": "0.0.0"
+    "@ora-ai/ax-nextjs": "0.0.0",
+    "@ax-fixtures/flagship": "0.0.0",
+    "@ax-fixtures/flagship-pages": "0.0.0",
+    "@ax-fixtures/next-auth": "0.0.0",
+    "@ax-fixtures/webmcp": "0.0.0"
   },
-  "changesets": []
+  "changesets": [
+    "chore-drop-ard-config",
+    "phase-2-1-config",
+    "phase-2-8-gating-auth"
+  ]
 }
