@@ -80,14 +80,6 @@ export interface AxConfig {
    */
   scaffoldLlmsTxt?: boolean;
   /**
-   * Whether to scaffold an agent-aware 404 page (`app/not-found.tsx`) when none exists, plus a
-   * route-manifest data module (`app/not-found-agent-data.*`) that is regenerated on every build.
-   * The page tells agents why the 404 happened and how to continue (discovery links + the app's
-   * real routes); the not-found file itself is scaffolded once and never overwritten. **Opt-in —
-   * defaults to `false`**, same reasoning as `scaffoldLlmsTxt`.
-   */
-  scaffoldAgent404?: boolean;
-  /**
    * Whether to manage `public/robots.txt`. When on, ax appends the discovery pointers it is
    * uniquely placed to know — a `Sitemap:` line (only when a sitemap actually exists) and an
    * `Agentmap:` line for the catalog it just generated — to an existing `public/robots.txt`, in a
@@ -109,7 +101,8 @@ export interface AxConfig {
   /**
    * Whether to generate markdown twins — per-page markdown files in `public/` (route `/docs` →
    * `/docs.md`) derived from markdown sources (`page.mdx`) or the build's prerendered HTML, plus a
-   * `public/auth.md` guide when gated surfaces exist. **Default `true`**, unlike the scaffolds:
+   * `public/auth.md` guide when gated surfaces exist and a `public/404.md` wayfinding guide (where
+   * an agent continues from a dead-end URL). **Default `true`**, unlike the scaffolds:
    * twins are *generated artifacts* (regenerated every build, marked generated-by, never yours to
    * edit), not one-time source-tree scaffolds, and the first run that would write them is confirmed
    * at the review-before-publish gate, so nothing ships silently. Set `false` to opt out entirely.
@@ -221,7 +214,6 @@ export const axConfigSchema: Record<string, unknown> = {
     },
     emit: { type: 'string', enum: ['static', 'route'] },
     scaffoldLlmsTxt: { type: 'boolean' },
-    scaffoldAgent404: { type: 'boolean' },
     scaffoldRobots: { type: 'boolean' },
     scaffoldJsonLd: { type: 'boolean' },
     markdownTwins: { type: 'boolean' },

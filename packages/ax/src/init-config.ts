@@ -28,7 +28,6 @@ export interface InitAnswers {
   scaffoldLlmsTxt: boolean;
   scaffoldJsonLd: boolean;
   scaffoldRobots: boolean;
-  scaffoldAgent404: boolean;
   markdownTwins: boolean;
   report: boolean;
   /**
@@ -109,14 +108,9 @@ export function renderAxConfig(answers: InitAnswers, target: ConfigFileTarget): 
       String(answers.scaffoldRobots),
     ),
     field(
-      'Scaffold an agent-aware 404 that tells agents why a page is missing and lists your real ' +
-        'routes and discovery artifacts, so a wrong URL is a signpost instead of a dead end.',
-      'scaffoldAgent404',
-      String(answers.scaffoldAgent404),
-    ),
-    field(
-      'Generate markdown twins of your prerendered pages (route /docs → /docs.md) plus /auth.md ' +
-        'when surfaces are gated. Regenerated every build — generated output, never yours to edit.',
+      'Generate markdown twins of your prerendered pages (route /docs → /docs.md), /auth.md when ' +
+        'surfaces are gated, and the /404.md wayfinding guide lost agents continue from. ' +
+        'Regenerated every build — generated output, never yours to edit.',
       'markdownTwins',
       String(answers.markdownTwins),
     ),

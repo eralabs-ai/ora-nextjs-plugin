@@ -26,7 +26,6 @@ describe('loadAxConfig', () => {
       siteUrl: undefined,
       emit: 'static',
       scaffoldLlmsTxt: false,
-      scaffoldAgent404: false,
       scaffoldRobots: false,
       scaffoldJsonLd: false,
       markdownTwins: true,

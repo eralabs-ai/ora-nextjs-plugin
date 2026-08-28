@@ -789,11 +789,11 @@ describe('runInit markdown twins + serving-manifest wiring', () => {
 
   it('declining the twin and manifest questions writes markdownTwins: false and wires no prebuild', async () => {
     writeBareApp(dir);
-    // Setup order: llmsTxt, jsonLd, robots, agent404, markdownTwins, report, manifest — deselect
+    // Setup order: llmsTxt, jsonLd, robots, markdownTwins, report, manifest — deselect
     // markdownTwins and manifest, keep the rest. Only the build offer remains a confirm.
     const prompter = new ScriptedPrompter({
       text: ['https://acme.com'],
-      multiSelect: [['llmsTxt', 'jsonLd', 'robots', 'agent404', 'report']],
+      multiSelect: [['llmsTxt', 'jsonLd', 'robots', 'report']],
       confirm: [false],
     });
     const code = await runInit([], { ...io(), prompter });
@@ -814,7 +814,7 @@ describe('runInit setup multi-select', () => {
     // Deselect only jsonLd and manifest; everything else in SETUP_OPTIONS stays selected.
     const prompter = new ScriptedPrompter({
       text: ['https://acme.com'],
-      multiSelect: [['llmsTxt', 'robots', 'agent404', 'markdownTwins', 'report']],
+      multiSelect: [['llmsTxt', 'robots', 'markdownTwins', 'report']],
       confirm: [false],
     });
 
@@ -825,7 +825,6 @@ describe('runInit setup multi-select', () => {
     expect(source).toContain('scaffoldJsonLd: false,');
     expect(source).toContain('scaffoldLlmsTxt: true,');
     expect(source).toContain('scaffoldRobots: true,');
-    expect(source).toContain('scaffoldAgent404: true,');
     expect(source).toContain('markdownTwins: true,');
     expect(source).toContain('report: true,');
 

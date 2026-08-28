@@ -137,6 +137,59 @@ describe('generateCatalog agent-readiness recommendations', () => {
   });
 });
 
+// The generated /404.md wayfinding guide: planned whenever markdownTwins is on and a router
+// exists, rendered from serving-manifest data with this run's own outputs (planned twins, the
+// catalog) overlaid so the guide describes the build it ships with.
+describe('generateCatalog notFoundMdPlan', () => {
+  it('plans /404.md for an App Router app, listing routes and the catalog it writes this run', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    mkdirSync(join(dir, 'app', 'docs'), { recursive: true });
+    writeFileSync(join(dir, 'app', 'page.tsx'), 'export default () => null;', 'utf8');
+    writeFileSync(join(dir, 'app', 'docs', 'page.tsx'), 'export default () => null;', 'utf8');
+
+    const { notFoundMdPlan } = await generateCatalog({ cwd: dir });
+
+    expect(notFoundMdPlan?.servedPath).toBe('/404.md');
+    expect(notFoundMdPlan?.content).toContain('# Page not found');
+    expect(notFoundMdPlan?.content).toContain('[/docs](/docs)');
+    // The catalog is written alongside this run, so the guide may link it before it's on disk.
+    expect(notFoundMdPlan?.content).toContain('/.well-known/ai-catalog.json');
+    expect(notFoundMdPlan?.content).toContain('generated-by: "@ora-ai/ax-nextjs"');
+  });
+
+  it('plans no /404.md when markdownTwins is off or no router exists', async () => {
+    // No app/ or pages/ dir at all → nothing is a page miss → no guide.
+    expect((await generateCatalog({ cwd: dir })).notFoundMdPlan).toBeUndefined();
+
+    mkdirSync(join(dir, 'app'), { recursive: true });
+    writeFileSync(join(dir, 'app', 'page.tsx'), 'export default () => null;', 'utf8');
+    writeFileSync(join(dir, 'ax.config.mjs'), 'export default { markdownTwins: false };\n', 'utf8');
+    expect((await generateCatalog({ cwd: dir })).notFoundMdPlan).toBeUndefined();
+  });
+
+  it('reports every detected 404 page, segment-level included', async () => {
+    mkdirSync(join(dir, 'app', 'docs'), { recursive: true });
+    writeFileSync(join(dir, 'app', 'page.tsx'), 'export default () => null;', 'utf8');
+    writeFileSync(
+      join(dir, 'app', 'not-found.tsx'),
+      'export default () => <link rel="alternate" type="text/markdown" href="/404.md" />;',
+      'utf8',
+    );
+    writeFileSync(join(dir, 'app', 'docs', 'not-found.tsx'), 'export default () => null;', 'utf8');
+
+    const { report } = await generateCatalog({ cwd: dir });
+
+    expect(report.agent404).toEqual({
+      notFoundPresent: true,
+      agentAware: false,
+      pages: [
+        { source: join('app', 'docs', 'not-found.tsx'), agentAware: false },
+        { source: join('app', 'not-found.tsx'), agentAware: true },
+      ],
+    });
+  });
+});
+
 // The build report is what a coding agent reads instead of the CLI output, and its `ora` section is
 // what makes it actionable: each artifact the plugin knows about, expressed as the Ora checks it
 // contributes to.

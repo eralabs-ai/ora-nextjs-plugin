@@ -37,6 +37,7 @@ fixtures/mcp-multi-server/public/index.md
 fixtures/discovery/public/index.md
 fixtures/middleware/public/index.md
 fixtures/*/public/auth.md
+fixtures/*/public/404.md
 
 # The serving-manifest data module a fixture's `prebuild: ax manifest` regenerates every build —
 # build output there (real projects may commit theirs; a fixture must rebuild it from scratch).

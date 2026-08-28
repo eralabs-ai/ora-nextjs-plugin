@@ -156,11 +156,19 @@ export interface BuildReport {
     llmsTxt: ReportArtifact;
     openapi: ReportArtifact;
   };
-  /** Agent-aware 404 status: whether a not-found page exists and whether it signposts agents. */
+  /**
+   * Agent-aware 404 status. `pages` lists every detected 404 page — App Router `not-found.*`
+   * files at the root *and* in route segments (a `notFound()` inside a segment renders the nearest
+   * one, bypassing the root), plus the Pages Router's `pages/404.*` — each with whether it links
+   * agents onward (the `/404.md` alternate link, llms.txt, or the AI Catalog). `agentAware` is
+   * true only when every detected page does. `markdownGuide` is the generated `public/404.md`
+   * wayfinding guide, reconciled by the CLI after the write.
+   */
   agent404: {
     notFoundPresent: boolean;
     agentAware: boolean;
-    source?: string;
+    pages: Array<{ source: string; agentAware: boolean }>;
+    markdownGuide?: string;
   };
   /**
    * The negotiation middleware: whether a `middleware.{ts,js}` exists and whether it wires the

@@ -123,6 +123,38 @@ describe('runCli markdown twins', () => {
     });
   });
 
+  it('writes the /404.md wayfinding guide alongside the twins and reconciles the report', async () => {
+    writeAppWithPrerender();
+    const code = await runCli(['--yes', '--report'], io());
+    expect(code).toBe(0);
+
+    expect(stdout.some((l) => l.includes('404 wayfinding guide → /404.md'))).toBe(true);
+    const guide = readFileSync(join(dir, 'public', '404.md'), 'utf8');
+    expect(guide).toContain(`generated-by: "${GENERATED_BY}"`);
+    expect(guide).toContain('# Page not found');
+    // The guide links the twin written this same run — overlaid at plan time, not read off disk.
+    expect(guide).toContain('markdown: [/index.md](/index.md)');
+
+    const report = readReport();
+    expect(report.agent404.markdownGuide).toBe(join('public', '404.md'));
+    expect(report.sizes.some((s) => s.artifact === '404.md')).toBe(true);
+  });
+
+  it('markdownTwins: false plans no /404.md and leaves an existing generated one alone', async () => {
+    writeAppWithPrerender();
+    write(
+      'ax.config.ts',
+      "export default { siteUrl: 'https://example.com', markdownTwins: false };\n",
+    );
+    write('public/404.md', `---\ntitle: "x"\ngenerated-by: "${GENERATED_BY}"\n---\n\nold\n`);
+    const code = await runCli(['--yes', '--report'], io());
+    expect(code).toBe(0);
+    // Turning the feature off is the user's call; deleting their public/ contents on that signal
+    // is not ours to make silently — same posture as the twins.
+    expect(readFileSync(join(dir, 'public', '404.md'), 'utf8')).toContain('old');
+    expect(readReport().agent404.markdownGuide).toBeUndefined();
+  });
+
   it('refreshes an existing serving manifest after the twins land', async () => {
     writeAppWithPrerender();
     write('ax-manifest.ts', 'export const axManifest = {} as const;\n');

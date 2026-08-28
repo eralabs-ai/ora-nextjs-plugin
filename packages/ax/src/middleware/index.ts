@@ -83,7 +83,8 @@ export interface WithAxOptions {
  * the build never lists a gated route's twin, and artifacts aren't gateable surfaces).
  */
 function discoveryPaths(manifest: AxServingManifest): ReadonlySet<string> {
-  const { aiCatalog, mcpServerCard, mcpServerCards, llmsTxt, authMd, openapi } = manifest.artifacts;
+  const { aiCatalog, mcpServerCard, mcpServerCards, llmsTxt, authMd, notFoundMd, openapi } =
+    manifest.artifacts;
   return new Set(
     [
       aiCatalog,
@@ -91,6 +92,7 @@ function discoveryPaths(manifest: AxServingManifest): ReadonlySet<string> {
       ...(mcpServerCards ?? []),
       llmsTxt,
       authMd,
+      notFoundMd,
       openapi,
       ...Object.values(manifest.markdownTwins),
     ].filter((path): path is string => typeof path === 'string'),

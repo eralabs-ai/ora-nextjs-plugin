@@ -105,7 +105,6 @@ function withDefaults(config: AxConfig): ResolvedAxConfig {
     siteUrl: config.siteUrl,
     emit: config.emit ?? 'static',
     scaffoldLlmsTxt: config.scaffoldLlmsTxt ?? false,
-    scaffoldAgent404: config.scaffoldAgent404 ?? false,
     scaffoldRobots: config.scaffoldRobots ?? false,
     scaffoldJsonLd: config.scaffoldJsonLd ?? false,
     // Default ON, unlike the scaffolds: twins are regenerated build artifacts (never user-owned

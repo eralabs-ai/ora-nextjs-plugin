@@ -628,12 +628,11 @@ function writeGatingCards(
  * `wireManifest`, which isn't a config field at all) so the mapping in {@link collectInteractive} is
  * one explicit switch rather than a name-matching convention.
  */
-type SetupOptionValue =
-  'llmsTxt' | 'jsonLd' | 'robots' | 'agent404' | 'markdownTwins' | 'report' | 'manifest';
+type SetupOptionValue = 'llmsTxt' | 'jsonLd' | 'robots' | 'markdownTwins' | 'report' | 'manifest';
 
 /**
- * The seven setup choices, each pre-selected — replaces what used to be seven sequential y/n
- * confirms. One question reads faster than seven, and a list makes the *shape* of what's on offer
+ * The six setup choices, each pre-selected — replaces what used to be sequential y/n
+ * confirms. One question reads faster than six, and a list makes the *shape* of what's on offer
  * visible at a glance instead of trickling out one item at a time. Labels stay short; a clause is
  * added only where the name alone doesn't say what the user would be giving up by deselecting it,
  * and that clause states the value to the user/agents, not the mechanism.
@@ -657,13 +656,8 @@ const SETUP_OPTIONS: Array<{ value: SetupOptionValue; label: string; selected: t
     selected: true,
   },
   {
-    value: 'agent404',
-    label: 'Scaffold an agent-aware 404 page — steers lost agents back',
-    selected: true,
-  },
-  {
     value: 'markdownTwins',
-    label: 'Markdown twins on every build (/docs → /docs.md)',
+    label: 'Markdown twins on every build (/docs → /docs.md, plus a /404.md wayfinding guide)',
     selected: true,
   },
   {
@@ -741,7 +735,6 @@ async function collectInteractive(
       scaffoldLlmsTxt: setupSelected('llmsTxt'),
       scaffoldJsonLd: setupSelected('jsonLd'),
       scaffoldRobots: setupSelected('robots'),
-      scaffoldAgent404: setupSelected('agent404'),
       // Twin *intent* lands in config; generation happens at build (twins need the prerendered output).
       markdownTwins: setupSelected('markdownTwins'),
       report: setupSelected('report'),
@@ -971,7 +964,6 @@ export async function runInit(argv: string[], io: InitIO = {}): Promise<number> 
       scaffoldLlmsTxt: true,
       scaffoldJsonLd: true,
       scaffoldRobots: true,
-      scaffoldAgent404: true,
       markdownTwins: true,
       report: true,
     };
