@@ -1,5 +1,7 @@
 import type { ArtifactSize } from './artifact-size.js';
+import type { DetectedAuthProvider } from './detect-auth-provider.js';
 import type { TwinSkipReason, TwinTier } from './markdown-twins.js';
+import type { EntryAuthStatus } from './types.js';
 import type { OraCheckStatus } from './ora-checks.js';
 import type { RouterKind } from './router-model.js';
 import type { JsonLdScaffoldResult } from './scaffold-json-ld.js';
@@ -74,6 +76,32 @@ export interface OraReport {
   checks: OraCheckStatus[];
 }
 
+/**
+ * The auth posture of the site's agent surfaces, in one structured place — which surfaces are
+ * gated and what agents were told about each, plus the detected auth provider with a durable note
+ * on what it's worth for agent auth (never version-specific wiring, which would rot). An agent
+ * working the report reads each surface's `note` as its next step.
+ */
+export interface ReportAuth {
+  /** One entry per published gated surface, from the same descriptors the catalog carries. */
+  gatedSurfaces: Array<{
+    /** Served URL path of the gated surface. */
+    path: string;
+    /** The published scheme (`unknown` = gated but undeclared — the actionable case). */
+    status: EntryAuthStatus;
+    /** Whether the descriptor came from an ax.config declaration (vs derived from the source). */
+    declared: boolean;
+    /** Whether OAuth endpoint URLs are published for this surface. */
+    oauthEndpoints: boolean;
+    /** Where a human obtains access, when declared. */
+    docsUrl?: string;
+    /** The actionable gap for this surface, when there is one. */
+    note?: string;
+  }>;
+  /** The detected auth-provider dependency, when a known one is present. */
+  provider?: DetectedAuthProvider;
+}
+
 export interface BuildReport {
   // No version field yet: the shape is still moving and nothing external consumes it until the
   // package is published. Add `reportVersion: 1` at first publish, and bump it only on a change that
@@ -145,6 +173,8 @@ export interface BuildReport {
     wiredToAx: boolean;
     source?: string;
   };
+  /** Auth posture of the agent surfaces: gated surfaces, their schemes, the detected provider. */
+  auth: ReportAuth;
   /** What the opt-in source-tree scaffolds wrote, appended, or skipped this run. */
   scaffolds: ReportScaffolds;
   /** The markdown-twin pass: what was written, what was refused and why (see the type). */

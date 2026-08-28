@@ -4,6 +4,7 @@
 // in spec/.
 
 import type { IsGated } from './gating.js';
+import type { EntryAuth } from './types.js';
 
 /** One entry the developer declares by hand, merged over/appended to inferred entries. */
 export interface AxEntryOverride {
@@ -30,8 +31,21 @@ export interface AxEntryOverride {
    */
   representativeQueries?: string[];
   metadata?: Record<string, unknown>;
-  // Entries also remain an open extension point (auth, top-level provenance, ...). Config
-  // overrides mirror that.
+  /**
+   * Declares the entry's auth posture when ax can't derive it — most usefully the endpoint(s)
+   * where an agent authenticates. Exactly Ora's secret-free `EntryAuth` shape (status, OAuth
+   * endpoint URLs, scope keys, and a human docs URL — never credentials or prose): anything else
+   * would be dropped at crawl time anyway. Declared once here, it flows to every surface — the
+   * catalog entry, the MCP server card's `authentication` block, and the generated `/auth.md`.
+   * On an MCP server's entry it also refines the mount itself, replacing the undescribable
+   * `status: "unknown"` a detected `withMcpAuth` wrapper gets. A declared descriptor wins over a
+   * detected one (with a warning when they disagree), and — like a detected one — marks the
+   * surface as gated. URL fields must be absolute http(s) URLs; the config gate rejects anything
+   * else loudly.
+   */
+  auth?: EntryAuth;
+  // Entries also remain an open extension point (top-level provenance, ...). Config overrides
+  // mirror that.
   [key: string]: unknown;
 }
 
@@ -138,6 +152,40 @@ export interface AxConfig {
 export type ResolvedAxConfig = Required<Omit<AxConfig, 'siteUrl' | 'isGated'>> &
   Pick<AxConfig, 'siteUrl' | 'isGated'>;
 
+// Mirrors the caps in auth.ts (which mirror Ora's crawl-time re-validation): URL fields must be
+// absolute http(s) and in-bounds, lists are capped. Closed objects, unlike the entry override
+// itself: `auth` is ax's own typed contract with a known target shape, so an unrecognized key in
+// it is a typo worth failing loudly on, not extensibility.
+const entryAuthSchema = {
+  type: 'object',
+  required: ['status'],
+  properties: {
+    status: { type: 'string', enum: ['oauth2', 'api_key', 'none', 'unknown'] },
+    oauth: {
+      type: 'object',
+      properties: {
+        authorizationEndpoint: { type: 'string', maxLength: 256, pattern: '^https?://' },
+        tokenEndpoint: { type: 'string', maxLength: 256, pattern: '^https?://' },
+        registrationEndpoint: { type: 'string', maxLength: 256, pattern: '^https?://' },
+        scopesSupported: {
+          type: 'array',
+          maxItems: 32,
+          items: { type: 'string', minLength: 1, maxLength: 256 },
+        },
+        grantTypesSupported: {
+          type: 'array',
+          maxItems: 32,
+          items: { type: 'string', minLength: 1, maxLength: 256 },
+        },
+        dcr: { type: 'boolean' },
+      },
+      additionalProperties: false,
+    },
+    docsUrl: { type: 'string', maxLength: 256, pattern: '^https?://' },
+  },
+  additionalProperties: false,
+};
+
 const entryOverrideSchema = {
   type: 'object',
   required: ['identifier'],
@@ -153,6 +201,7 @@ const entryOverrideSchema = {
     // load ("fails loudly") instead of at the write gate.
     representativeQueries: { type: 'array', minItems: 2, maxItems: 5, items: { type: 'string' } },
     metadata: { type: 'object' },
+    auth: entryAuthSchema,
   },
   // Open extensibility, matching the spec's own entries — see AxEntryOverride above.
   additionalProperties: true,

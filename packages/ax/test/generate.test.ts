@@ -698,3 +698,245 @@ describe('generateCatalog multi-mount MCP', () => {
     expect(report.ora.checks.some((c) => c.id === 'mcp-server-card')).toBe(false);
   });
 });
+
+describe('generateCatalog with config-declared entry auth', () => {
+  const declaringConfig = [
+    'export default {',
+    "  siteUrl: 'https://example.com',",
+    '  entries: [{',
+    "    identifier: 'urn:air:example.com:mcp-server',",
+    '    auth: {',
+    "      status: 'oauth2',",
+    "      oauth: { authorizationEndpoint: 'https://auth.example.com/authorize', tokenEndpoint: 'https://auth.example.com/token' },",
+    "      docsUrl: 'https://example.com/docs/auth',",
+    '    },',
+    '  }],',
+    '};',
+    '',
+  ].join('\n');
+
+  it('refines a withMcpAuth mount everywhere: entry, server card, and auth.md endpoints', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(join(dir, 'ax.config.mjs'), declaringConfig, 'utf8');
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      "import { createMcpHandler, withMcpAuth } from 'mcp-handler';\n" +
+        'const handler = createMcpHandler((server) => {});\n' +
+        'const authed = withMcpAuth(handler, verifyToken, {});\n' +
+        'export { authed as GET };\n',
+      'utf8',
+    );
+
+    const { catalog, serverCardPlan, authMdPlan, report } = await generateCatalog({ cwd: dir });
+
+    // The catalog entry carries the declared descriptor, not the detection ceiling ("unknown").
+    expect(catalog.entries[0]?.auth).toEqual({
+      status: 'oauth2',
+      oauth: {
+        authorizationEndpoint: 'https://auth.example.com/authorize',
+        tokenEndpoint: 'https://auth.example.com/token',
+      },
+      docsUrl: 'https://example.com/docs/auth',
+    });
+    expect(serverCardPlan?.cards[0]?.card.authentication).toEqual({ required: true });
+    // auth.md now tells agents *how* to authenticate instead of "not statically derivable".
+    expect(authMdPlan?.content).toContain('OAuth 2.0');
+    expect(authMdPlan?.content).toContain('<https://auth.example.com/token>');
+    expect(authMdPlan?.content).toContain('Get access: <https://example.com/docs/auth>');
+    expect(authMdPlan?.content).not.toContain('not statically derivable');
+    expect(report.mcp.unreviewedMounts).toEqual([]);
+  });
+
+  it('gates an un-wrapped mount by declaration alone and marks it reviewed', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(join(dir, 'ax.config.mjs'), declaringConfig, 'utf8');
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      "import { createMcpHandler } from 'mcp-handler';\n" +
+        'const handler = createMcpHandler((server) => {});\n' +
+        'export { handler as GET };\n',
+      'utf8',
+    );
+
+    const { catalog, serverCardPlan, authMdPlan, report } = await generateCatalog({ cwd: dir });
+
+    expect(catalog.entries[0]?.auth?.status).toBe('oauth2');
+    expect(serverCardPlan?.cards[0]?.card.authentication).toEqual({ required: true });
+    expect(authMdPlan).toBeDefined();
+    // Declaring auth in config *is* the review — the mount is neither unreviewed nor silently open.
+    expect(report.mcp.unreviewedMounts).toEqual([]);
+  });
+
+  it("warns when a declared status contradicts the surface's own committed declaration", async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      [
+        'export default {',
+        "  siteUrl: 'https://example.com',",
+        "  entries: [{ identifier: 'urn:air:example.com:openapi', auth: { status: 'oauth2' } }],",
+        '};',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    mkdirSync(join(dir, 'public'), { recursive: true });
+    writeFileSync(
+      join(dir, 'public', 'openapi.json'),
+      JSON.stringify({
+        openapi: '3.1.0',
+        info: {},
+        components: { securitySchemes: { key: { type: 'apiKey', in: 'header', name: 'X-K' } } },
+      }),
+      'utf8',
+    );
+
+    const warnings: string[] = [];
+    const { catalog } = await generateCatalog({ cwd: dir, onWarning: (m) => warnings.push(m) });
+
+    expect(catalog.entries[0]?.auth).toEqual({ status: 'oauth2' });
+    expect(warnings.some((w) => w.includes('"oauth2"') && w.includes('"api_key"'))).toBe(true);
+  });
+});
+
+describe('report auth section', () => {
+  it('lists a gated undeclared mount with an actionable note, and the detected provider', async () => {
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({ name: 'demo', dependencies: { '@clerk/nextjs': '^6.0.0' } }),
+      'utf8',
+    );
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com' };\n",
+      'utf8',
+    );
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      "import { createMcpHandler, withMcpAuth } from 'mcp-handler';\n" +
+        'const handler = createMcpHandler((server) => {});\n' +
+        'const authed = withMcpAuth(handler, verifyToken, {});\n' +
+        'export { authed as GET };\n',
+      'utf8',
+    );
+
+    const { report } = await generateCatalog({ cwd: dir });
+
+    expect(report.auth.gatedSurfaces).toHaveLength(1);
+    expect(report.auth.gatedSurfaces[0]).toMatchObject({
+      path: '/mcp',
+      status: 'unknown',
+      declared: false,
+      oauthEndpoints: false,
+    });
+    expect(report.auth.gatedSurfaces[0]?.note).toContain('undeclared');
+    expect(report.auth.provider?.name).toBe('clerk');
+  });
+
+  it('marks a config-declared descriptor as declared and notes only the missing docsUrl', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      [
+        'export default {',
+        "  siteUrl: 'https://example.com',",
+        '  entries: [{',
+        "    identifier: 'urn:air:example.com:mcp-server',",
+        "    auth: { status: 'api_key' },",
+        '  }],',
+        '};',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      "import { createMcpHandler, withMcpAuth } from 'mcp-handler';\n" +
+        'const handler = createMcpHandler((server) => {});\n' +
+        'const authed = withMcpAuth(handler, verifyToken, {});\n' +
+        'export { authed as GET };\n',
+      'utf8',
+    );
+
+    const { report } = await generateCatalog({ cwd: dir });
+
+    expect(report.auth.gatedSurfaces[0]).toMatchObject({
+      path: '/mcp',
+      status: 'api_key',
+      declared: true,
+    });
+    expect(report.auth.gatedSurfaces[0]?.note).toContain('docsUrl');
+    expect(report.auth.provider).toBeUndefined();
+  });
+
+  it('speaks to Ora auth checks: mechanism actionable while "unknown", PRM omitted for api_key', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    writeFileSync(
+      join(dir, 'ax.config.mjs'),
+      "export default { siteUrl: 'https://example.com' };\n",
+      'utf8',
+    );
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      "import { createMcpHandler, withMcpAuth } from 'mcp-handler';\n" +
+        'const handler = createMcpHandler((server) => {});\n' +
+        'const authed = withMcpAuth(handler, verifyToken, {});\n' +
+        'export { authed as GET };\n',
+      'utf8',
+    );
+
+    // Gated with status "unknown" → the mechanism check is actionable with the declare note; no
+    // OAuth declared → the RFC 9728 check is omitted, not held against the site.
+    const { report } = await generateCatalog({ cwd: dir });
+    const mechanism = report.ora.checks.find((c) => c.id === 'mcp-auth-mechanism');
+    expect(mechanism?.status).toBe('actionable');
+    expect(mechanism?.note).toContain('entries[].auth');
+    expect(report.ora.checks.some((c) => c.id === 'oauth-protected-resource')).toBe(false);
+
+    // Declare api_key → mechanism addressed, PRM still (honestly) absent. A *different* directory
+    // (not a recreated one): the config loader (jiti) caches modules by absolute path within a
+    // process, so rewriting the same ax.config.mjs path would read back the first version.
+    const dir2 = mkdtempSync(join(tmpdir(), 'ax-generate-auth2-'));
+    try {
+      writeFileSync(join(dir2, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+      const routeDir2 = join(dir2, 'app', '[transport]');
+      mkdirSync(routeDir2, { recursive: true });
+      writeFileSync(
+        join(routeDir2, 'route.ts'),
+        "import { createMcpHandler, withMcpAuth } from 'mcp-handler';\n" +
+          'const handler = createMcpHandler((server) => {});\n' +
+          'const authed = withMcpAuth(handler, verifyToken, {});\n' +
+          'export { authed as GET };\n',
+        'utf8',
+      );
+      writeFileSync(
+        join(dir2, 'ax.config.mjs'),
+        "export default { siteUrl: 'https://example.com', entries: [{ identifier: 'urn:air:example.com:mcp-server', auth: { status: 'api_key' } }] };\n",
+        'utf8',
+      );
+      const { report: declared } = await generateCatalog({ cwd: dir2 });
+      expect(declared.ora.checks.find((c) => c.id === 'mcp-auth-mechanism')?.status).toBe(
+        'addressed',
+      );
+      expect(declared.ora.checks.some((c) => c.id === 'oauth-protected-resource')).toBe(false);
+    } finally {
+      rmSync(dir2, { recursive: true, force: true });
+    }
+  });
+
+  it('is empty (no surfaces, no provider) for an open site', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'demo' }), 'utf8');
+    const { report } = await generateCatalog({ cwd: dir });
+    expect(report.auth).toEqual({ gatedSurfaces: [] });
+  });
+});

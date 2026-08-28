@@ -89,3 +89,56 @@ describe('renderAxConfig', () => {
     expect(validateAxConfig(object).valid).toBe(true);
   });
 });
+
+describe('renderAxConfig entries (declared auth from the wizard)', () => {
+  const authEntries: InitAnswers['entries'] = [
+    {
+      identifier: 'urn:air:example.com:mcp-server',
+      auth: {
+        status: 'oauth2',
+        oauth: {
+          authorizationEndpoint: 'https://auth.example.com/authorize',
+          tokenEndpoint: 'https://auth.example.com/token',
+        },
+        docsUrl: 'https://example.com/docs/auth',
+      },
+    },
+  ];
+
+  it('omits the entries key entirely when the wizard collected none', () => {
+    expect(renderAxConfig(answers(), TS)).not.toContain('entries:');
+  });
+
+  it('renders collected auth entries as readable object literals, not quoted-key JSON', () => {
+    const source = renderAxConfig(answers({ entries: authEntries }), TS);
+    expect(source).toContain('entries: [');
+    expect(source).toContain('identifier: "urn:air:example.com:mcp-server"');
+    expect(source).toContain('status: "oauth2"');
+    expect(source).toContain('authorizationEndpoint: "https://auth.example.com/authorize"');
+    expect(source).toContain('docsUrl: "https://example.com/docs/auth"');
+    expect(source).not.toContain('"identifier":');
+  });
+
+  it('renders a config that passes the ax.config schema gate (TS, ESM, and CJS forms)', async () => {
+    for (const target of [
+      TS,
+      { language: 'js', moduleSystem: 'esm' },
+      { language: 'js', moduleSystem: 'cjs' },
+    ] as ConfigFileTarget[]) {
+      const source = renderAxConfig(answers({ entries: authEntries }), target);
+      // Evaluate the rendered body the way a config loader would see it: strip module syntax and
+      // parse the object literal, then run it through the real schema gate.
+      const objectSource = source
+        .replace(/^import type.*$/m, '')
+        .replace(/^\/\*\* @type.*$/m, '')
+        .replace('const config: AxConfig =', 'const config =')
+        .replace('export default config;', '')
+        .replace('module.exports = config;', '');
+      // eslint-disable-next-line no-new-func
+      const config: unknown = new Function(`${objectSource}\nreturn config;`)();
+      const result = validateAxConfig(config);
+      expect(result.errors).toEqual([]);
+      expect(result.valid).toBe(true);
+    }
+  });
+});

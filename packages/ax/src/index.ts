@@ -151,9 +151,20 @@ export {
   type IsGated,
 } from './gating.js';
 
-export { authForOpenApi, safeHttpUrl } from './auth.js';
+export {
+  authForOpenApi,
+  credentialQueryParam,
+  safeHttpUrl,
+  sanitizeDeclaredAuth,
+  type SanitizeDeclaredAuthResult,
+} from './auth.js';
 
-export { applyEntryOverrides, entryUrlPath, type ApplyEntryOverridesResult } from './entries.js';
+export {
+  applyEntryOverrides,
+  entryUrlPath,
+  sanitizeOverrideAuth,
+  type ApplyEntryOverridesResult,
+} from './entries.js';
 
 export {
   resolveSiteUrl,
@@ -177,12 +188,23 @@ export {
 } from './router-model.js';
 
 export {
+  detectAuthMetadata,
+  type AuthMetadataSuggestion,
+  type DetectAuthMetadataOptions,
+} from './detect-auth-metadata.js';
+
+export { detectAuthProvider, type DetectedAuthProvider } from './detect-auth-provider.js';
+
+export {
   detectMcpServers,
   detectMcpMounts,
   buildMcpEntries,
+  mcpMountIdentifier,
+  applyDeclaredMountAuth,
   type DetectMcpOptions,
   type DetectMcpMountsOptions,
   type BuildMcpEntriesOptions,
+  type ApplyDeclaredMountAuthOptions,
   type McpMount,
 } from './detect-mcp.js';
 

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { detectMcpMounts, detectMcpServers } from '../src/detect-mcp.js';
+import { applyDeclaredMountAuth, detectMcpMounts, detectMcpServers } from '../src/detect-mcp.js';
 
 let dir: string;
 let warnings: string[];
@@ -424,5 +424,74 @@ describe('detectMcpServers', () => {
       warn,
     });
     expect(entries).toHaveLength(1);
+  });
+});
+
+describe('applyDeclaredMountAuth', () => {
+  const mount = (pathname: string, auth?: import('../src/types.js').EntryAuth) => ({
+    filePath: join('app', 'route.ts'),
+    pathname,
+    capabilities: [],
+    ...(auth !== undefined ? { auth } : {}),
+  });
+  const declared: import('../src/types.js').EntryAuth = {
+    status: 'oauth2',
+    oauth: { tokenEndpoint: 'https://auth.example.com/token' },
+  };
+
+  it('routes a declared auth into the single mount via the undisambiguated identifier', () => {
+    const mounts = applyDeclaredMountAuth({
+      mounts: [mount('/mcp')],
+      overrides: [{ identifier: 'urn:air:example.com:mcp-server', auth: declared }],
+      siteUrl: 'https://example.com',
+      warn,
+    });
+    expect(mounts[0]?.auth).toEqual(declared);
+    expect(warnings).toEqual([]);
+  });
+
+  it('refines a detected withMcpAuth "unknown" into the declared descriptor', () => {
+    const mounts = applyDeclaredMountAuth({
+      mounts: [mount('/mcp', { status: 'unknown' })],
+      overrides: [{ identifier: 'urn:air:example.com:mcp-server', auth: declared }],
+      siteUrl: 'https://example.com',
+      warn,
+    });
+    expect(mounts[0]?.auth).toEqual(declared);
+  });
+
+  it('matches multi-mount identifiers by their disambiguating path segment only', () => {
+    const mounts = applyDeclaredMountAuth({
+      mounts: [mount('/api/mcp'), mount('/api/other-mcp')],
+      overrides: [{ identifier: 'urn:air:example.com:mcp-server:api-mcp', auth: declared }],
+      siteUrl: 'https://example.com',
+      warn,
+    });
+    expect(mounts[0]?.auth).toEqual(declared);
+    expect(mounts[1]).not.toHaveProperty('auth');
+  });
+
+  it('warns and ignores a declared status "none" — a declaration cannot assert a mount open', () => {
+    const detected: import('../src/types.js').EntryAuth = { status: 'unknown' };
+    const mounts = applyDeclaredMountAuth({
+      mounts: [mount('/mcp', detected)],
+      overrides: [{ identifier: 'urn:air:example.com:mcp-server', auth: { status: 'none' } }],
+      siteUrl: 'https://example.com',
+      warn,
+    });
+    expect(mounts[0]?.auth).toEqual(detected);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('"none"');
+  });
+
+  it('changes nothing without a site URL (identifiers cannot be computed)', () => {
+    const mounts = applyDeclaredMountAuth({
+      mounts: [mount('/mcp')],
+      overrides: [{ identifier: 'urn:air:example.com:mcp-server', auth: declared }],
+      siteUrl: undefined,
+      warn,
+    });
+    expect(mounts[0]).not.toHaveProperty('auth');
+    expect(warnings).toEqual([]);
   });
 });

@@ -30,7 +30,7 @@ The repo is in changesets **pre-release mode** (`.changeset/pre.json`) with the
 so a plain `npm install @ora-ai/ax-nextjs` resolves nothing until a real `latest`
 exists — only an explicit `@canary` install gets the prerelease.
 
-Install for partners: `npm install --save-dev @ora-ai/ax-nextjs@canary`
+Install for partners: `npm install @ora-ai/ax-nextjs@canary`
 
 ## Promoting canary → latest
 

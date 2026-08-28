@@ -344,7 +344,7 @@ describe('runInit multi-mount primary question', () => {
     writeBareApp(dir);
     addTwoMounts(dir);
 
-    let selectCalls = 0;
+    let primaryQuestions = 0;
     const prompter: Prompter = {
       text: async () => 'https://acme.com',
       confirm: async () => false,
@@ -354,8 +354,10 @@ describe('runInit multi-mount primary question', () => {
           .filter(isMultiSelectChoice)
           .filter((choice) => choice.selected)
           .map((choice) => choice.value),
-      select: async () => {
-        selectCalls++;
+      // The gated mount's auth-scheme question also arrives here — answer undefined (= skip);
+      // this test is about the primary question specifically.
+      select: async (question) => {
+        if (question.includes('PRIMARY')) primaryQuestions++;
         return undefined;
       },
     };
@@ -363,7 +365,7 @@ describe('runInit multi-mount primary question', () => {
     expect(await runInit([], { ...io(), prompter })).toBe(0);
 
     // Exactly one public server → it is the primary, silently: no question asked.
-    expect(selectCalls).toBe(0);
+    expect(primaryQuestions).toBe(0);
     expect(
       stdout.some((l) => l.includes('Primary MCP server: /api/public/mcp') && l.includes('public')),
     ).toBe(true);
@@ -408,8 +410,12 @@ describe('runInit multi-mount primary question', () => {
           .map((choice) => choice.value),
       select: async (question, rows) => {
         selectQuestions.push(question);
-        selectRows.push(...rows);
-        return rows.filter(isMultiSelectChoice).find((choice) => choice.selected)?.value;
+        // Capture only the primary question's rows — the gated mount's auth-scheme select (asked
+        // later, and answered "skip" here via its default-less undefined) has its own rows.
+        if (question.includes('PRIMARY')) selectRows.push(...rows);
+        return question.includes('PRIMARY')
+          ? rows.filter(isMultiSelectChoice).find((choice) => choice.selected)?.value
+          : undefined;
       },
     };
 
@@ -418,9 +424,9 @@ describe('runInit multi-mount primary question', () => {
     // Two public servers → ambiguous, so the question runs. It lists only the MCP server rows
     // (the gating question just showed the full tree — repeating it would be noise), defaults to
     // the first public one, and annotates the gated row with the gating answer.
-    expect(selectQuestions).toEqual([
+    expect(selectQuestions[0]).toBe(
       'Which MCP server is the PRIMARY (the path agents probe first)?',
-    ]);
+    );
     expect(selectRows.every(isMultiSelectChoice)).toBe(true);
     const choices = selectRows.filter(isMultiSelectChoice);
     expect(choices.map((c) => c.value)).toEqual(['/api/mcp', '/api/public/mcp', '/api/tools/mcp']);
@@ -550,7 +556,7 @@ describe('runInit interactive (scripted answers)', () => {
       // rows — the setup multi-select (asked right after) offers its own unrelated seven rows, and
       // this test is about the gating prompt's shape, not the setup one.
       multiSelect: async (question, rows) => {
-        if (!question.startsWith('What should ax set up?')) offeredRows.push(...rows);
+        if (!question.startsWith('[ax] What should ax set up?')) offeredRows.push(...rows);
         return rows
           .filter(isMultiSelectChoice)
           .filter((choice) => choice.selected)
@@ -830,5 +836,385 @@ describe('runInit setup multi-select', () => {
     expect(pkg.scripts.prebuild).toBeUndefined();
     expect(pkg.scripts.postbuild).toBe('ax');
     expect(existsSync(join(dir, 'ax-manifest.ts'))).toBe(false);
+  });
+});
+
+describe('auth-endpoint questions (declared auth for gated MCP servers)', () => {
+  /** A withMcpAuth-wrapped mount at /mcp — gated by its own code, so it pre-deselects. */
+  function addGatedMcpMount(dir2: string): void {
+    const routeDir = join(dir2, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      `import { createMcpHandler, withMcpAuth } from 'mcp-handler';\n` +
+        `const handler = createMcpHandler((server) => { server.tool('roll_dice', 'd', {}, async () => ({})); });\n` +
+        `const authed = withMcpAuth(handler, verifyToken, {});\n` +
+        `export { authed as GET };\n`,
+      'utf8',
+    );
+  }
+
+  it('collects manually-entered endpoints + docs URL when the source tree has no OAuth to read', async () => {
+    writeBareApp(dir);
+    addGatedMcpMount(dir);
+
+    const prompter = new ScriptedPrompter({
+      text: ['https://acme.com', 'https://auth.acme.com/authorize', 'https://auth.acme.com/token'],
+      multiSelect: [[], []],
+      // No OAuth evidence → the default is api_key; choosing OAuth is what asks the endpoints.
+      select: ['oauth2'],
+      confirm: [false],
+    });
+
+    const code = await runInit([], { ...io(), prompter });
+
+    expect(code).toBe(0);
+    const source = readFileSync(join(dir, 'ax.config.ts'), 'utf8');
+    expect(source).toContain('identifier: "urn:air:acme.com:mcp-server"');
+    expect(source).toContain('authorizationEndpoint: "https://auth.acme.com/authorize"');
+    expect(source).toContain('tokenEndpoint: "https://auth.acme.com/token"');
+    // No docs question for OAuth — it is self-service, there is no credential page to point at.
+    expect(source).not.toContain('docsUrl');
+    // Round-trip: the written config passes the real loader/schema gate and carries the auth.
+    const { config } = await loadAxConfig(dir);
+    expect(config.entries[0]?.auth).toEqual({
+      status: 'oauth2',
+      oauth: {
+        authorizationEndpoint: 'https://auth.acme.com/authorize',
+        tokenEndpoint: 'https://auth.acme.com/token',
+      },
+    });
+  });
+
+  it('never asks endpoint questions when an authorization server is declared (runtime-discoverable)', async () => {
+    writeBareApp(dir);
+    addGatedMcpMount(dir);
+    const metaDir = join(dir, 'app', '.well-known', 'oauth-protected-resource');
+    mkdirSync(metaDir, { recursive: true });
+    writeFileSync(
+      join(metaDir, 'route.ts'),
+      "import { protectedResourceHandler } from 'mcp-handler';\n" +
+        "const handler = protectedResourceHandler({ authServerUrls: ['https://auth.acme.com'] });\n" +
+        'export { handler as GET };\n',
+      'utf8',
+    );
+
+    const textQuestions: string[] = [];
+    const prompter = new (class extends ScriptedPrompter {
+      override async text(question: string, defaultValue?: string): Promise<string> {
+        textQuestions.push(question);
+        return super.text(question, defaultValue);
+      }
+    })({
+      text: ['https://acme.com'],
+      multiSelect: [[], []],
+      confirm: [false],
+    });
+
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+    // Only the siteUrl question ran — OAuth with a declared server has nothing left to ask.
+    expect(textQuestions).toHaveLength(1);
+    expect(
+      stdout.some(
+        (l) =>
+          l.includes('Detected OAuth authorization server') &&
+          l.includes('discover its endpoints from the metadata chain'),
+      ),
+    ).toBe(true);
+    const { config } = await loadAxConfig(dir);
+    expect(config.entries[0]?.auth).toEqual({ status: 'oauth2' });
+  });
+
+  it('adopts the endpoints a committed RFC 8414 metadata document already declares (never asked)', async () => {
+    writeBareApp(dir);
+    addGatedMcpMount(dir);
+    const wellKnown = join(dir, 'public', '.well-known');
+    mkdirSync(wellKnown, { recursive: true });
+    writeFileSync(
+      join(wellKnown, 'oauth-authorization-server'),
+      JSON.stringify({
+        issuer: 'https://acme.com',
+        authorization_endpoint: 'https://acme.com/oauth/authorize',
+        token_endpoint: 'https://acme.com/oauth/token',
+      }),
+      'utf8',
+    );
+
+    // Only the siteUrl is scripted: the endpoints come from the committed document, not questions.
+    const prompter = new ScriptedPrompter({
+      text: ['https://acme.com'],
+      multiSelect: [[], []],
+      confirm: [false],
+    });
+
+    const code = await runInit([], { ...io(), prompter });
+
+    expect(code).toBe(0);
+    const { config } = await loadAxConfig(dir);
+    expect(config.entries[0]?.auth).toEqual({
+      status: 'oauth2',
+      oauth: {
+        authorizationEndpoint: 'https://acme.com/oauth/authorize',
+        tokenEndpoint: 'https://acme.com/oauth/token',
+      },
+    });
+    // The adoption names its source, so the config value is traceable, not magic.
+    expect(stdout.some((l) => l.includes('Using the OAuth endpoints your public'))).toBe(true);
+  });
+
+  it('an unbacked OAuth answer declares nothing; an Enter-through declares api_key', async () => {
+    writeBareApp(dir);
+    addGatedMcpMount(dir);
+
+    // No OAuth evidence, OAuth chosen, both endpoints skipped → nothing to declare, no entries.
+    const prompter = new ScriptedPrompter({
+      text: ['https://acme.com', '', ''],
+      multiSelect: [[], []],
+      select: ['oauth2'],
+      confirm: [false],
+    });
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+    expect(readFileSync(join(dir, 'ax.config.ts'), 'utf8')).not.toContain('entries:');
+
+    // Fresh project, pure Enter-through: with no OAuth evidence the scheme defaults to api_key —
+    // the declaration nearly every gated surface can truthfully make — so accepting every default
+    // declares it (the docs prefill, submitted unchanged, skips the docsUrl).
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+    writeBareApp(dir);
+    addGatedMcpMount(dir);
+    stdout = [];
+    const enterThrough = new ScriptedPrompter({
+      text: ['https://acme.com'],
+      multiSelect: [[], []],
+      confirm: [false],
+    });
+    expect(await runInit([], { ...io(), prompter: enterThrough })).toBe(0);
+    const { config: rerun } = await loadAxConfig(dir);
+    expect(rerun.entries[0]?.auth).toEqual({ status: 'api_key' });
+  });
+
+  it('re-prompts on an invalid endpoint URL and skips after repeated bad input', async () => {
+    writeBareApp(dir);
+    addGatedMcpMount(dir);
+
+    const prompter = new ScriptedPrompter({
+      text: [
+        'https://acme.com',
+        'javascript:alert(1)', // authorization endpoint: three bad tries → skipped
+        'not-a-url',
+        '/relative',
+        'https://auth.acme.com/token', // token endpoint: valid on the first try
+        '', // docs: skipped
+      ],
+      multiSelect: [[], []],
+      select: ['oauth2'],
+      confirm: [false],
+    });
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+
+    expect(stdout.filter((l) => l.includes('is not an absolute http(s) URL'))).toHaveLength(3);
+    const { config } = await loadAxConfig(dir);
+    expect(config.entries[0]?.auth).toEqual({
+      status: 'oauth2',
+      oauth: { tokenEndpoint: 'https://auth.acme.com/token' },
+    });
+  });
+
+  it('asks nothing when no MCP server is gated', async () => {
+    writeBareApp(dir);
+    addMcpMount(dir); // plain mount, pre-selected public
+    let textQuestions = 0;
+    const prompter: Prompter = {
+      text: async (_q, d) => {
+        textQuestions++;
+        return d ?? 'https://acme.com';
+      },
+      confirm: async () => false,
+      multiSelect: async (_q, rows) =>
+        rows.filter(isMultiSelectChoice).map((choice) => choice.value),
+      select: async () => undefined,
+    };
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+    // Only the siteUrl question was asked.
+    expect(textQuestions).toBe(1);
+    expect(readFileSync(join(dir, 'ax.config.ts'), 'utf8')).not.toContain('entries:');
+  });
+});
+
+describe('auth-scheme question (api_key and skip branches)', () => {
+  function addGatedMount(dir2: string): void {
+    const routeDir = join(dir2, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      `import { createMcpHandler, withMcpAuth } from 'mcp-handler';\n` +
+        `const handler = createMcpHandler((server) => {});\n` +
+        `const authed = withMcpAuth(handler, verifyToken, {});\n` +
+        `export { authed as GET };\n`,
+      'utf8',
+    );
+  }
+
+  it('choosing API key declares status "api_key" (with the docs URL) and skips the OAuth questions', async () => {
+    writeBareApp(dir);
+    addGatedMount(dir);
+
+    const textQuestions: string[] = [];
+    const prompter = new (class extends ScriptedPrompter {
+      override async text(question: string, defaultValue?: string): Promise<string> {
+        textQuestions.push(question);
+        return super.text(question, defaultValue);
+      }
+    })({
+      text: ['https://acme.com', 'https://acme.com/docs/api-keys'],
+      multiSelect: [[], []],
+      select: ['api_key'],
+      confirm: [false],
+    });
+
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+    const { config } = await loadAxConfig(dir);
+    expect(config.entries[0]?.auth).toEqual({
+      status: 'api_key',
+      docsUrl: 'https://acme.com/docs/api-keys',
+    });
+    // The OAuth endpoint questions never ran — only siteUrl and the docs URL were asked.
+    expect(textQuestions.some((q) => q.includes('OAuth'))).toBe(false);
+  });
+
+  it('choosing API key with no docs URL still declares the scheme (an active choice is a declaration)', async () => {
+    writeBareApp(dir);
+    addGatedMount(dir);
+
+    const prompter = new ScriptedPrompter({
+      text: ['https://acme.com', ''],
+      multiSelect: [[], []],
+      select: ['api_key'],
+      confirm: [false],
+    });
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+    const { config } = await loadAxConfig(dir);
+    expect(config.entries[0]?.auth).toEqual({ status: 'api_key' });
+  });
+
+  it('an unedited docs-URL prefill (the bare site origin) means skip, not a homepage docsUrl', async () => {
+    writeBareApp(dir);
+    addGatedMount(dir);
+
+    const prompter = new ScriptedPrompter({
+      // The docs answer echoes the prefill exactly — the user pressed Enter without adding a path.
+      text: ['https://acme.com', 'https://acme.com/'],
+      multiSelect: [[], []],
+      select: ['api_key'],
+      confirm: [false],
+    });
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+    const { config } = await loadAxConfig(dir);
+    expect(config.entries[0]?.auth).toEqual({ status: 'api_key' });
+  });
+
+  it('choosing skip asks nothing further and writes no entries', async () => {
+    writeBareApp(dir);
+    addGatedMount(dir);
+
+    const textQuestions: string[] = [];
+    const prompter = new (class extends ScriptedPrompter {
+      override async text(question: string, defaultValue?: string): Promise<string> {
+        textQuestions.push(question);
+        return super.text(question, defaultValue);
+      }
+    })({
+      text: ['https://acme.com'],
+      multiSelect: [[], []],
+      select: ['skip'],
+      confirm: [false],
+    });
+
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+    expect(textQuestions).toHaveLength(1); // only siteUrl
+    expect(readFileSync(join(dir, 'ax.config.ts'), 'utf8')).not.toContain('entries:');
+  });
+});
+
+describe('credential-in-URL guard (wizard answers are published verbatim)', () => {
+  it('refuses a URL embedding a credential-like query parameter and lets the user retry', async () => {
+    writeBareApp(dir);
+    const routeDir = join(dir, 'app', '[transport]');
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      join(routeDir, 'route.ts'),
+      `import { createMcpHandler, withMcpAuth } from 'mcp-handler';\n` +
+        `const handler = createMcpHandler((server) => {});\n` +
+        `const authed = withMcpAuth(handler, verifyToken, {});\n` +
+        `export { authed as GET };\n`,
+      'utf8',
+    );
+
+    const prompter = new ScriptedPrompter({
+      text: [
+        'https://acme.com',
+        'https://acme.com/docs?api_key=sk-live-123', // refused — embeds a credential
+        'https://acme.com/docs/api-access', // clean retry accepted
+      ],
+      multiSelect: [[], []],
+      select: ['api_key'],
+      confirm: [false],
+    });
+
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+    expect(stdout.some((l) => l.includes('credential-like query parameter'))).toBe(true);
+    const { config } = await loadAxConfig(dir);
+    expect(config.entries[0]?.auth).toEqual({
+      status: 'api_key',
+      docsUrl: 'https://acme.com/docs/api-access',
+    });
+    expect(JSON.stringify(config)).not.toContain('sk-live-123');
+  });
+});
+
+describe('provider-wired OAuth evidence (Clerk-style runtime metadata)', () => {
+  it('defaults to OAuth, prints the wiring context, and a bare Enter-through declares oauth2', async () => {
+    writeBareApp(dir);
+    const mountDir = join(dir, 'app', '[transport]');
+    mkdirSync(mountDir, { recursive: true });
+    writeFileSync(
+      join(mountDir, 'route.ts'),
+      `import { createMcpHandler, withMcpAuth } from 'mcp-handler';\n` +
+        `const handler = createMcpHandler((server) => {});\n` +
+        `const authed = withMcpAuth(handler, verifyToken, { resourceMetadataPath: '/.well-known/oauth-protected-resource' });\n` +
+        `export { authed as GET };\n`,
+      'utf8',
+    );
+    const metaDir = join(dir, 'app', '.well-known', 'oauth-protected-resource');
+    mkdirSync(metaDir, { recursive: true });
+    writeFileSync(
+      join(metaDir, 'route.ts'),
+      "import { protectedResourceHandlerClerk } from '@clerk/mcp-tools/next';\n" +
+        'const handler = protectedResourceHandlerClerk();\n' +
+        'export { handler as GET };\n',
+      'utf8',
+    );
+
+    let schemeDefault: string | undefined;
+    const prompter = new (class extends ScriptedPrompter {
+      override async select(question: string, rows: MultiSelectRow[]): Promise<string | undefined> {
+        if (question.startsWith('How do agents authenticate')) {
+          schemeDefault = rows.filter(isMultiSelectChoice).find((c) => c.selected)?.value;
+        }
+        return super.select(question, rows);
+      }
+    })({
+      // Only the siteUrl is scripted — everything else is a pure Enter-through on defaults.
+      text: ['https://acme.com'],
+      multiSelect: [[], []],
+      confirm: [false],
+    });
+
+    expect(await runInit([], { ...io(), prompter })).toBe(0);
+    expect(schemeDefault).toBe('oauth2');
+    // Endpoints skipped, docs skipped — but the wiring backs a bare oauth2 declaration.
+    const { config } = await loadAxConfig(dir);
+    expect(config.entries[0]?.auth).toEqual({ status: 'oauth2' });
   });
 });

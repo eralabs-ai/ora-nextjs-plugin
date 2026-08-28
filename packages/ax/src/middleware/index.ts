@@ -65,6 +65,36 @@ export interface WithAxOptions {
    * `Host` value never reaches a response header).
    */
   canonicalUrl?: (pathname: string, request: NextRequest) => string | URL | null | undefined;
+  /**
+   * Whether requests for the published discovery artifacts (the catalog, server cards, llms.txt,
+   * auth.md, openapi.json, and the markdown twins themselves) bypass the wrapped middleware
+   * entirely and are served as-is. **Default `true`.** These files exist precisely to be read by
+   * agents the site has never heard of, so a wrapped bot-gate (UA filters, geo blocks, …) that
+   * covers them silently un-publishes everything the build published — the exact incident this
+   * guard exists for. Set `false` only when the artifacts themselves are meant to be gated.
+   */
+  protectDiscovery?: boolean;
+}
+
+/**
+ * The served paths of every published discovery artifact the manifest records, plus the markdown
+ * twins' own paths. Direct set membership — never routes (page gating is the app's policy, see
+ * `docs-auth-gate`) and never `gatedPaths` (nothing gated is ever in this set by construction:
+ * the build never lists a gated route's twin, and artifacts aren't gateable surfaces).
+ */
+function discoveryPaths(manifest: AxServingManifest): ReadonlySet<string> {
+  const { aiCatalog, mcpServerCard, mcpServerCards, llmsTxt, authMd, openapi } = manifest.artifacts;
+  return new Set(
+    [
+      aiCatalog,
+      mcpServerCard,
+      ...(mcpServerCards ?? []),
+      llmsTxt,
+      authMd,
+      openapi,
+      ...Object.values(manifest.markdownTwins),
+    ].filter((path): path is string => typeof path === 'string'),
+  );
 }
 
 /**
@@ -80,6 +110,9 @@ export const axMatcher = ['/((?!_next|api|.*\\..*|favicon|robots|health|status).
  * Wraps (or stands in for) a Next.js middleware with manifest-driven markdown negotiation.
  *
  * Per request, in order:
+ *   0. The path is a published discovery artifact (see `WithAxOptions.protectDiscovery`) → the
+ *      chain continues untouched and the wrapped middleware never runs: the artifacts the build
+ *      published must stay readable by every client, or the publication was a lie.
  *   1. Not a detected agent and no markdown `Accept` → the wrapped middleware answers (or the
  *      chain just continues).
  *   2. The manifest marks the path gated → fall through untouched. The app's own 401/403 is the
@@ -95,10 +128,15 @@ export const axMatcher = ['/((?!_next|api|.*\\..*|favicon|robots|health|status).
  */
 export function withAx(options: WithAxOptions, middleware?: AxMiddleware): AxMiddleware {
   const { manifest } = options;
+  const protectedPaths = options.protectDiscovery === false ? undefined : discoveryPaths(manifest);
 
   return (request, event) => {
     const url = new URL(request.url);
     const pathname = normalizePathname(url.pathname);
+
+    if (protectedPaths?.has(pathname) === true) {
+      return undefined;
+    }
 
     const detection = detectAgent(request.headers);
     if (!detection.detected && !acceptsMarkdown(request.headers)) {

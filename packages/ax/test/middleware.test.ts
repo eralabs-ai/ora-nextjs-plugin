@@ -323,3 +323,67 @@ describe('axMatcher', () => {
     expect(matches('/favicon.ico')).toBe(false);
   });
 });
+
+describe('discovery-artifact protection (protectDiscovery)', () => {
+  const blockingGate = vi.fn(() => new Response('denied', { status: 403 }));
+
+  function gateManifest(): AxServingManifest {
+    return {
+      ...manifest,
+      artifacts: {
+        ...manifest.artifacts,
+        mcpServerCard: '/.well-known/mcp/server-card.json',
+        mcpServerCards: ['/.well-known/mcp/server-card/api-mcp.json'],
+        openapi: '/openapi.json',
+      },
+    };
+  }
+
+  it('serves every published artifact past a blocking wrapped middleware, for any client', async () => {
+    blockingGate.mockClear();
+    const wrapped = withAx({ manifest: gateManifest() }, blockingGate);
+    for (const path of [
+      '/.well-known/ai-catalog.json',
+      '/.well-known/mcp/server-card.json',
+      '/.well-known/mcp/server-card/api-mcp.json',
+      '/llms.txt',
+      '/auth.md',
+      '/openapi.json',
+      '/docs.md', // a twin's own path — direct fetches must not be gateable either
+    ]) {
+      // A scripty UA that typical bot gates block — and a plain browser both pass through.
+      const scripty = new Request(`https://site.test${path}`, {
+        headers: { 'user-agent': 'Go-http-client/1.1' },
+      }) as unknown as NextRequest;
+      expect(await wrapped(scripty, fetchEvent())).toBeUndefined();
+      expect(
+        await wrapped(browserRequest(`https://site.test${path}`), fetchEvent()),
+      ).toBeUndefined();
+    }
+    expect(blockingGate).not.toHaveBeenCalled();
+  });
+
+  it('still hands ordinary page requests to the wrapped middleware', async () => {
+    blockingGate.mockClear();
+    const wrapped = withAx({ manifest: gateManifest() }, blockingGate);
+    const response = await wrapped(browserRequest('https://site.test/pricing'), fetchEvent());
+    expect(blockingGate).toHaveBeenCalledTimes(1);
+    expect((response as Response).status).toBe(403);
+  });
+
+  it('protectDiscovery: false restores the old behavior (artifacts reach the gate)', async () => {
+    blockingGate.mockClear();
+    const wrapped = withAx({ manifest: gateManifest(), protectDiscovery: false }, blockingGate);
+    const response = await wrapped(browserRequest('https://site.test/llms.txt'), fetchEvent());
+    expect(blockingGate).toHaveBeenCalledTimes(1);
+    expect((response as Response).status).toBe(403);
+  });
+
+  it('never protects gated paths or plain routes — only the published artifacts', async () => {
+    blockingGate.mockClear();
+    const wrapped = withAx({ manifest: gateManifest() }, blockingGate);
+    await wrapped(browserRequest('https://site.test/private'), fetchEvent());
+    await wrapped(browserRequest('https://site.test/'), fetchEvent());
+    expect(blockingGate).toHaveBeenCalledTimes(2);
+  });
+});

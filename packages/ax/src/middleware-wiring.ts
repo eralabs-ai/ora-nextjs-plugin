@@ -90,6 +90,8 @@ export function buildMiddlewareWiringInstruction(
     `, and export the matcher literal \`export const config = { matcher: ${MIDDLEWARE_MATCHER_LITERAL} };\`. ` +
     'The middleware rewrites a request to its markdown twin only when the manifest lists one, ' +
     'never touches gated paths, and answers unknown URLs from detected agents with a 200 ' +
-    'markdown wayfinding body — it composes with (never replaces) your existing middleware.'
+    'markdown wayfinding body — it composes with (never replaces) your existing middleware, and ' +
+    'keeps your own gating (UA filters, bot walls) from ever blocking the published discovery ' +
+    'artifacts.'
   );
 }

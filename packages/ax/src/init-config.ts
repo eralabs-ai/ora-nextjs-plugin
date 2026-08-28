@@ -3,6 +3,8 @@
 // commits doubles as the documentation for what they turned on. This module is pure — answers in,
 // source string out — so the wizard's I/O and this file's exact shape can be tested apart.
 
+import type { AxEntryOverride } from './config-schema.js';
+
 /** How the config file should be written, derived from the project (never asked). */
 export interface ConfigFileTarget {
   /** `.ts` when the project has a tsconfig.json, else `.js`. Drives the filename and syntax. */
@@ -29,6 +31,13 @@ export interface InitAnswers {
   scaffoldAgent404: boolean;
   markdownTwins: boolean;
   report: boolean;
+  /**
+   * Declared entry overrides — today only the auth descriptors the wizard collected for gated MCP
+   * servers (where agents authenticate). Unlike the gating *decision* (recorded in the server
+   * card), the descriptor belongs in config: it's declarative content the developer owns and
+   * edits, exactly what they'd hand-write per the README. Omitted/empty renders no `entries` key.
+   */
+  entries?: AxEntryOverride[];
 }
 
 /** The canonical config basename (matches config.ts's `CONFIG_BASENAME`). */
@@ -42,6 +51,30 @@ export function configFileName(target: ConfigFileTarget): string {
 /** A `key: value,` line preceded by its rationale comment, at two-space indent. */
 function field(comment: string, key: string, value: string): string {
   return `  // ${comment}\n  ${key}: ${value},`;
+}
+
+/**
+ * Renders one entry override as a JS object literal at the `entries` array's indent. A tiny
+ * renderer of plain JSON values (unquoted keys, JSON-escaped leaves) rather than
+ * `JSON.stringify(..., null, 2)`, so the emitted config reads like the hand-written examples in
+ * the README instead of quoted-key JSON.
+ */
+function renderEntryOverride(entry: AxEntryOverride, indent = '    '): string {
+  return `${indent}${renderValue(entry, indent)},`;
+}
+
+function renderValue(value: unknown, indent: string): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => renderValue(item, indent)).join(', ')}]`;
+  }
+  if (typeof value === 'object' && value !== null) {
+    const inner = `${indent}  `;
+    const fields = Object.entries(value)
+      .filter(([, v]) => v !== undefined)
+      .map(([key, v]) => `${inner}${key}: ${renderValue(v, inner)},`);
+    return `{\n${fields.join('\n')}\n${indent}}`;
+  }
+  return JSON.stringify(value);
 }
 
 /**
@@ -94,6 +127,16 @@ export function renderAxConfig(answers: InitAnswers, target: ConfigFileTarget): 
       String(answers.report),
     ),
   ];
+
+  if (answers.entries !== undefined && answers.entries.length > 0) {
+    const rendered = answers.entries.map((entry) => renderEntryOverride(entry)).join('\n');
+    fields.push(
+      '  // Where agents authenticate to your gated server(s) — declared once here, published to\n' +
+        '  // the catalog entry, the MCP server card, and the generated /auth.md. Secret-free by\n' +
+        '  // design: endpoint URLs and a docs link only, never credentials.\n' +
+        `  entries: [\n${rendered}\n  ],`,
+    );
+  }
 
   const body = fields.join('\n');
 

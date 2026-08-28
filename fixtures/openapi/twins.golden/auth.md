@@ -18,4 +18,4 @@ The HTTP API documented by [/openapi.json](https://openapi-fixture.example.com/o
 - Authorization endpoint: <https://example.com/oauth/authorize>
 - Token endpoint: <https://example.com/oauth/token>
 - Scopes: `read:echo`, `write:echo`
-- Get access: not documented yet. (Site owner: declare `auth.docsUrl` on this entry in ax.config to link where credentials are obtained.)
+- Get access: sign in through your MCP client via OAuth — no manually issued credentials.
