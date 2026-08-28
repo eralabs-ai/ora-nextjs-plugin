@@ -18,6 +18,23 @@ npx ax init
 
 That's it. From now on, every build generates your agent-friendly artifacts automatically.
 
+## Try it before release
+
+Before `@ora-ai/ax-nextjs` is published, try it from a tarball instead of an npm install:
+
+```sh
+pnpm build                                                # builds packages/ax (tsup → dist/); only dist ships
+cd packages/ax && pnpm pack                               # writes ora-ai-ax-nextjs-0.0.0.tgz
+cd /path/to/your-next-app
+npm install /absolute/path/to/ora-ai-ax-nextjs-0.0.0.tgz  # or a "file:" dependency in package.json
+npx ax init                                               # see "ax init" below
+next build
+```
+
+Confirm it worked the way you would after a real release — check `/.well-known/ai-catalog.json`,
+the `.md` twins, and `/404.md` (see "What ax does" below). Once `@ora-ai/ax-nextjs` is published,
+drop the tarball step and install normally, as shown above in "One-time setup".
+
 ## What ax does
 
 **Teach agents how to use your website — `agents.md`**
