@@ -435,12 +435,13 @@ export function Tools() {
   });
 });
 
-// The webmcp-imperative fixture is the end-to-end shape of the bug: its layout.tsx mentions the API
-// in a metadata string and its page.tsx renders it as visible prose, which produced four spurious
-// warnings while the one real registration lives in a separate client component.
-describe('detectWebMcp against the webmcp-imperative fixture', () => {
-  it('warns about nothing while still detecting the real registration', () => {
-    const fixture = fileURLToPath(new URL('../../../fixtures/webmcp-imperative/', import.meta.url));
+// The webmcp fixture is the end-to-end shape of the bug: its layout.tsx mentions the API in a
+// metadata string and its page.tsx renders it as visible prose, which once produced four spurious
+// warnings while the one real registration lives in a separate client component. The same page
+// also carries a declarative <form toolname>, so this doubles as the two-shapes-coexisting case.
+describe('detectWebMcp against the webmcp fixture', () => {
+  it('warns about nothing while still detecting the real registrations', () => {
+    const fixture = fileURLToPath(new URL('../../../fixtures/webmcp/', import.meta.url));
     const result = detectWebMcp({
       cwd: fixture,
       siteUrl: SITE_URL,
@@ -450,8 +451,10 @@ describe('detectWebMcp against the webmcp-imperative fixture', () => {
     });
 
     expect(warnings).toEqual([]);
-    expect(result.toolNames).toEqual(['add_to_cart']);
-    expect(result.entries).toEqual([]);
-    expect(result.sites.map((site) => site.source)).toEqual([join('app', 'register-tools.tsx')]);
+    expect([...result.toolNames].sort()).toEqual(['add_to_cart', 'subscribe_newsletter']);
+    // Only the declarative form yields an entry; the imperative registration never does.
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]?.capabilities).toEqual(['subscribe_newsletter']);
+    expect(result.sites.map((site) => site.source)).toContain(join('app', 'register-tools.tsx'));
   });
 });

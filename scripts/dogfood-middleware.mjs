@@ -1,14 +1,17 @@
 #!/usr/bin/env node
-// Dogfood for the @ora-ai/ax/middleware runtime entry: boots the built `middleware` fixture with
+// Dogfood for the @ora-ai/ax/middleware runtime entry: boots the built `flagship` fixture with
 // a real `next start` and probes it over HTTP — the same black-box posture as Ora's
 // markdown-negotiation checks (dual-fetch of one URL with and without `Accept: text/markdown`
 // must return different content types, correct bodies both ways, and `Vary: Accept` on the
 // negotiated response). Unit tests already cover the branch logic; this proves the wiring holds
-// through Next's Edge bundling, header merging, and static file serving on a real server.
+// through Next's Edge bundling, header merging, and static file serving on a real server —
+// including flagship's composed form, `withAx({ manifest }, botGate)`, where the app's own
+// middleware runs for every request ax's negotiation doesn't claim.
 //
 // Run after `pnpm fixtures:build` (the fixture must be built). Probes deliberately avoid the
 // homepage: its twin is generated *post*build, so the first build's manifest doesn't list it yet
-// (documented one-build staleness) — the hand-authored /docs twin is the stable negotiation target.
+// (documented one-build staleness) — the hand-authored /destinations twin is the stable
+// negotiation target.
 
 import { execFile, spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
@@ -17,7 +20,7 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
-const fixtureDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'middleware');
+const fixtureDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'flagship');
 const port = 3100 + (process.pid % 500);
 const origin = `http://127.0.0.1:${port}`;
 
@@ -91,24 +94,24 @@ try {
   console.log(`middleware dogfood against ${origin}`);
 
   // Ora's markdown-negotiation-vary semantics: the same URL, with and without the Accept header.
-  const html = await probe('/docs', BROWSER_HEADERS);
-  check('browser /docs is HTML', html.contentType.includes('text/html'), html.contentType);
-  check('browser /docs renders the page', html.body.includes('<h1>Docs</h1>'));
+  const html = await probe('/destinations', BROWSER_HEADERS);
+  check('browser /destinations is HTML', html.contentType.includes('text/html'), html.contentType);
+  check('browser /destinations renders the page', html.body.includes('Where we fly'));
 
-  const negotiated = await probe('/docs', { ...BROWSER_HEADERS, accept: 'text/markdown' });
+  const negotiated = await probe('/destinations', { ...BROWSER_HEADERS, accept: 'text/markdown' });
   check(
-    'Accept: text/markdown /docs is markdown',
+    'Accept: text/markdown /destinations is markdown',
     negotiated.contentType.includes('markdown'),
     negotiated.contentType,
   );
   check(
-    'negotiated /docs serves the twin body',
-    negotiated.body.includes('# Docs (hand-authored twin)'),
+    'negotiated /destinations serves the twin body',
+    negotiated.body.includes('# Where we fly (hand-authored twin)'),
   );
-  check('negotiated /docs carries Vary: Accept', varyCoversAccept(negotiated.response));
+  check('negotiated /destinations carries Vary: Accept', varyCoversAccept(negotiated.response));
   check(
-    'negotiated /docs carries the canonical Link back to the HTML URL',
-    /<[^>]*\/docs>;\s*rel="canonical"/.test(negotiated.response.headers.get('link') ?? ''),
+    'negotiated /destinations carries the canonical Link back to the HTML URL',
+    /<[^>]*\/destinations>;\s*rel="canonical"/.test(negotiated.response.headers.get('link') ?? ''),
     negotiated.response.headers.get('link') ?? '(none)',
   );
   check(
@@ -116,36 +119,43 @@ try {
     html.contentType.split(';')[0] !== negotiated.contentType.split(';')[0],
   );
 
-  const agent = await probe('/docs', { 'user-agent': GPTBOT_UA });
+  const agent = await probe('/destinations', { 'user-agent': GPTBOT_UA });
   check(
-    'detected agent /docs gets the markdown twin',
-    agent.body.includes('# Docs (hand-authored twin)'),
+    'detected agent /destinations gets the markdown twin',
+    agent.body.includes('# Where we fly (hand-authored twin)'),
   );
-  check('agent /docs carries Vary: Accept', varyCoversAccept(agent.response));
+  check('agent /destinations carries Vary: Accept', varyCoversAccept(agent.response));
 
   // The two non-optional cloaking guards.
-  const googlebot = await probe('/docs', { 'user-agent': GOOGLEBOT_UA });
-  check('Googlebot /docs is never rerouted', googlebot.body.includes('<h1>Docs</h1>'));
-  const cursorBody = await probeCurl('/docs', {
+  const googlebot = await probe('/destinations', { 'user-agent': GOOGLEBOT_UA });
+  check('Googlebot /destinations is never rerouted', googlebot.body.includes('Where we fly'));
+  const cursorBody = await probeCurl('/destinations', {
     'user-agent': CURSOR_UA,
     'sec-fetch-mode': 'navigate',
     'sec-fetch-dest': 'document',
     accept: BROWSER_HEADERS.accept,
   });
-  check("Cursor's embedded browser gets HTML", cursorBody.includes('<h1>Docs</h1>'));
+  check("Cursor's embedded browser gets HTML", cursorBody.includes('Where we fly'));
 
-  // The manifest is the contract: no twin / gated / dynamic all fall through to the app.
-  const shell = await probe('/shell', { 'user-agent': GPTBOT_UA });
-  check('agent on a twin-less route gets the HTML', shell.contentType.includes('text/html'));
-  const gated = await probe('/private', { 'user-agent': GPTBOT_UA });
+  // The manifest is the contract: gated / dynamic fall through to the app. (The old twin-less
+  // probe lives on in the markdown-twins fixture's /shell rung; every ungated flagship route in
+  // the manifest has a twin.)
+  const gated = await probe('/account', { 'user-agent': GPTBOT_UA });
   check('agent on a gated path is untouched', gated.body.includes('Sign in'));
-  const dynamic = await probe('/blog/hello', { 'user-agent': GPTBOT_UA });
+  const dynamic = await probe('/destinations/jfk', { 'user-agent': GPTBOT_UA });
   check(
     'agent on a dynamic route gets the real page',
     // React SSR interleaves comment markers between text nodes, so never match the joined string.
     dynamic.contentType.includes('text/html') &&
-      dynamic.body.includes('Blog:') &&
-      dynamic.body.includes('hello'),
+      dynamic.body.includes('New York') &&
+      dynamic.body.includes('JFK'),
+  );
+  // flagship's own middleware (the bot gate composed via withAx's second argument) still runs for
+  // requests ax doesn't claim: a scripted UA on a plain page is challenged.
+  const blocked = await probe('/destinations', { 'user-agent': 'curl/8.6.0' });
+  check(
+    'scripted UA is challenged by the composed app middleware',
+    blocked.response.status === 403,
   );
 
   // The 404 doctrine: agents get a 200 wayfinding body, plain clients keep the honest 404.
@@ -158,7 +168,7 @@ try {
     // are guaranteed both before and after the fixture has ever been built twice.
     wayfinding.contentType.includes('markdown') &&
       wayfinding.body.startsWith('# /definitely-not-here — not found') &&
-      wayfinding.body.includes('[/docs](/docs)'),
+      wayfinding.body.includes('[/destinations](/destinations)'),
   );
   check('wayfinding carries Vary: Accept', varyCoversAccept(wayfinding.response));
   const miss = await probe('/definitely-not-here', BROWSER_HEADERS);

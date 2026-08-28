@@ -1,0 +1,344 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "ora-air API",
+    "version": "0.1.0",
+    "description": "HTTP API for the ora-air demo app. Public read-only flight search is available without auth; booking, seats, and payment flows are intended for trusted first-party clients."
+  },
+  "servers": [
+    {
+      "url": "https://flagship-fixture.example.com"
+    }
+  ],
+  "paths": {
+    "/api/search": {
+      "get": {
+        "summary": "Search available flights",
+        "parameters": [
+          {
+            "name": "origin",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "Origin IATA code, e.g. JFK"
+          },
+          {
+            "name": "destination",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "Destination IATA code, e.g. LAX"
+          },
+          {
+            "name": "date",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "format": "date" },
+            "description": "Departure date in YYYY-MM-DD format"
+          },
+          {
+            "name": "passengers",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 9, "default": 1 },
+            "description": "Passenger count"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching flight options",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "flights": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Flight" }
+                    }
+                  },
+                  "required": ["flights"]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      }
+    },
+    "/api/session": {
+      "post": {
+        "summary": "Mint a short-lived demo session token",
+        "responses": {
+          "200": {
+            "description": "Token minted successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "t": { "type": "string" }
+                  },
+                  "required": ["t"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/seats": {
+      "post": {
+        "summary": "Get seat map for a selected flight",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "f": { "type": "string", "description": "Flight id" }
+                },
+                "required": ["f"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Seat map returned",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SeatMapResponse" }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/book": {
+      "post": {
+        "summary": "Create a pending booking",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "f": { "type": "string", "description": "Flight id" },
+                  "c": { "type": "string", "description": "Fare class code" },
+                  "s": { "type": "string", "description": "Seat id" },
+                  "px": {
+                    "type": "object",
+                    "properties": {
+                      "fn": { "type": "string" },
+                      "ln": { "type": "string" },
+                      "em": { "type": "string", "format": "email" }
+                    },
+                    "required": ["fn", "ln", "em"]
+                  }
+                },
+                "required": ["f", "c", "s", "px"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Booking created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "b": { "type": "string", "description": "Booking id" },
+                    "a": { "type": "number", "description": "Amount due" }
+                  },
+                  "required": ["b", "a"]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/pay": {
+      "post": {
+        "summary": "Pay and confirm a pending booking",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "b": { "type": "string", "description": "Booking id" },
+                  "cn": { "type": "string", "description": "Card number" },
+                  "ex": { "type": "string", "description": "Expiry MM/YY" },
+                  "cv": { "type": "string", "description": "CVV" },
+                  "nm": { "type": "string", "description": "Cardholder name" }
+                },
+                "required": ["b", "cn", "ex", "cv"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Payment accepted and booking confirmed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "p": { "type": "string", "description": "PNR" },
+                    "b": { "type": "string", "description": "Booking id" }
+                  },
+                  "required": ["p", "b"]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "responses": {
+      "BadRequest": {
+        "description": "Invalid request payload or parameters",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": { "type": "string" },
+                "e": { "type": "string" }
+              }
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Request denied by bot/auth guard",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Flight": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "flightNumber": { "type": "string" },
+          "origin": { "type": "string" },
+          "destination": { "type": "string" },
+          "departureTime": { "type": "string" },
+          "arrivalTime": { "type": "string" },
+          "durationMinutes": { "type": "integer" },
+          "aircraft": { "type": "string" },
+          "fares": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "classCode": { "type": "string" },
+                "className": { "type": "string" },
+                "price": { "type": "number" },
+                "perks": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                }
+              },
+              "required": ["classCode", "className", "price", "perks"]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "flightNumber",
+          "origin",
+          "destination",
+          "departureTime",
+          "arrivalTime",
+          "durationMinutes",
+          "aircraft",
+          "fares"
+        ]
+      },
+      "SeatMapResponse": {
+        "type": "object",
+        "properties": {
+          "ac": { "type": "string", "description": "Aircraft model" },
+          "cb": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "n": { "type": "string" },
+                "fc": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "cl": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "rw": {
+                  "type": "array",
+                  "items": { "type": "integer" }
+                },
+                "st": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "s": { "type": "string" },
+                      "r": { "type": "integer" },
+                      "c": { "type": "string" },
+                      "o": { "type": "integer" },
+                      "x": { "type": "integer" },
+                      "p": { "type": "number" }
+                    },
+                    "required": ["s", "r", "c", "o", "x", "p"]
+                  }
+                }
+              },
+              "required": ["n", "fc", "cl", "rw", "st"]
+            }
+          }
+        },
+        "required": ["ac", "cb"]
+      }
+    }
+  }
+}

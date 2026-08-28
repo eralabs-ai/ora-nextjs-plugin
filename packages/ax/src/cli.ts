@@ -874,11 +874,8 @@ function reportMarkdownTwinOutcome(
   if (notFoundMdResult.deleted !== undefined) {
     stdout(`[ax] ✓ removed ${notFoundMdResult.deleted} (no router to describe misses for)`);
   }
-  if (twinResult.deleted.length > 0) {
-    stdout(
-      `[ax] ✓ removed ${twinResult.deleted.length} stale markdown twin` +
-        `${twinResult.deleted.length === 1 ? '' : 's'}`,
-    );
+  for (const removed of twinResult.deleted) {
+    stdout(`[ax] ✓ removed ${removed} (stale markdown twin)`);
   }
 
   const skipped = twins.skipped;

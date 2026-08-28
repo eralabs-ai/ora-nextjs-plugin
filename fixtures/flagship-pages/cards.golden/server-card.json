@@ -1,0 +1,28 @@
+{
+  "name": "com.example.flagship-pages-fixture/api-public-mcp",
+  "description": "flagship-pages MCP server at /api/public/mcp",
+  "version": "0.0.0",
+  "serverUrl": "https://flagship-pages-fixture.example.com/api/public/mcp",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://flagship-pages-fixture.example.com/api/public/mcp"
+    }
+  ],
+  "tools": [
+    {
+      "name": "search_flights"
+    }
+  ],
+  "serverInfo": {
+    "name": "flagship-pages",
+    "version": "0.0.0"
+  },
+  "transport": {
+    "type": "streamable-http",
+    "endpoint": "https://flagship-pages-fixture.example.com/api/public/mcp"
+  },
+  "capabilities": {
+    "tools": {}
+  }
+}

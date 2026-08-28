@@ -241,7 +241,13 @@ export async function writeServingManifest(
   const nextConfig = await loadNextConfig(cwd);
   for (const message of nextConfig.warnings) warn(message);
 
-  const router = buildRouterModel(cwd);
+  // Built with pageExtensions so an MDX page that routes is in the manifest's route table — the
+  // middleware must rewrite/fall through for it, never treat it as a miss.
+  const router = buildRouterModel(cwd, {
+    ...(nextConfig.config.pageExtensions !== undefined
+      ? { pageExtensions: nextConfig.config.pageExtensions }
+      : {}),
+  });
   const data = buildServingManifest({
     cwd,
     router,
